@@ -640,6 +640,28 @@ Pasar un contexto de un agente a otro —de Claude a Codex, o entre máquinas—
 mano. El material ya existe (transcript, evidencia de runs, adjuntos); falta decidir qué viaja y
 qué se queda, que es la parte difícil.
 
+## Propuestas sin acordar
+
+Ideas que salieron trabajando y que **no se tocan hasta que el usuario diga**. Están escritas para
+que no se pierdan y para que la decisión se tome mirándolas, no de memoria. Ninguna es un defecto:
+las dos son superficie nueva.
+
+### PROP-01 · Que un paso del plan diga qué evidencia miró
+
+Salió al diseñar TEC-06. Cuando el Assistant pueda leer adjuntos, diffs y ficheros de un run, su
+razonamiento seguirá siendo invisible: se ve el resultado, no en qué se apoyó. Un paso que dijera
+«leyó `error.log`» o «miró los cambios en `src/`» haría auditable el razonamiento y no sólo su
+conclusión, que es lo que hace falta para confiar en un plan que no has seguido en directo.
+
+Coste: un campo nuevo en el paso y su pintado. **No está en TEC-06** y por eso no entra con ella.
+
+### PROP-02 · Enseñar el diff en la tarjeta de aprobación
+
+Hoy una aprobación lleva `summary` —texto— y su digest atado a la acción. Aprobar un cambio de
+ficheros o un despliegue se hace mejor viendo **qué cambia**. Requiere que el core capture el diff
+y lo guarde junto a la aprobación, así que es tarea con nombre propio y no un adelanto de otra.
+Emparenta con TEC-12.
+
 ## Hallazgos
 
 > **Nota de la parte de interfaz de HZ-27** (2026-09-02). Se eligió ofrecer lo único que funciona
