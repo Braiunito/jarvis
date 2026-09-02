@@ -374,6 +374,49 @@ es como debería ser en los tres.
 Cosas que aparecieron trabajando en otra tarea. Se anotan aquí para que no se pierdan y para que
 quien las arregle sepa de dónde salieron.
 
+### [x] HZ-21 · La limpieza de spools no existía, y su comando no funcionaba
+
+Hecho 2026-09-02 · `packages/agent-adapters/src/runner.ts`, `apps/core/src/runs/{supervisor,remote-runner,spool}.ts`
+· test `RUNNER-SWEEP-01`
+
+Salud enseñaba «Limpieza de spools · sin datos» y se quedaba en 9/10. Detrás había dos fallos, uno
+tapando al otro:
+
+1. **Nadie barría.** El check existía y `noteSweep()` también, pero no había una sola llamada en
+   todo el repositorio: la limpieza nunca se implementó. El disco de cada máquina de la flota
+   crecía sin tope con spools de trabajos de hace meses.
+2. **El comando de barrido estaba roto de origen.** `buildSweepCommand` anidaba comillas simples
+   dentro de comillas simples y **ningún** shell remoto lo aceptaba: bash respondía `syntax error`
+   y zsh `parse error near then`. Aunque alguien hubiera llamado a `noteSweep`, el barrido habría
+   fallado en las seis máquinas a la vez.
+
+Ahora el supervisor barre al arrancar y cada seis horas (`JARVIS_SWEEP_INTERVAL_MS`,
+`JARVIS_SPOOL_RETENTION_DAYS`), resolviendo el spool con el home de cada host; un host caído no
+detiene a los demás. El comando se reescribió con un `while read` que sí parsea, y su test
+**ejecuta el barrido en un shell de verdad** en vez de comparar la cadena: comprobar el texto es lo
+que dejó pasar el error original. En zeus: 10/10 en comprobaciones.
+
+### [x] HZ-22 · «Requieren atención» no se podía vaciar
+
+Hecho 2026-09-02 · migración 8, `runs/{repository,routes}.ts`, `metrics/service.ts`
+
+El aviso contaba todo lo que había fallado en la ventana, sin forma de decir «ya lo he visto»: un
+fallo de hace tres días pedía lo mismo que uno de hace un minuto, así que el número no bajaba nunca
+y dejaba de mirarse. Ahora hay `POST /api/runs/:id/ack` y `POST /api/runs/ack`, y el contador sólo
+suma lo no reconocido. No cambia el trabajo: sigue fallido, con su estado y sus eventos; sólo deja
+de reclamar.
+
+### [x] HZ-23 · No había forma de saber cuántas terminales estaban abiertas
+
+Hecho 2026-09-02 · `apps/core/src/terminal/service.ts`, `apps/core/src/metrics/service.ts`
+
+La navegación avisa de trabajo y de salud, pero no de terminales vivas, que es justo lo que se
+olvida abierto. Contarlas cuesta un ssh por máquina, así que `/api/metrics` publica el último
+recuento conocido con TTL de un minuto y refresca por detrás: una consola que espera a seis
+servidores para pintar un número es peor que un número de hace un minuto. Sólo se pregunta a los
+hosts que ya se saben con tmux, y mientras no se haya contado nunca el dato viaja como `at: null`
+para que la interfaz no pinte un cero que en realidad es «no lo sé».
+
 ### [x] HZ-20 · Ninguna conversación de la flota se podía leer
 
 Hecho 2026-09-02 · `aisessions/src/aisessions/{serve,cli}.py`, `deploy/compose.yml`,

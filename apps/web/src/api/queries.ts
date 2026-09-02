@@ -405,6 +405,9 @@ export function useOpenTerminal() {
       }),
     onSuccess: (_data, variables) => {
       void client.invalidateQueries({ queryKey: keys.terminals(variables.host) });
+      // El contador del carril vive en `metrics`: sin esto, abres una terminal y el número sigue
+      // diciendo lo de antes hasta el siguiente sondeo.
+      void client.invalidateQueries({ queryKey: ['metrics'] });
     },
   });
 }
