@@ -76,6 +76,17 @@ test('flujo 2 · trabajo directo: destino visible antes de enviar, y resultado e
   await expect(page.getByLabel('Qué quieres que haga el agente')).toHaveValue('');
   await expect(page.getByText('Terminado').first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText('resultado').first()).toBeVisible();
+
+  /*
+   * Lo repetido se agrupa; lo distinto no.
+   *
+   * La línea de tiempo junta eventos idénticos seguidos —un agente que razona emite el mismo
+   * cada pocos segundos— pero tres respuestas distintas son tres cosas que el agente dijo, y
+   * fundirlas escondería información. El agente falso manda «paso 1/3», «paso 2/3» y «paso 3/3».
+   */
+  for (const paso of ['paso 1/3', 'paso 2/3', 'paso 3/3']) {
+    await expect(page.getByText(paso, { exact: true })).toHaveCount(1);
+  }
 });
 
 test('flujo 3 · el borrador sobrevive a navegar y volver', async ({ page }) => {

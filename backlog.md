@@ -262,6 +262,25 @@ Cerrada el 2026-09-02, con el core de la sesión paralela (`acknowledged_at`, `P
 - **Chip de terminales abiertas** junto a Terminal, y sólo cuando el core las ha contado alguna vez
   (`terminals.at !== null`). Un cero que en realidad es «no lo sé» es peor que no pintar nada.
 
+### [x] UX-13 · La línea de tiempo no repite lo mismo cuatro veces
+
+Cerrada el 2026-09-02. Un agente que razona emite el mismo evento cada pocos segundos, y la
+actividad se llenaba de tarjetas idénticas —«salida sin clasificar · el modelo está pensando»,
+cuatro seguidas— que empujaban fuera de la pantalla lo único que se venía a leer.
+
+- **Se agrupa lo consecutivo e idéntico**, con su `×N` y el rango de horas («19:18:32 → 19:18:36»).
+  La firma es lo que se pinta, no el payload: dos eventos que se leen igual son, para quien mira, el
+  mismo evento repetido. **Lo distinto no se junta nunca**, aunque llegue seguido: «paso 1/3» y
+  «paso 2/3» son dos cosas que el agente dijo, y fundirlas escondería información. Hay test E2E de
+  esa garantía, que es la que se rompe sin querer al optimizar.
+- **Razonar deja de ser «sin clasificar»**: se reconoce por lo que el propio evento dice de sí
+  mismo —su `subtype` o la nota del adaptador—, no adivinando, y se etiqueta «razonando».
+- **Un evento crudo con nota se cuenta con la nota**. Antes se pintaban tres chips (`type: raw`,
+  `payload: 6 campos`, `note: …`) y había que leer los tres para enterarse de uno.
+
+Los eventos ya guardados no cambian al redesplegar, así que esto arregla también lo que hay en las
+sesiones de ahora, no sólo lo que llegue a partir de aquí.
+
 ### [x] HZ-25 · El titulador nunca llamó al modelo, y por eso los nombres eran malos
 
 Encontrado el 2026-09-02 al probarlo punta a punta contra el bastión, después de que el usuario
@@ -452,6 +471,39 @@ es como debería ser en los tres.
 
 Cosas que aparecieron trabajando en otra tarea. Se anotan aquí para que no se pierdan y para que
 quien las arregle sepa de dónde salieron.
+
+### [x] HZ-25 · El Assistant estaba apagado porque el core hablaba con el proveedor equivocado
+
+Hecho 2026-09-02 · `apps/core/src/assistant/model.ts` (`OpenAiCompatibleModel`), `config.ts`,
+`services.ts`, `deploy/compose.yml`
+
+El panel del Assistant llevaba días diciendo «no hay modelo configurado en el core», y la lectura
+fácil era que faltaba una credencial. Faltaba **la que el core sabía usar**: la migración trajo el
+motor de planes y el modelo contra la Messages API de Anthropic, pero esta casa tiene —y llevaba
+meses usando— una credencial de OpenAI. Con el proveedor equivocado no hay clave que valga.
+
+Ahora el core habla los dos protocolos, el proveedor se elige con `JARVIS_MODEL_PROVIDER` y por
+defecto se deduce de la URL. El compose pasa además `JARVIS_MODEL_BASE_URL` y el proveedor: sin
+eso, una credencial de OpenAI acababa llamando a la API de Anthropic y el Assistant quedaba
+configurado y aun así roto, que es peor que apagado.
+
+Al probarlo contra el modelo real salió un fallo que ningún test con un doble habría encontrado:
+cuando el modelo pide **dos herramientas en el mismo mensaje**, la API exige una respuesta por cada
+`tool_call_id` y devuelve 400 si falta alguna. Se respondía sólo a la primera, así que el plan
+moría en el primer turno en que quería mirar dos cosas antes de decidir —que es lo normal—.
+Corregido y con test.
+
+Comprobado en zeus de punta a punta: objetivo → el modelo decide un paso con su motivo → trabajo
+real en goro2 (`node: v22.21.0 git: 2.47.3`) → síntesis que cita el trabajo por su id y ofrece los
+siguientes pasos concretos.
+
+### [x] HZ-26 · La línea de tiempo se llenaba de «el modelo está pensando»
+
+Hecho 2026-09-02 · `packages/agent-adapters/src/adapters/claude.ts`
+
+Claude Code emite un contador de razonamiento cada pocos segundos, y guardarlo ponía cinco tarjetas
+idénticas seguidas que empujaban fuera de la pantalla lo único que se venía a leer: qué hizo el
+agente y qué respondió. Ya no se guarda; que sigue trabajando lo dice su estado.
 
 ### [x] HZ-24 · Veintitrés sesiones de la flota no aparecían nunca
 

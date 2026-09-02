@@ -64,6 +64,10 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **La actividad deja de repetir lo mismo**: los eventos idénticos seguidos —un agente razonando
+  emite uno cada pocos segundos— se cuentan una vez, con cuántas veces pasó y desde cuándo hasta
+  cuándo. Lo distinto no se junta: dos respuestas seguidas siguen siendo dos. Y lo que llegaba como
+  «salida sin clasificar» mientras el modelo razonaba se llama ahora «razonando».
 - **Los títulos automáticos ya los escribe el modelo**: las variables del titulador estaban en el
   `.env` y no llegaban al contenedor, así que el modelo nunca se llamó y todos los nombres salían
   del heurístico local. De ahí «/model model» y frases sueltas sacadas de la mitad de un hilo.
@@ -129,6 +133,12 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   de hace días; junto a Terminal hay un aviso de cuántas hay abiertas, que se mueve en el momento
   al abrir o cerrar una; y la limpieza de spools —que estaba declarada en Salud pero no existía—
   se ejecuta al arrancar y cada seis horas, con lo que las comprobaciones pasan de 9/10 a 10/10.
+
+- **El Assistant, encendido**: delegas un objetivo y el coordinador lo parte en pasos que son
+  trabajo real en la máquina —con su motivo, su destino y su permiso a la vista—, pide permiso
+  antes de lo que tenga efectos, y cierra con una síntesis que cita los trabajos por su id y
+  ofrece qué hacer a continuación. Habla tanto con la API de Anthropic como con cualquier
+  endpoint compatible con OpenAI, que es lo que permite usar la credencial que ya hubiera.
 
 ### Corregido durante la migración
 

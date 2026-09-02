@@ -42,8 +42,28 @@ const VISUALS: Record<string, EventVisual> = {
   'agent.raw': { icon: ACTION_ICON.copy, tone: '' },
 };
 
+/**
+ * ¿Esto es el modelo razonando?
+ *
+ * Llega como `agent.raw` desde versiones del adaptador que no lo traducían, y en la línea de
+ * tiempo se leía «salida sin clasificar» cinco veces seguidas. Se reconoce por lo que el propio
+ * evento dice de sí mismo —su `subtype` o la nota del adaptador—, no por adivinar.
+ */
+function isThinking(event: RunEvent): boolean {
+  if (event.type === 'agent.reasoning') return true;
+  if (event.type !== 'agent.raw') return false;
+  const payload = event.payload as Record<string, unknown>;
+  const inner = payload['payload'] as Record<string, unknown> | undefined;
+  if (typeof inner?.['subtype'] === 'string' && /thinking/i.test(inner['subtype'])) return true;
+  return typeof payload['note'] === 'string' && /pensando|thinking|razon/i.test(payload['note']);
+}
+
 const visualOf = (type: string): EventVisual =>
   VISUALS[type] ?? { icon: STATUS_ICON.activity, tone: '' };
+
+/** Lo que se enseña en el distintivo: el nombre del tipo, salvo que sepamos algo mejor. */
+const kindLabel = (event: RunEvent): string =>
+  (isThinking(event) ? 'razonando' : EVENT_KIND[event.type] ?? event.type);
 
 /**
  * Lo que dijo el agente, frente a lo que hizo la máquina.
@@ -260,7 +280,12 @@ function EventDetail({ event, onClose }: { event: RunEvent; onClose: () => void 
   );
 }
 
-function EventCard({ event, onOpen }: { event: RunEvent; onOpen: () => void }): JSX.Element {
+function EventCard({ event, onOpen, repeats = 1 }: {
+  event: RunEvent;
+  onOpen: () => void;
+  /** Cuántas veces seguidas llegó lo mismo. Ver `cluster`. */
+  repeats?: number;
+}): JSX.Element {
   const visual = visualOf(event.type);
   const rendered = describe(event);
   const answer = isAnswer(event);
@@ -270,8 +295,8 @@ function EventCard({ event, onOpen }: { event: RunEvent; onOpen: () => void }): 
       onClick={onOpen} title="Ver el evento tal y como llegó">
       <span className="event-head">
         <span className={`badge ${visual.tone}`}>
-          <Glyph icon={visual.icon} />
-          {EVENT_KIND[event.type] ?? event.type}
+          <Glyph icon={isThinking(event) ? ACTION_ICON.session : visual.icon} />
+          {kindLabel(event)}
         </span>
         {rendered.kind === 'text' && rendered.headline ? (
           <span className="event-headline truncate">{rendered.headline}</span>
@@ -281,6 +306,11 @@ function EventCard({ event, onOpen }: { event: RunEvent; onOpen: () => void }): 
         ) : null}
         {rendered.kind === 'facts' && rendered.note ? (
           <span className="tiny faint truncate">{rendered.note}</span>
+        ) : null}
+        {repeats > 1 ? (
+          <span className="badge neutral" title={`${repeats} eventos idénticos seguidos`}>
+            ×{repeats}
+          </span>
         ) : null}
         <span className="event-seq tiny faint mono">#{event.seq}</span>
         <Glyph icon={ACTION_ICON.expandJson} size={13} className="event-more" />
@@ -307,6 +337,51 @@ function EventCard({ event, onOpen }: { event: RunEvent; onOpen: () => void }): 
     </button>
   );
 }
+
+/**
+ * Lo repetido se cuenta una vez, con su rango.
+ *
+ * Un agente que razona emite el mismo evento cada pocos segundos, y la línea de tiempo se llenaba
+ * de cuatro tarjetas idénticas —«el modelo está pensando», cuatro veces— que empujaban fuera de la
+ * pantalla lo único que se venía a leer. Se agrupa **sólo lo consecutivo e idéntico**: dos
+ * respuestas distintas no se juntan nunca, aunque lleguen seguidas, porque cada una dice algo.
+ *
+ * La firma es lo que se pinta, no el payload: dos eventos que se leen igual son, para quien mira,
+ * el mismo evento repetido.
+ */
+interface Cluster {
+  event: RunEvent;
+  count: number;
+  from: string;
+  to: string;
+}
+
+function signatureOf(event: RunEvent): string {
+  const rendered = describe(event);
+  const body = rendered.kind === 'text'
+    ? [rendered.headline, rendered.body, rendered.extra].join('|')
+    : rendered.facts.map((fact) => `${fact.label}=${fact.value}`).join('|');
+  return `${event.type}|${body}`;
+}
+
+function cluster(events: RunEvent[]): Cluster[] {
+  const clusters: Cluster[] = [];
+  let signature = '';
+  for (const event of events) {
+    const current = signatureOf(event);
+    const last = clusters.at(-1);
+    if (last && current === signature) {
+      last.count += 1;
+      last.to = event.at;
+      continue;
+    }
+    signature = current;
+    clusters.push({ event, count: 1, from: event.at, to: event.at });
+  }
+  return clusters;
+}
+
+const timeOf = (iso: string): string => new Date(iso).toLocaleTimeString();
 
 /**
  * Lo que pidió la persona, como primera fila del hilo.
@@ -361,8 +436,8 @@ export function EventTimeline({ events, empty, limit, userMessage }: {
 
   const answers = events.filter(isAnswer);
   const source = onlyAnswers ? answers : events;
-  const shown = limit ? source.slice(-limit) : source;
-  const opened = shown.find((event) => event.seq === open);
+  const shown = cluster(limit ? source.slice(-limit) : source);
+  const opened = shown.find((item) => item.event.seq === open)?.event;
 
   if (events.length === 0) {
     return (
@@ -408,18 +483,26 @@ export function EventTimeline({ events, empty, limit, userMessage }: {
 
       <div className="timeline">
         {userMessage ? <UserMessageRow text={userMessage} /> : null}
-        {shown.map((event, index) => {
-          const visual = visualOf(event.type);
+        {shown.map((item, index) => {
+          const visual = visualOf(item.event.type);
           return (
-            <div key={event.seq} className={`tl-row ${isAnswer(event) ? 'answer' : ''}`}>
-              <div className="tl-time">{new Date(event.at).toLocaleTimeString()}</div>
+            <div key={item.event.seq} className={`tl-row ${isAnswer(item.event) ? 'answer' : ''}`}>
+              <div className="tl-time">
+                {timeOf(item.from)}
+                {item.count > 1 && item.to !== item.from ? (
+                  <>
+                    <span className="faint"> → </span>
+                    {timeOf(item.to)}
+                  </>
+                ) : null}
+              </div>
               <div className="tl-rail">
                 <span className={`tl-dot ${visual.tone}`}>
-                  <Glyph icon={visual.icon} size={13} />
+                  <Glyph icon={isThinking(item.event) ? ACTION_ICON.session : visual.icon} size={13} />
                 </span>
                 {index < shown.length - 1 ? <span className="tl-line" /> : null}
               </div>
-              <EventCard event={event} onOpen={() => setOpen(event.seq)} />
+              <EventCard event={item.event} repeats={item.count} onOpen={() => setOpen(item.event.seq)} />
             </div>
           );
         })}
