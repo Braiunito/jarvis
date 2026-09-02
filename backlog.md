@@ -199,6 +199,17 @@ AA) por las seis pantallas y por las cuatro pestañas del workspace, en escritor
   de secciones se retira para dejarle el sitio a las teclas útiles. El test simula el encogimiento
   y comprueba que Esc sigue dentro de lo visible.
 
+**Los estados que la pila falsa no produce.** El distintivo de cuota tiene cuatro estados y el
+agente falso sólo genera uno: axe nunca ve el rojo de «te queda poca cuota», que es justo el que
+hay que poder leer antes de mandar trabajo. En vez de fabricar una cuenta gastada, se mide el CSS
+que los pinta: se inserta un distintivo de cada tono en una tarjeta real y se calcula el contraste
+con la misma fórmula que usa axe, en los dos temas. Cubre todos los sitios donde aparece un
+distintivo, no sólo la cuota.
+
+Ojo con una trampa al medir así: `color-mix()` se computa como `color(srgb r g b)` con componentes
+de 0 a 1, no como `rgb()` de 0 a 255. Leerlo mal da contrastes inventados —y fue lo que hizo fallar
+la primera versión de esta comprobación con colores que sí cumplen.
+
 Alta: `@axe-core/playwright` 4.13.0 (MPL-2.0), sólo de desarrollo: no viaja en el bundle.
 
 ### [x] UX-08 · Los eventos del agente se leen, no se descifran

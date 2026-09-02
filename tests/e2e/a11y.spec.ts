@@ -208,3 +208,95 @@ test('con el teclado virtual abierto, la terminal y sus teclas siguen a la vista
   expect(height).toBeLessThanOrEqual(420 - 100);
   expect(height).toBeGreaterThan(100);
 });
+
+/**
+ * Los estados que las pruebas no llegan a producir.
+ *
+ * El distintivo de cuota tiene cuatro estados y el stack falso sólo produce uno: axe nunca ve el
+ * rojo de «te queda poca cuota», que es justo el que hay que poder leer antes de mandar trabajo.
+ * En vez de fabricar la cuota gastada —que obliga a tocar el agente falso—, se mide el CSS que
+ * los pinta: se inserta un distintivo de cada tono en una tarjeta de verdad y se calcula el
+ * contraste con la misma fórmula que usa axe.
+ *
+ * Cubre además todos los sitios donde aparece un distintivo, no sólo la cuota.
+ */
+const TONES = ['ok', 'warn', 'danger', 'running', 'neutral'];
+
+async function badgeContrast(page: Page): Promise<Array<{ tone: string; ratio: number }>> {
+  return page.evaluate((tones) => {
+    const channel = (value: number): number => {
+      const c = value / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    /*
+     * `color-mix()` se computa como `color(srgb r g b)`, con componentes de 0 a 1, no como
+     * `rgb()` de 0 a 255. Leerlo como si fuera rgb da un negro casi puro y contrastes inventados:
+     * es el error que hacía fallar esta comprobación con colores que sí cumplen.
+     */
+    const parse = (color: string): [number, number, number, number] => {
+      const parts = color.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0, 1];
+      const scale = color.startsWith('color(') ? 255 : 1;
+      return [
+        (parts[0] ?? 0) * scale,
+        (parts[1] ?? 0) * scale,
+        (parts[2] ?? 0) * scale,
+        parts[3] ?? 1,
+      ];
+    };
+    const luminance = ([r, g, b]: number[]): number =>
+      0.2126 * channel(r ?? 0) + 0.7152 * channel(g ?? 0) + 0.0722 * channel(b ?? 0);
+    const over = (top: number[], bottom: number[]): number[] => {
+      const alpha = top[3] ?? 1;
+      return [0, 1, 2].map((i) => (top[i] ?? 0) * alpha + (bottom[i] ?? 0) * (1 - alpha));
+    };
+
+    const host = document.querySelector('.card') ?? document.body;
+    const page = parse(getComputedStyle(document.body).backgroundColor);
+    const results: Array<{ tone: string; ratio: number }> = [];
+
+    for (const tone of tones) {
+      const badge = document.createElement('span');
+      badge.className = `badge ${tone}`;
+      badge.textContent = 'prueba';
+      host.appendChild(badge);
+      const style = getComputedStyle(badge);
+      const background = over(parse(style.backgroundColor), page);
+      const foreground = over(parse(style.color), background);
+      const light = luminance(foreground);
+      const dark = luminance(background);
+      const [hi, lo] = light > dark ? [light, dark] : [dark, light];
+      results.push({ tone, ratio: Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100 });
+      badge.remove();
+    }
+    return results;
+  }, TONES);
+}
+
+test('los distintivos de estado cumplen AA en tema claro, incluidos los que no se ven aquí', async ({ page }) => {
+  await login(page);
+  const ratios = await badgeContrast(page);
+  expect(ratios.filter((tone) => tone.ratio < 4.5)).toEqual([]);
+});
+
+test.describe('tema oscuro', () => {
+  test.use({ colorScheme: 'dark' });
+
+  test('los distintivos de estado cumplen AA', async ({ page }) => {
+    await login(page);
+    const ratios = await badgeContrast(page);
+    expect(ratios.filter((tone) => tone.ratio < 4.5)).toEqual([]);
+  });
+
+  test('la portada y el workspace no tienen fallos de accesibilidad', async ({ page }) => {
+    await login(page);
+    await page.waitForTimeout(1000);
+    expect(describeViolations((await analyze(page)).violations)).toEqual([]);
+
+    await nav(page, 'Sesiones').click();
+    await page.getByRole('row', { name: /timeout del pool/i }).click();
+    await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
+    await expect(page).toHaveURL(/\/w\//);
+    await page.waitForTimeout(800);
+    expect(describeViolations((await analyze(page)).violations)).toEqual([]);
+  });
+});
