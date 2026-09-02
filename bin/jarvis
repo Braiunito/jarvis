@@ -29,7 +29,7 @@ jarvis — operación del stack
   logs [s]      sigue los registros
   ps            qué está corriendo y con qué salud
   smoke         comprueba que el stack responde de verdad
-  backup        copia verificada de la base y del almacén de autenticación
+  backup [dir]  copia verificada de la base y del almacén de autenticación
   users ...     cuentas: add, enroll, list, disable, set-password…
   config        muestra la configuración efectiva de compose
 
@@ -61,12 +61,52 @@ case "${1:-}" in
     ;;
   backup)
     shift
-    # La copia se hace desde dentro del contenedor del core, que es quien tiene la base montada.
-    compose exec -T core node /app/scripts/backup.mjs "$@" || {
-      echo "el core no lleva los scripts dentro; hazlo desde el repo:"
-      echo "  node scripts/backup.mjs --core-db=<ruta> --auth-dir=<ruta> --out=<destino>"
-      exit 1
+    # La copia sale de dos contenedores porque el estado vive en dos sitios: la base la monta el
+    # core y el almacén de autenticación lo monta el gateway, y ninguno ve la mitad del otro. Esa
+    # separación es la frontera de privilegio del ADR-001 y no se rompe para hacer una copia: se
+    # hace media en cada uno y se sacan las dos con `docker cp`.
+    #
+    # Aquí no hace falta Node ni saber en qué volumen vive nada, que es justo lo que antes hacía
+    # imposible respaldar producción desde el bastión.
+    dest="$here/backups/$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+    if [[ $# -gt 0 && "$1" != --* ]]; then dest="$1"; shift; fi
+    inner="/tmp/jarvis-backup-$(date -u +%s)-$$"
+
+    core_id="$(compose ps -q core || true)"
+    gateway_id="$(compose ps -q gateway || true)"
+    [[ -n "$core_id" ]] || { echo "el core no está levantado; arranca con 'bin/jarvis up' antes de copiar"; exit 1; }
+    [[ -n "$gateway_id" ]] || { echo "el gateway no está levantado; arranca con 'bin/jarvis up' antes de copiar"; exit 1; }
+
+    # Lo que queda dentro de los contenedores se va, salga bien o mal: son las claves del stack.
+    limpiar() {
+      docker exec "$core_id" rm -rf "$inner" >/dev/null 2>&1 || true
+      docker exec "$gateway_id" rm -rf "$inner" >/dev/null 2>&1 || true
     }
+    trap limpiar EXIT
+
+    # La copia lleva `session.key`, `internal.key` y los hashes de contraseña: nace sin permisos
+    # para nadie más que quien la hace.
+    umask 077
+    mkdir -p "$dest"
+
+    compose exec -T core node /app/scripts/backup.mjs --only=core --out="$inner" "$@"
+    compose exec -T gateway node /app/scripts/backup.mjs --only=auth --out="$inner" "$@"
+    docker cp "$core_id:$inner/." "$dest/"
+    docker cp "$gateway_id:$inner/." "$dest/"
+    chmod -R go-rwx "$dest"
+
+    # Media copia es un fallo, no un aviso: sin la base no hay nada que restaurar, y sin el
+    # almacén de autenticación no entra nadie a mirarlo.
+    [[ -s "$dest/core.db" ]] || { echo "la copia salió sin core.db; no la des por buena"; exit 1; }
+    [[ -s "$dest/users.json" ]] || { echo "la copia salió sin users.json; no la des por buena"; exit 1; }
+
+    echo
+    echo "copia en $dest"
+    ls -l "$dest"
+    echo
+    echo "para comprobarla de verdad, restáurala en un destino vacío:"
+    echo "  docker exec -i $core_id node /app/scripts/restore.mjs --from=- < /dev/null  # (dentro del core)"
+    echo "  o, desde un sitio con Node: node scripts/restore.mjs --from=$dest --core-db=/tmp/prueba/core.db --auth-dir=/tmp/prueba"
     ;;
   users)
     shift

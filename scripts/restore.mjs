@@ -10,7 +10,7 @@
  */
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const args = new Map();
@@ -24,12 +24,43 @@ const coreDb = resolve(args.get('core-db') ?? './restored/core/core.db');
 const authDir = resolve(args.get('auth-dir') ?? './restored/gateway');
 const force = args.get('force') === 'true';
 
-if (!from || !existsSync(join(from, 'manifest.json'))) {
-  console.error('uso: restore.mjs --from=<directorio de backup> [--core-db=…] [--auth-dir=…] [--force]');
-  process.exit(2);
+/**
+ * Una copia puede venir en un manifiesto o en dos.
+ *
+ * Cuando se hace desde el stack desplegado, la base sale del contenedor del core y el almacén de
+ * autenticación del gateway —ningún contenedor ve las dos mitades—, así que cada mitad trae su
+ * `manifest-core.json` o `manifest-auth.json`. Una copia hecha de una sola vez trae el
+ * `manifest.json` de siempre, y ése manda si está.
+ */
+function loadManifest(dir) {
+  if (!existsSync(dir)) return null;
+  const names = existsSync(join(dir, 'manifest.json'))
+    ? ['manifest.json']
+    : readdirSync(dir).filter((name) => /^manifest-.+\.json$/.test(name)).sort();
+  if (!names.length) return null;
+
+  const merged = { createdAt: null, files: [], warnings: [], parts: names };
+  for (const name of names) {
+    const part = JSON.parse(readFileSync(join(dir, name), 'utf8'));
+    merged.files.push(...(part.files ?? []));
+    merged.warnings.push(...(part.warnings ?? []));
+    // La copia es tan vieja como su mitad más vieja: es lo que hay que mirar para saber si sirve.
+    if (part.createdAt && (!merged.createdAt || part.createdAt < merged.createdAt)) {
+      merged.createdAt = part.createdAt;
+    }
+  }
+  return merged;
 }
 
-const manifest = JSON.parse(readFileSync(join(from, 'manifest.json'), 'utf8'));
+const manifest = from ? loadManifest(from) : null;
+if (!manifest) {
+  console.error('uso: restore.mjs --from=<directorio de backup> [--core-db=…] [--auth-dir=…] [--force]');
+  console.error('  el directorio necesita un manifest.json, o los manifest-core.json / manifest-auth.json');
+  process.exit(2);
+}
+if (manifest.parts.length > 1) {
+  console.log(`[restore] copia en ${manifest.parts.length} mitades: ${manifest.parts.join(' + ')}`);
+}
 const digest = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 for (const file of manifest.files) {
@@ -44,6 +75,17 @@ for (const file of manifest.files) {
   }
 }
 console.log(`[restore] ${manifest.files.length} ficheros verificados contra el manifiesto`);
+
+/**
+ * Media copia se restaura, pero se dice.
+ *
+ * Restaurar sólo la base deja un stack al que no puede entrar nadie —las passkeys viven en
+ * `users.json`— y restaurar sólo la autenticación deja a todo el mundo mirando una base vacía.
+ * Las dos cosas se pueden querer a propósito; ninguna se puede descubrir después.
+ */
+const tiene = (label) => manifest.files.some((file) => file.label === label);
+if (!tiene('core-db')) console.warn('[restore] AVISO: esta copia no trae la base del core');
+if (!tiene('auth')) console.warn('[restore] AVISO: esta copia no trae el almacén de autenticación');
 
 if ((existsSync(coreDb) || existsSync(join(authDir, 'users.json'))) && !force) {
   console.error('[restore] el destino ya tiene datos; usa --force sólo si de verdad quieres pisarlos');

@@ -176,6 +176,18 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 
 Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer el código:
 
+- **`bin/jarvis backup` no había funcionado nunca contra el stack desplegado**, que es el único
+  sitio donde hace falta. La imagen del core no llevaba `scripts/` dentro, así que fallaba con
+  `MODULE_NOT_FOUND` y remataba con un consejo imposible de seguir: ejecutar el script «desde el
+  repo», con rutas que viven dentro de un volumen de Docker y en un bastión que no tiene Node.
+  Salió a la luz respaldando a mano, de noche, antes de un despliegue. Además la copia habría
+  salido **incompleta** aunque el script hubiera estado ahí: la base la monta el core y el
+  almacén de autenticación lo monta el gateway, y ningún contenedor ve la mitad del otro. Ahora se
+  copia media en cada uno —sin romper esa separación, que es la frontera de privilegio del
+  ADR-001— y se sacan las dos con `docker cp`; el restore sabe juntarlas y avisa en voz alta si le
+  llega media copia. Con pruebas que **ejecutan** los dos scripts, que es lo que no había y por
+  eso nadie se enteró;
+
 - una línea de salida más grande que el trozo de lectura dejaba el run **bloqueado para siempre**;
   ahora la lectura crece hasta un tope y, si se supera, se anota y se sigue;
 - una cancelación no se confirmaba nunca si al wrapper lo mataban antes de publicar su estado;

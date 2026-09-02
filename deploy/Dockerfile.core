@@ -47,6 +47,11 @@ COPY --from=build /app/apps/core/dist ./apps/core/dist
 COPY --from=build /app/apps/core/package.json ./apps/core/
 COPY --from=build /app/package.json ./
 
+# Las herramientas de copia viajan con la imagen: son la única forma de respaldar esto, y una
+# copia que exige tener Node en el bastión es una copia que nadie hace. Sin este COPY,
+# `bin/jarvis backup` falla con MODULE_NOT_FOUND y remata con un consejo que no se puede seguir.
+COPY scripts ./scripts
+
 # Un usuario sin privilegios; el volumen de datos es suyo.
 RUN mkdir -p /var/lib/jarvis-core && chown -R node:node /var/lib/jarvis-core /app
 USER node
