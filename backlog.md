@@ -262,6 +262,39 @@ Cerrada el 2026-09-02, con el core de la sesión paralela (`acknowledged_at`, `P
 - **Chip de terminales abiertas** junto a Terminal, y sólo cuando el core las ha contado alguna vez
   (`terminals.at !== null`). Un cero que en realidad es «no lo sé» es peor que no pintar nada.
 
+### [x] UX-12 · El nombre se queda puesto, y las sesiones fantasma no estorban
+
+Cerrada el 2026-09-02, con dos fallos que se veían como uno solo.
+
+**El título automático no persistía.** `touch()` protegía sólo `title_source = 'user'`, así que
+volver al explorador y pulsar la misma sesión mandaba otra vez el título del índice y deshacía el
+automático. Desde fuera se ve como que renombrar no guarda nada, y a partir de ahí nadie se fía de
+la función. Ahora protege `'user'` y `'auto'`: los dos son mejores que el del índice, que es lo
+que puso la CLI. Y `SessionSummary` lleva `workspaceTitle`, porque la lista enseñaba el nombre del
+índice aunque el workspace ya tuviera otro.
+
+**Las sesiones fantasma, con el dato correcto.** El stack anterior ya había decidido detectarlas
+por contadores y **no por el patrón del título** (`CHANGELOG` de LiteChat, «Sesiones vacías»), y el
+motivo sigue siendo el mismo: `Claude a758cca7` es la consecuencia —el índice cae a ese nombre
+cuando ningún mensaje de la persona sirve para titular—, no la causa.
+
+Medido sobre las **73 sesiones reales del bastión**: 20 tienen ese título, 17 están vacías del todo
+(0 y 0), y las 3 restantes tienen `user_messages: 2` con `assistant_messages: 0`. Esas tres son el
+caso que faltaba: sus únicos turnos de usuario son envoltorios de comando (`<command-name>`,
+`[Request interrupted`), que el parser descarta como candidatos a título. Tienen contador de
+usuario y no tienen nada que reanudar.
+
+O sea que el dato que hacía falta no existía, así que se añadió **en el origen**:
+
+- `aisessions` cuenta ahora `user_text_messages` —turnos de la persona que dicen algo— con columna
+  propia y `SCHEMA_VERSION` 2 → 3, que reconstruye el índice solo al arrancar. 34 tests en verde
+  con uno nuevo para el caso de los `/comando`. **Requiere reconstruir y redesplegar su imagen.**
+- El core expone `empty` en `SessionSummary`, calculado con los contadores. Con un índice antiguo
+  que no manda el campo, degrada a la regla de siempre en vez de romperse.
+- La interfaz las oculta por defecto con un contador para enseñarlas, las marca «Vacía» cuando se
+  enseñan, y la vista previa explica que reanudarla da un agente sin contexto —que es lo que se
+  veía como «[sin respuesta]» y parecía un fallo de la aplicación.
+
 ### [x] UX-10 · El título automático, al entrar y no sólo al terminar
 
 Cerrada el 2026-09-02. El nombre del workspace venía del índice, y lo que el índice sabe es lo que
@@ -416,6 +449,13 @@ recuento conocido con TTL de un minuto y refresca por detrás: una consola que e
 servidores para pintar un número es peor que un número de hace un minuto. Sólo se pregunta a los
 hosts que ya se saben con tmux, y mientras no se haya contado nunca el dato viaja como `at: null`
 para que la interfaz no pinte un cero que en realidad es «no lo sé».
+
+Abrir y cerrar **mueven el número en el momento**, sin esperar al siguiente recuento: son acciones
+deliberadas de una persona, y el caso que de verdad importa es cerrar la última terminal de una
+máquina y que el aviso siga marcando una —uno se va creyendo que dejó algo abierto—. Un contador
+que miente tranquilizando es peor que no tenerlo. El ajuste es optimista (reengancharse a una que
+ya estaba no suma) y el recuento de fondo corrige cualquier desvío. Comprobado en zeus: 2 → abrir
+→ 3 → cerrar → 2, al instante.
 
 ### [x] HZ-20 · Ninguna conversación de la flota se podía leer
 

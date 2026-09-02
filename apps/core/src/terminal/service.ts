@@ -63,6 +63,31 @@ export class TerminalService {
     return { ...this.#count, stale: age > ttlMs };
   }
 
+  /**
+   * Mueve el contador en el momento, sin esperar al próximo recuento.
+   *
+   * Abrir o cerrar una terminal es una acción deliberada de una persona: si al volver la mirada al
+   * carril el número sigue diciendo lo de antes, no se lee como «dato con TTL», se lee como que
+   * está roto. Y el caso que de verdad importa es el contrario: cerrar la última terminal de una
+   * máquina y que el aviso siga marcando una, porque entonces uno se va creyendo que dejó algo
+   * abierto. Un contador que miente tranquilizando es peor que no tenerlo.
+   *
+   * Es un ajuste optimista: el recuento de fondo corrige cualquier desvío en el siguiente ciclo.
+   * No se inventa nada si aún no se ha contado nunca —ahí el dato correcto es «no lo sé»—.
+   */
+  #adjustCount(host: string, delta: number): void {
+    if (!this.#count.at) return;
+    const byHost = new Map(this.#count.byHost.map((entry) => [entry.host, entry.open]));
+    const next = Math.max(0, (byHost.get(host) ?? 0) + delta);
+    if (next === 0) byHost.delete(host);
+    else byHost.set(host, next);
+    this.#count = {
+      ...this.#count,
+      open: Math.max(0, this.#count.open + delta),
+      byHost: [...byHost].map(([name, open]) => ({ host: name, open })),
+    };
+  }
+
   async #refreshCount(): Promise<void> {
     // `detect` sirve de la caché de capacidades (diez minutos), así que esto no es una ronda de
     // sondeos: es leer lo que ya se sabe y preguntar sólo por lo que caducó.
@@ -137,6 +162,8 @@ export class TerminalService {
       actorUser: user.username, eventType: 'terminal.opened', host,
       payload: { provider, sessionId: sessionId ?? null, permissionProfile, name },
     });
+    // Sólo cuenta si se creó: reengancharse a una que ya estaba no abre nada nuevo.
+    this.#adjustCount(host, 1);
     return { name, host, created: true };
   }
 
@@ -157,6 +184,8 @@ export class TerminalService {
       throw new JarvisError('NOT_FOUND', result.stderr.trim() || 'the terminal session is not there', { scope: { host } });
     }
     this.#deps.audit.record({ actorUser: user.username, eventType: 'terminal.destroyed', host, payload: { name } });
+    // Las de trabajo no entran en el contador, así que tampoco lo bajan al desaparecer.
+    if (!name.startsWith('jarvis-run-')) this.#adjustCount(host, -1);
   }
 
   #assertOurs(name: string): void {

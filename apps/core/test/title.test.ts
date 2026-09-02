@@ -5,7 +5,7 @@
  * el título que escribe una persona no se toca.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { FakeSessionIndex } from '@jarvis/testkit';
+import { FakeSessionIndex, indexRow } from '@jarvis/testkit';
 import { openDatabase } from '../src/platform/db.js';
 import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
@@ -235,5 +235,91 @@ describe('nombrar al abrir el workspace', () => {
     expect(seen).toContain('el pool se queda sin conexiones');
     expect(seen).toContain('sigue igual');
     expect(seen).not.toContain('ya probé subir el máximo');
+  });
+});
+
+/**
+ * Que el nombre se quede puesto.
+ *
+ * Renombrar y que al volver a la lista siga el nombre viejo se lee como que no se guardó, y a
+ * partir de ahí nadie se fía de la función. Las dos puertas por las que se perdía son éstas.
+ */
+describe('el nombre persiste', () => {
+  it('reabrir desde el explorador no deshace el título automático', async () => {
+    const workspace = open('sid-persist', 'Claude a758cca7');
+    const title = await services.titles.nameOnOpen(workspace.id, {
+      userMessages: ['levanta la página de plataforma que está caída'],
+    });
+    expect(title).toBe('levanta la página de plataforma que está');
+
+    // El explorador manda el título del índice cada vez que se pulsa la sesión.
+    const reopened = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-persist' },
+        title: 'Claude a758cca7' },
+      user,
+    ).workspace;
+
+    expect(reopened.title).toBe(title);
+  });
+
+  it('la lista de sesiones enseña el nombre del workspace, no el del índice', async () => {
+    // `sid-1` es la fila que trae el índice falso, con su título del índice.
+    const workspace = services.workspaces.open(
+      { ref: { host: 'local', provider: 'claude', sessionId: 'sid-1' }, title: 'Claude a758cca7' },
+      user,
+    ).workspace;
+    await services.titles.nameOnOpen(workspace.id, { userMessages: ['arregla el pool'] });
+
+    const result = await services.sessions.search({});
+    const row = result.sessions.find((session) => session.ref.sessionId === 'sid-1');
+    expect(row?.workspaceTitle).toBe('arregla el pool');
+    expect(row?.workspaceId).toBe(workspace.id);
+  });
+});
+
+/**
+ * Las sesiones fantasma.
+ *
+ * Los agentes escriben el fichero al arrancar, así que un arranque que nunca se usó deja un resto
+ * sin nada dentro. Reanudarlo da un agente sin contexto que termina el turno sin decir nada, y eso
+ * se lee como un fallo de la aplicación.
+ *
+ * La regla es por contadores, **no por el patrón del título**: `Claude a758cca7` es la consecuencia
+ * —el índice cae a ese nombre cuando ningún mensaje de la persona sirve para titular— y no la
+ * causa. Medido sobre las 73 sesiones reales del bastión: 20 tenían ese título, 17 estaban vacías
+ * del todo y 3 sólo guardaban envoltorios de `/comando` que nadie contestó.
+ */
+describe('sesiones sin nada dentro', () => {
+  const rows = (extra: Record<string, unknown>) => new FakeSessionIndex([
+    indexRow({ session_id: 'viva', user_messages: 3, user_text_messages: 3, assistant_messages: 4 }),
+    indexRow({ session_id: 'fantasma', path: '/f2.jsonl', user_messages: 0, user_text_messages: 0, assistant_messages: 0 }),
+    indexRow({ session_id: 'solo-comandos', path: '/f3.jsonl', title: 'Claude a758cca7', ...extra }),
+  ]);
+
+  const search = async (index: FakeSessionIndex) => {
+    const local = buildServices({
+      db: openDatabase({ path: ':memory:' }),
+      clock: fixedClock('2026-09-02T12:00:00.000Z'),
+      index: index as never,
+      model: null,
+      config: { hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-title-spool' },
+    });
+    const result = await local.sessions.search({});
+    local.close();
+    return new Map(result.sessions.map((session) => [session.ref.sessionId, session.empty]));
+  };
+
+  it('marca la vacía y la que sólo guarda comandos, y respeta la que tiene trabajo', async () => {
+    const empty = await search(rows({ user_messages: 2, user_text_messages: 0, assistant_messages: 0 }));
+    expect(empty.get('viva')).toBe(false);
+    expect(empty.get('fantasma')).toBe(true);
+    expect(empty.get('solo-comandos')).toBe(true);
+  });
+
+  /** Un índice antiguo no cuenta los turnos con texto: la regla degrada, no se rompe. */
+  it('con un índice que no lo cuenta, vale la regla de siempre', async () => {
+    const empty = await search(rows({ user_messages: 2, assistant_messages: 0 }));
+    expect(empty.get('fantasma')).toBe(true);
+    expect(empty.get('solo-comandos')).toBe(false);
   });
 });

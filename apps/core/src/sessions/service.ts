@@ -38,13 +38,18 @@ export class SessionService {
 
     const known = new Map(workspaces.all().map((workspace) => [
       `${workspace.ref.host}|${workspace.ref.provider}|${workspace.ref.sessionId}`,
-      workspace.id,
+      workspace,
     ]));
 
     const sessions: SessionSummary[] = list.rows.map((row) => {
       const summary = rowToSummary(row, bastionHost);
       const key = `${summary.ref.host}|${summary.ref.provider}|${summary.ref.sessionId}`;
-      return { ...summary, workspaceId: known.get(key) ?? null };
+      const workspace = known.get(key);
+      return {
+        ...summary,
+        workspaceId: workspace?.id ?? null,
+        workspaceTitle: workspace?.title ?? null,
+      };
     });
 
     const freshness: HostFreshness[] = freshnessFrom(

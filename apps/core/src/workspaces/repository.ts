@@ -86,7 +86,11 @@ export class WorkspaceRepository {
         updated_at = ?,
         cwd = COALESCE(?, cwd),
         source_root = COALESCE(?, source_root),
-        title = CASE WHEN title_source = 'user' THEN title ELSE COALESCE(?, title) END
+        -- Ni el que escribió una persona ni el que generamos aquí: los dos son mejores que el del
+        -- índice, que es lo que puso la CLI y suele ser un hash. Proteger sólo 'user' hacía que
+        -- volver al explorador y pulsar la misma sesión deshiciera el nombre automático, y desde
+        -- fuera eso se ve como que el título no se guarda.
+        title = CASE WHEN title_source IN ('user', 'auto') THEN title ELSE COALESCE(?, title) END
       WHERE id = ?`).run(at, at, patch.cwd ?? null, patch.sourceRoot ?? null, patch.title ?? null, id);
   }
 

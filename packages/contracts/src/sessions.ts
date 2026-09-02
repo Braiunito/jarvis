@@ -23,6 +23,24 @@ export const SessionSummary = Type.Object({
   preview: Type.Union([Type.String(), Type.Null()]),
   /** Workspace ya abierto para esta sesión, si existe. */
   workspaceId: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * El nombre que tiene ese workspace.
+   *
+   * El índice sólo sabe lo que puso la CLI, y eso es un hash en cuanto la sesión no tuvo un primer
+   * mensaje aprovechable. Si aquí ya se le puso nombre —a mano o automáticamente— es el que hay
+   * que enseñar: si no, renombrar un workspace no se nota al volver a la lista y parece que no se
+   * guardó.
+   */
+  workspaceTitle: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * Una sesión en la que nunca llegó a pasar nada.
+   *
+   * Lo decide el core con los contadores del índice, no con el nombre: que se llame
+   * `Claude a758cca7` es una consecuencia —el índice cae a ese nombre cuando ningún mensaje de la
+   * persona sirve para titular—, no la causa. Reanudar una de éstas da un agente sin contexto que
+   * termina el turno sin decir nada, y eso se lee como un fallo de la aplicación.
+   */
+  empty: Type.Boolean(),
 });
 export type SessionSummary = Static<typeof SessionSummary>;
 

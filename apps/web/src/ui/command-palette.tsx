@@ -103,6 +103,9 @@ export function CommandPalette(): JSX.Element | null {
                   .filter((session) => !openedKeys.has(
                     `${session.ref.host}|${session.ref.provider}|${session.ref.sessionId}`,
                   ))
+                  // Una sesión donde nadie llegó a hablar no es un sitio al que volver: el agente
+                  // escribió el fichero al arrancar y ahí se quedó.
+                  .filter((session) => !session.empty)
                   .slice(0, 6)
                   .map((session) => (
                     <Command.Item
@@ -116,7 +119,9 @@ export function CommandPalette(): JSX.Element | null {
                     >
                       <span className="row" style={{ gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
                         <Glyph icon={ACTION_ICON.session} />
-                        <span className="palette-label">{session.title ?? session.ref.sessionId}</span>
+                        <span className="palette-label">
+                          {session.workspaceTitle ?? session.title ?? session.ref.sessionId}
+                        </span>
                       </span>
                       <span className="palette-hint">
                         abrir · {session.ref.provider} · {session.ref.host}

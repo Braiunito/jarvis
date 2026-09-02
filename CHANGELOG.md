@@ -64,6 +64,14 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **El nombre puesto se queda puesto**: renombrar un workspace —a mano o automáticamente— ya no se
+  deshace al volver al explorador y pulsar la misma sesión, y la lista de sesiones enseña ese
+  nombre en vez del que trae el índice.
+- **Las sesiones donde nunca pasó nada dejan de estorbar**: se ocultan por defecto, con un contador
+  para verlas y un aviso de que reanudarlas da un agente sin contexto. Se detectan por sus
+  contadores de mensajes, no por el patrón del título: `Claude a758cca7` es la consecuencia, no la
+  causa. Para distinguir las que sólo guardan un `/comando` que nadie contestó, el índice cuenta
+  ahora los turnos de la persona que dicen algo de verdad.
 - **Los workspaces se llaman por lo que se pidió** (UX-10): al entrar en uno cuyo nombre no sirve
   —`Claude a758cca7`, el `<environment_context>` que arrastra Codex, un hash, un vacío— se sustituye
   por lo que la persona pidió, en segundo plano y sin que la pantalla espere. Lo que escribe una
@@ -101,6 +109,12 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   rojo por debajo del 15% y el detalle completo al pasar por encima: correo, plan, en qué máquina
   se ejecutaría y cuándo se reinicia cada ventana. Se refresca al volver a la pestaña sin gastar
   cuota, porque el TTL vive en el servidor. OpenCode no publica cuota y por eso ni se le pregunta.
+
+- **Los avisos de la consola se pueden vaciar y dicen la verdad**: el contador de «requieren
+  atención» tiene ahora un «visto» por trabajo y otro para todos, así que deja de arrastrar fallos
+  de hace días; junto a Terminal hay un aviso de cuántas hay abiertas, que se mueve en el momento
+  al abrir o cerrar una; y la limpieza de spools —que estaba declarada en Salud pero no existía—
+  se ejecuta al arrancar y cada seis horas, con lo que las comprobaciones pasan de 9/10 a 10/10.
 
 ### Corregido durante la migración
 

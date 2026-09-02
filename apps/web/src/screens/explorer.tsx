@@ -23,6 +23,20 @@ import { Card, DataRow, Stat } from '../ui/primitives.jsx';
 
 type Availability = 'todas' | 'abiertas' | 'sin-abrir' | 'atencion';
 
+/**
+ * Una sesión en la que nadie llegó a hablar.
+ *
+ * La regla la aplica el core con los contadores del índice —incluidos los turnos de la persona que
+ * dicen algo de verdad, que es lo que distingue una sesión trabajada de la que sólo guarda un
+ * `/comando` que nadie contestó—. Aquí sólo se pinta lo que ya viene decidido: derivarlo otra vez
+ * en la interfaz es como acaban dos sitios contando cosas distintas.
+ */
+const isEmptySession = (session: SessionSummary): boolean => session.empty;
+
+/** El nombre que hay que enseñar: el que se le puso aquí gana al que trae el índice. */
+const sessionTitle = (session: SessionSummary): string =>
+  session.workspaceTitle ?? session.title ?? session.ref.sessionId;
+
 const AVAILABILITY_LABEL: Record<Availability, string> = {
   todas: 'Todas',
   abiertas: 'Ya abiertas',
@@ -37,6 +51,7 @@ export function ExplorerScreen(): JSX.Element {
   const [provider, setProvider] = useState('');
   const [host, setHost] = useState('');
   const [availability, setAvailability] = useState<Availability>('todas');
+  const [showEmpty, setShowEmpty] = useState(false);
   const [selected, setSelected] = useState<SessionSummary | null>(null);
 
   const sessions = useSessions({
@@ -60,7 +75,9 @@ export function ExplorerScreen(): JSX.Element {
     return map;
   }, [runs.data]);
 
+  const empty = rows.filter(isEmptySession);
   const visible = rows.filter((row) => {
+    if (!showEmpty && isEmptySession(row)) return false;
     if (availability === 'abiertas') return Boolean(row.workspaceId);
     if (availability === 'sin-abrir') return !row.workspaceId;
     if (availability === 'atencion') return row.workspaceId ? attentionByWorkspace.has(row.workspaceId) : false;
@@ -136,6 +153,17 @@ export function ExplorerScreen(): JSX.Element {
               ))}
             </select>
           </label>
+
+          {empty.length ? (
+            <button type="button" className="btn small ghost"
+              onClick={() => setShowEmpty((value) => !value)}
+              title="Sesiones sin ningún mensaje: el agente creó el fichero al arrancar y nunca se escribió nada">
+              <Glyph icon={showEmpty ? ACTION_ICON.reject : ACTION_ICON.filter} />
+              {showEmpty
+                ? `Ocultar ${empty.length} vacía${empty.length === 1 ? '' : 's'}`
+                : `${empty.length} vacía${empty.length === 1 ? '' : 's'} oculta${empty.length === 1 ? '' : 's'}`}
+            </button>
+          ) : null}
 
           {filtersActive ? (
             <button type="button" className="btn small ghost" onClick={() => {
@@ -278,7 +306,7 @@ export function ExplorerScreen(): JSX.Element {
                               <Glyph icon={PROVIDER_ICON[session.ref.provider] ?? NAV_ICON.terminal} size={15} />
                             </span>
                             <span className="cell-main">
-                              <span className="title truncate">{session.title ?? session.ref.sessionId}</span>
+                              <span className="title truncate">{sessionTitle(session)}</span>
                               <span className="tiny faint truncate mono">{session.cwd ?? 'sin carpeta'}</span>
                             </span>
                           </div>
@@ -296,7 +324,13 @@ export function ExplorerScreen(): JSX.Element {
                           <span className="small muted">{relativeTime(session.lastActivityAt)}</span>
                         </td>
                         <td>
-                          {needsAttention ? (
+                          {isEmptySession(session) ? (
+                            <span className="badge neutral"
+                              title="Nadie habló en esta sesión: reanudarla da un agente sin contexto">
+                              <Glyph icon={ACTION_ICON.empty} />
+                              Vacía
+                            </span>
+                          ) : needsAttention ? (
                             <span className="badge danger">
                               <Glyph icon={ACTION_ICON.error} />
                               Con fallo
@@ -335,7 +369,7 @@ export function ExplorerScreen(): JSX.Element {
             <div className="stack">
               <div>
                 <h3 style={{ margin: 0, fontSize: 15.5, color: 'var(--text-strong)' }}>
-                  {selected.title ?? selected.ref.sessionId}
+                  {sessionTitle(selected)}
                 </h3>
                 <p className="tiny faint mono" style={{ margin: '4px 0 0' }}>
                   {selected.ref.host} · {selected.ref.provider} · {selected.ref.sessionId}
@@ -355,6 +389,17 @@ export function ExplorerScreen(): JSX.Element {
                 </Link>
               </div>
               <ErrorNote error={open.error} />
+
+              {isEmptySession(selected) ? (
+                <p className="note warn">
+                  <Glyph icon={ACTION_ICON.empty} size={16} />
+                  <span>
+                    Nadie habló nunca en esta sesión. El agente creó el fichero al arrancar y ahí se
+                    quedó: reanudarla da un agente sin contexto, que suele terminar el turno sin
+                    decir nada.
+                  </span>
+                </p>
+              ) : null}
 
               {selected.preview ? (
                 <div className="note">

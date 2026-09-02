@@ -27,6 +27,8 @@ export interface IndexRow {
   model: string;
   size_bytes: number;
   user_messages: number;
+  /** Turnos de la persona que dicen algo: ni resultados de herramienta ni envoltorios de comando. */
+  user_text_messages?: number;
   assistant_messages: number;
   indexed_at: string;
 }
@@ -76,6 +78,19 @@ export function rowToSummary(row: IndexRow, bastionHost: string): SessionSummary
     lastActivityAt: row.updated_at || null,
     preview: row.preview || null,
     workspaceId: null,
+    workspaceTitle: null,
+    /*
+     * Nadie habló aquí.
+     *
+     * Con un índice que ya cuenta los turnos con texto real, esto incluye las sesiones cuyo único
+     * contenido son envoltorios de comando —las que acaban llamándose `Claude <hash>`—. Con uno
+     * antiguo, que no lo cuenta, degrada a la regla de siempre: cero mensajes de los dos lados.
+     */
+    empty: (row.assistant_messages ?? 0) === 0 && (
+      row.user_text_messages === undefined
+        ? (row.user_messages ?? 0) === 0
+        : row.user_text_messages === 0
+    ),
   };
 }
 

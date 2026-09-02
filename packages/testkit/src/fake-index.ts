@@ -19,6 +19,7 @@ export interface FakeIndexRow {
   model: string;
   size_bytes: number;
   user_messages: number;
+  user_text_messages?: number;
   assistant_messages: number;
   indexed_at: string;
 }
@@ -38,6 +39,7 @@ export const indexRow = (overrides: Partial<FakeIndexRow> = {}): FakeIndexRow =>
   model: 'claude-opus-5',
   size_bytes: 4096,
   user_messages: 3,
+  user_text_messages: 3,
   assistant_messages: 4,
   indexed_at: '2026-09-01T18:05:00.000Z',
   ...overrides,

@@ -208,3 +208,42 @@ describe('TERM-WS-01 · el socket es transporte, no continuidad', () => {
     expect(rejected).toBe(true);
   });
 });
+
+/**
+ * El contador que alimenta el aviso del carril.
+ *
+ * Lo que se prueba no es el número en sí, sino que se mueva **cuando la persona actúa**: cerrar la
+ * última terminal y que el aviso siga marcando una es la clase de mentira que hace que uno se vaya
+ * creyendo que dejó algo abierto.
+ */
+describe('cuántas terminales hay abiertas', () => {
+  const user = { userId: 'u-contador', username: 'braian' };
+
+  it('sube al abrir y baja al cerrar, sin esperar al siguiente recuento', async () => {
+    // Primero un recuento de verdad: hasta que exista, el dato honesto es «no lo sé».
+    services.terminal.openCount();
+    await waitFor(
+      () => Promise.resolve(services.terminal.openCount()),
+      (count) => count.at !== null,
+      { what: 'que se cuente por primera vez' },
+    );
+    const antes = services.terminal.openCount().open;
+
+    const opened = await services.terminal.open({
+      host: 'bastion', provider: 'claude', sessionId: 'sid-contador', cwd: null, user,
+    });
+    expect(opened.created).toBe(true);
+    expect(services.terminal.openCount().open).toBe(antes + 1);
+    expect(services.terminal.openCount().byHost).toContainEqual({ host: 'bastion', open: antes + 1 });
+
+    // Reengancharse a la que ya está no abre nada, así que tampoco suma.
+    const again = await services.terminal.open({
+      host: 'bastion', provider: 'claude', sessionId: 'sid-contador', cwd: null, user,
+    });
+    expect(again.created).toBe(false);
+    expect(services.terminal.openCount().open).toBe(antes + 1);
+
+    await services.terminal.destroy({ host: 'bastion', name: opened.name, user });
+    expect(services.terminal.openCount().open).toBe(antes);
+  }, 60_000);
+});
