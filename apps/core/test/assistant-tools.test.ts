@@ -14,7 +14,9 @@ import { fixedClock } from '../src/platform/clock.js';
 import { newRunId } from '../src/platform/ids.js';
 import { buildServices, type CoreServices } from '../src/services.js';
 import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
-import { AnthropicModel, renderContext, type FetchLike } from '../src/assistant/model.js';
+import {
+  AnthropicModel, OpenAiCompatibleModel, renderContext, type FetchLike,
+} from '../src/assistant/model.js';
 import type { AssistantToolbox, PlanContext, ToolOutcome } from '../src/assistant/types.js';
 
 const user = { userId: 'u1', username: 'braian' };
@@ -346,5 +348,107 @@ describe('el contexto que ve el modelo', () => {
     // Una aprobación viva se nombra para que no se pida dos veces lo mismo.
     expect(rendered).toContain('escribir en /srv/app');
     expect(rendered).toContain('12 pasos');
+  });
+});
+
+/**
+ * Una lista vacía tiene dos causas y no se parecen en nada: o la flota no tiene sesiones, o el
+ * índice todavía no ha barrido. Sin la marca del barrido las dos se ven igual, y la lectura que
+ * hace quien está delante —«aquí no hay nada»— es la equivocada.
+ */
+describe('por qué está vacía la lista de sesiones', () => {
+  it('un índice que aún no ha barrido se distingue de una flota sin sesiones', async () => {
+    index.rows = [];
+
+    index.lastScanAt = null;
+    const recienArrancado = await services.sessions.search({});
+    expect(recienArrancado.sessions).toHaveLength(0);
+    expect(recienArrancado.indexScannedAt).toBeNull();
+
+    index.lastScanAt = '2026-09-02T10:00:00.000Z';
+    const yaBarrido = await services.sessions.search({});
+    expect(yaBarrido.sessions).toHaveLength(0);
+    expect(yaBarrido.indexScannedAt).toBe('2026-09-02T10:00:00.000Z');
+  });
+});
+
+/**
+ * El mismo turno, contra un endpoint compatible con OpenAI.
+ *
+ * No es una preferencia de proveedor: es la credencial que hay en la casa. Un core que sólo supiera
+ * hablar con uno deja el Assistant apagado por un motivo que no tiene que ver con el producto.
+ */
+describe('el coordinador también habla con endpoints de OpenAI', () => {
+  it('consulta, recibe la observación como mensaje de herramienta y cierra con una decisión', async () => {
+    const toolbox = new StubToolbox();
+    const bodies: Array<Record<string, unknown>> = [];
+    let call = 0;
+    const respuestas = [
+      { role: 'assistant', tool_calls: [{ id: 'c1', function: { name: 'get_health', arguments: '{}' } }] },
+      { role: 'assistant', tool_calls: [{ id: 'c2', function: { name: 'finish', arguments: '{"summary":"listo"}' } }] },
+    ];
+    const fetchImpl: FetchLike = async (url, init) => {
+      expect(url).toContain('/v1/chat/completions');
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      const message = respuestas[Math.min(call, respuestas.length - 1)];
+      call += 1;
+      return new Response(JSON.stringify({ choices: [{ message }] }), { status: 200 });
+    };
+
+    const model = new OpenAiCompatibleModel({ apiKey: 'k', baseUrl: 'https://api.test', model: 'gpt-5.6', fetchImpl });
+    const decision = await model.decide(context, toolbox);
+
+    expect(decision).toEqual({ kind: 'finish', summary: 'listo' });
+    expect(toolbox.calls).toEqual(['get_health', 'finish']);
+
+    // Las herramientas viajan como funciones, y la observación vuelve con rol `tool` y su id.
+    const primero = bodies[0] as { tools?: Array<{ type: string; function: { name: string } }> };
+    expect(primero.tools?.[0]?.type).toBe('function');
+    expect(primero.tools?.map((tool) => tool.function.name)).toContain('finish');
+    const segundo = bodies[1]?.['messages'] as Array<{ role: string; tool_call_id?: string }>;
+    expect(segundo.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'c1' });
+  });
+
+  it('unos argumentos que no son JSON no tumban el turno', async () => {
+    const toolbox = new StubToolbox();
+    const fetchImpl: FetchLike = async () => new Response(JSON.stringify({
+      choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'c1', function: { name: 'finish', arguments: 'esto no es json' } }] } }],
+    }), { status: 200 });
+
+    const model = new OpenAiCompatibleModel({ apiKey: 'k', baseUrl: 'https://api.test', model: 'm', fetchImpl });
+    // La herramienta se queja con su propio mensaje —«falta summary»— en vez de romperse el turno.
+    const decision = await model.decide(context, toolbox);
+    expect(decision.kind).toBe('finish');
+  });
+
+  it('responde a todas las herramientas que pidió el modelo, no sólo a la primera', async () => {
+    const toolbox = new StubToolbox();
+    const bodies: Array<Record<string, unknown>> = [];
+    let call = 0;
+    const respuestas = [
+      {
+        role: 'assistant',
+        tool_calls: [
+          { id: 'c1', function: { name: 'get_health', arguments: '{}' } },
+          { id: 'c2', function: { name: 'get_health', arguments: '{}' } },
+        ],
+      },
+      { role: 'assistant', tool_calls: [{ id: 'c3', function: { name: 'finish', arguments: '{"summary":"ya está"}' } }] },
+    ];
+    const fetchImpl: FetchLike = async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      const message = respuestas[Math.min(call, respuestas.length - 1)];
+      call += 1;
+      return new Response(JSON.stringify({ choices: [{ message }] }), { status: 200 });
+    };
+
+    const model = new OpenAiCompatibleModel({ apiKey: 'k', baseUrl: 'https://api.test', model: 'm', fetchImpl });
+    const decision = await model.decide(context, toolbox);
+
+    expect(decision.kind).toBe('finish');
+    // Lo que importa: sin esto la API responde 400, porque cada `tool_call_id` necesita respuesta.
+    const segunda = bodies[1]?.['messages'] as Array<{ role: string; tool_call_id?: string }>;
+    const respondidos = segunda.filter((m) => m.role === 'tool').map((m) => m.tool_call_id);
+    expect(respondidos).toEqual(['c1', 'c2']);
   });
 });

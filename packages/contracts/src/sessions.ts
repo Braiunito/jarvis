@@ -48,6 +48,21 @@ export const TranscriptMessage = Type.Object({
   role: Type.Union([Type.Literal('user'), Type.Literal('assistant'), Type.Literal('system'), Type.Literal('tool')]),
   at: Type.Union([Iso8601, Type.Null()]),
   text: Type.String(),
+  /**
+   * Qué es esta línea en realidad.
+   *
+   * Los comandos que se teclean en la CLI (`/model`), su salida y las notas que inyecta la
+   * herramienta llegan con `role: "user"` porque así los guarda el fichero de sesión. Sin esto se
+   * leen como algo que escribió una persona —y el titulador se lo cree.
+   */
+  kind: Type.Union([
+    Type.Literal('text'),
+    Type.Literal('command'),
+    Type.Literal('command-output'),
+    Type.Literal('note'),
+  ]),
+  /** Forma corta y legible de lo que no es texto de la persona. */
+  label: Type.Union([Type.String(), Type.Null()]),
   /** De dónde viene lo que se muestra: importado, escrito aquí, salida de tool, evidencia. */
   provenance: Type.Union([
     Type.Literal('remote-transcript'),
@@ -91,5 +106,12 @@ export const SessionSearchResult = Type.Object({
    */
   truncated: Type.Boolean(),
   fetchedAt: Iso8601,
+  /**
+   * Cuándo terminó el índice su último barrido de la flota; `null` si no ha hecho ninguno.
+   *
+   * Es lo que separa «la flota no tiene sesiones» de «el índice todavía no ha mirado». Sin este
+   * dato las dos cosas se ven igual —una lista vacía— y la lectura que se hace es la equivocada.
+   */
+  indexScannedAt: Type.Optional(Type.Union([Iso8601, Type.Null()])),
 });
 export type SessionSearchResult = Static<typeof SessionSearchResult>;

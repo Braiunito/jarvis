@@ -13,7 +13,7 @@
  */
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Attachment, PermissionProfile, Run } from '@jarvis/contracts';
+import type { Attachment, PermissionProfile, Run, TranscriptMessage } from '@jarvis/contracts';
 import {
   useCancelRun, useCreateRun, useRenameWorkspace, useSaveDraft, useTarget, useTranscript, useUsage,
   useWorkspace,
@@ -73,6 +73,40 @@ const formatBytes = (bytes: number): string => {
 };
 
 type TabId = 'actividad' | 'conversacion' | 'contexto' | 'ajustes';
+
+/**
+ * Lo que pasó en la CLI, no lo que dijo nadie.
+ *
+ * Un `/model` tecleado en la terminal y su respuesta llegan al transcript con `role: "user"`
+ * porque así los guarda el fichero de sesión. Pintarlos como mensajes —y encima marcados «escrito
+ * en la máquina»— hace creer que alguien escribió `<command-name>/model</command-name>`. Ocupan una
+ * línea, en su forma corta, y el texto entero sigue disponible al pasar por encima.
+ */
+function CliLine({ message }: { message: TranscriptMessage }): JSX.Element {
+  const icon = message.kind === 'command'
+    ? ACTION_ICON.go
+    : message.kind === 'command-output'
+      ? NAV_ICON.terminal
+      : ACTION_ICON.error;
+  const what = message.kind === 'command'
+    ? 'comando'
+    : message.kind === 'command-output'
+      ? 'salida'
+      : 'aviso';
+
+  return (
+    <div className="cli-line" title={message.text}>
+      <span className="badge neutral">
+        <Glyph icon={icon} size={13} />
+        {what}
+      </span>
+      <span className={`truncate ${message.kind === 'note' ? '' : 'mono'}`}>{message.label}</span>
+      {message.at ? (
+        <span className="tiny faint nowrap">{new Date(message.at).toLocaleTimeString()}</span>
+      ) : null}
+    </div>
+  );
+}
 
 export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.Element {
   const detail = useWorkspace(workspaceId);
@@ -380,17 +414,21 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                 <div className="messages" tabIndex={0} role="region"
                   aria-label="Conversación de la sesión">
                   {messages.map((message, index) => (
-                    <div key={index} className={`message ${message.role}`}>
-                      <div className="who">
-                        <span>{message.role}</span>
-                        <span className="badge neutral">
-                          <Glyph icon={PROVENANCE_ICON[message.provenance] ?? PROVENANCE_ICON['system'] as never} size={13} />
-                          {PROVENANCE[message.provenance] ?? message.provenance}
-                        </span>
-                        {message.at ? <span>{new Date(message.at).toLocaleString()}</span> : null}
-                      </div>
-                      <div className="body">{message.text}</div>
-                    </div>
+                    message.kind === 'text'
+                      ? (
+                        <div key={index} className={`message ${message.role}`}>
+                          <div className="who">
+                            <span>{message.role}</span>
+                            <span className="badge neutral">
+                              <Glyph icon={PROVENANCE_ICON[message.provenance] ?? PROVENANCE_ICON['system'] as never} size={13} />
+                              {PROVENANCE[message.provenance] ?? message.provenance}
+                            </span>
+                            {message.at ? <span>{new Date(message.at).toLocaleString()}</span> : null}
+                          </div>
+                          <div className="body">{message.text}</div>
+                        </div>
+                      )
+                      : <CliLine key={index} message={message} />
                   ))}
                   {!transcript.isLoading && !transcript.error && messages.length === 0 ? (
                     <Empty

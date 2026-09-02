@@ -15,14 +15,23 @@ interface SearchQuery {
 export function registerSessionRoutes(app: FastifyInstance, services: CoreServices): void {
   app.get('/api/sessions', async (request, reply) => {
     const query = (request.query ?? {}) as SearchQuery;
-    const limit = Math.min(Math.max(Number(query.limit ?? 50) || 50, 1), 200);
+    /**
+     * Sin `limit` no se inventa uno aquí: lo decide el servicio, que es quien sabe cuántas caben
+     * y quien marca la respuesta como recortada.
+     *
+     * Esta línea tenía un `?? 50` que pisaba ese acuerdo: la consola pedía sin límite, la ruta
+     * mandaba 50 y veintitrés sesiones de la flota no aparecían nunca —ni ellas ni un aviso de que
+     * faltaban—. Un tope por si acaso sigue habiendo, pero sólo para lo que alguien pida a mano.
+     */
+    const asked = Number(query.limit);
+    const limit = Number.isFinite(asked) && asked > 0 ? Math.min(asked, 500) : undefined;
     const result = await services.sessions.search({
       q: query.q,
       host: query.host,
       provider: query.provider,
       cwd: query.cwd,
       since: query.since,
-      limit,
+      ...(limit ? { limit } : {}),
     });
     return reply.send(result);
   });

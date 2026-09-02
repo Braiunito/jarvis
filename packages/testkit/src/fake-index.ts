@@ -100,6 +100,14 @@ export class FakeSessionIndex {
     };
   }
 
+  /** Cuándo se barrió. `null` finge un índice recién arrancado, que es el caso interesante. */
+  lastScanAt: string | null = '2026-09-01T18:05:00.000Z';
+
+  async status(): Promise<{ lastScanAt: string | null }> {
+    this.#maybeFail();
+    return { lastScanAt: this.lastScanAt };
+  }
+
   async health(): Promise<{ ok: boolean; error: string | null; lastOkAt: string | null }> {
     return this.failWith
       ? { ok: false, error: this.failWith, lastOkAt: null }

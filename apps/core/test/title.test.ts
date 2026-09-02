@@ -10,6 +10,7 @@ import { openDatabase } from '../src/platform/db.js';
 import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
 import { looksAutomatic, TitleService, titleFromPrompt, type TitleModel } from '../src/workspaces/title.js';
+import { classifyMessage } from '../src/sessions/message-kind.js';
 
 const user = { userId: 'u1', username: 'braian' };
 
@@ -347,5 +348,55 @@ describe('el índice no cabe entero', () => {
     expect((await local.sessions.search({ limit: 6 })).truncated).toBe(true);
     expect((await local.sessions.search({ limit: 20 })).truncated).toBe(false);
     local.close();
+  });
+});
+
+/**
+ * Lo que teclea una persona en la CLI no es lo que dice.
+ *
+ * `/model` llega al transcript con `role: "user"` porque así lo guarda el fichero de sesión. Sin
+ * distinguirlo, el titulador se lo cree: la sesión acababa llamándose «/model model».
+ */
+describe('el ruido de la CLI no titula', () => {
+  const comando = '<command-name>/model</command-name>\n<command-message>model</command-message>\n'
+    + '<command-args></command-args>';
+  const salida = '<local-command-stdout>Set model to `Sonnet 5` and saved as your default'
+    + ' for new sessions</local-command-stdout>';
+
+  it('se reconoce y se cuenta aparte', () => {
+    expect(classifyMessage(comando)).toEqual({ kind: 'command', label: '/model' });
+    expect(classifyMessage(salida).kind).toBe('command-output');
+    expect(classifyMessage('[Request interrupted by user]').kind).toBe('note');
+    expect(classifyMessage('arregla el pool que se cae').kind).toBe('text');
+  });
+
+  it('el heurístico local no nombra la sesión con un comando', () => {
+    expect(titleFromPrompt(comando)).toBe('trabajo sin título');
+    expect(titleFromPrompt(`${comando}\n\narregla el deploy roto`)).toBe('arregla el deploy roto');
+  });
+
+  it('el titulador ignora comandos y salidas al elegir material', async () => {
+    let seen = '';
+    const model: TitleModel = { summarize: async ({ prompt }) => { seen = prompt; return 'lo que sea'; } };
+    const service = new TitleService({ db: services.db, clock: services.clock, model });
+    const workspace = open('sid-ruido', 'Claude a758cca7');
+
+    await service.nameOnOpen(workspace.id, {
+      userMessages: [comando, 'la campanita del panel no suena', salida, 'sigue sin sonar'],
+    });
+    expect(seen).toContain('la campanita del panel no suena');
+    expect(seen).toContain('sigue sin sonar');
+    expect(seen).not.toContain('command-name');
+    expect(seen).not.toContain('Set model to');
+  });
+
+  it('sin nada que no sea ruido, no se nombra y no se gasta una llamada', async () => {
+    let calls = 0;
+    const model: TitleModel = { summarize: async () => { calls += 1; return 'no debería llamarse'; } };
+    const service = new TitleService({ db: services.db, clock: services.clock, model });
+    const workspace = open('sid-solo-ruido', 'Claude bbbbbbbb');
+
+    expect(await service.nameOnOpen(workspace.id, { userMessages: [comando, salida] })).toBeNull();
+    expect(calls).toBe(0);
   });
 });

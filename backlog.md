@@ -262,6 +262,37 @@ Cerrada el 2026-09-02, con el core de la sesión paralela (`acknowledged_at`, `P
 - **Chip de terminales abiertas** junto a Terminal, y sólo cuando el core las ha contado alguna vez
   (`terminals.at !== null`). Un cero que en realidad es «no lo sé» es peor que no pintar nada.
 
+### [x] HZ-25 · El titulador nunca llamó al modelo, y por eso los nombres eran malos
+
+Encontrado el 2026-09-02 al probarlo punta a punta contra el bastión, después de que el usuario
+reportara títulos como «/model model» y «Bien, esa campanita debería ir en el».
+
+Tres fallos encadenados, y el primero explica los otros dos:
+
+1. **Las variables del titulador estaban en el `.env` y no se pasaban al contenedor.** `deploy/compose.yml`
+   no incluía `JARVIS_TITLE_*` en el entorno del core, así que `titleApiKey` llegaba vacía, el
+   modelo era `null` y **todos** los títulos salían del heurístico local. Un ajuste configurado que
+   no llega es peor que uno ausente, porque nadie vuelve a mirarlo.
+2. **El heurístico se tragaba el ruido de la CLI.** `<command-name>/model</command-name>` llega al
+   transcript con `role: "user"`, y al quitar sólo las etiquetas quedaba «/model model». Ahora los
+   bloques de comando se quitan enteros y hay un clasificador (`sessions/message-kind.ts`) que
+   distingue texto, comando, salida de comando y aviso.
+3. **El primer mensaje no era el primero.** Se pedían los últimos 20 mensajes y se trataba el
+   primero de esa ventana como el primero de la sesión: en una sesión larga, eso es un mensaje
+   cualquiera de la mitad —de ahí «Bien, esa campanita debería ir en el»—. Ahora el primero sale
+   del `preview` que ya guarda el índice, que llega gratis con la fila que se lee para localizar la
+   sesión.
+
+Medido contra `qwen/qwen3.6-27b` en Groq con la clave real:
+
+| llamada | resultado | tiempo |
+|---|---|---|
+| sin `reasoning_effort` | `<think>` y `finish_reason: "length"`, sin título | 14,6 s |
+| con `reasoning_effort: "none"` | `revisar despliegue y corregir campana` | 6,3 s |
+
+O sea que el ajuste heredado del LiteChat viejo era necesario **y** el tiempo de espera de 8 s se
+quedaba corto para el modelo real: subido a 15 s, que nadie espera a esto.
+
 ### [x] HZ-24 · El explorador enseñaba 50 de 73 sesiones, y no lo decía
 
 Encontrado el 2026-09-02 al no cuadrar dos números: el core marcaba 20 sesiones vacías y la consola
@@ -421,6 +452,21 @@ es como debería ser en los tres.
 
 Cosas que aparecieron trabajando en otra tarea. Se anotan aquí para que no se pierdan y para que
 quien las arregle sepa de dónde salieron.
+
+### [x] HZ-24 · Veintitrés sesiones de la flota no aparecían nunca
+
+Hecho 2026-09-02 · `apps/core/src/sessions/{service,routes}.ts`, `packages/contracts/src/sessions.ts`
+
+El explorador enseñaba 50 de las 73 sesiones de la flota, y nada decía que faltaran. El tope estaba
+en **dos capas**: el servicio heredaba el defecto del cliente del índice, y la ruta —que es la que
+mandaba— inventaba un `?? 50` propio cuando nadie pedía límite. Arreglar sólo el servicio no cambió
+nada, porque la ruta seguía pisándolo; se vio porque la respuesta llegaba marcada como recortada
+con 50 filas, que sólo cuadra si el límite efectivo era 50.
+
+Ahora la ruta no inventa límite —lo decide el servicio— y `SessionSearchResult` lleva `truncated`,
+que el explorador cuenta: una lista recortada en silencio hace concluir que lo que falta no existe.
+Comprobado en zeus: 73 sesiones, `truncated: false`, repartidas goro2 27 · goro3 19 · bastion 18 ·
+vultr 7 · bevrim 2.
 
 ### [x] HZ-21 · La limpieza de spools no existía, y su comando no funcionaba
 

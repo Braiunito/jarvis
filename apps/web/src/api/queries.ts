@@ -8,7 +8,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type {
   Approval, Attachment, Draft, Health, HostCapabilities, Plan, PlanStep, Run, RunEvent,
-  SessionSearchResult, TargetPlan, TerminalSession, UsageSnapshot, Workspace,
+  SessionSearchResult, TargetPlan, TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
 import { get, post, put } from './client.js';
 
@@ -159,7 +159,9 @@ export const useTranscript = (workspace: Workspace | undefined) => useQuery({
     ? keys.transcript(workspace.ref.host, workspace.ref.provider, workspace.ref.sessionId)
     : ['transcript', 'none'],
   queryFn: () => get<{
-    messages: Array<{ role: string; at: string | null; text: string; provenance: string }>;
+    // El tipo del contrato, no una copia a mano: cuando el core añadió `kind` y `label` para
+    // distinguir un comando de la CLI de algo que escribió una persona, la copia se quedó vieja.
+    messages: TranscriptMessage[];
     truncated: boolean;
     /** Los mensajes que tiene la sesión, que no son los que caben en esta página. */
     messageCount: number | null;

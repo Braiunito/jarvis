@@ -269,15 +269,29 @@ export function ExplorerScreen(): JSX.Element {
                   </button>
                 }
               />
+            ) : sessions.data?.indexScannedAt == null ? (
+              /*
+               * Todavía no ha mirado.
+               *
+               * Tras un reinicio el índice tarda unos minutos en recorrer la flota, y hasta
+               * entonces «no hay sesiones» y «aún no he mirado» se veían exactamente igual. La
+               * diferencia importa: en el primer caso hay algo que arreglar y en el segundo sólo
+               * hay que esperar.
+               */
+              <Empty
+                icon={ACTION_ICON.timer}
+                title="El índice todavía no ha barrido la flota"
+                hint="Recorrer las máquinas lleva unos minutos después de arrancar. Esto se llena solo; no hay nada que hacer."
+              />
             ) : (
               <Empty
                 icon={NAV_ICON.sessions}
-                title="El índice no ve ninguna sesión"
-                hint="Aquí aparecen las sesiones de Claude, Codex y OpenCode que haya en las máquinas de la flota. Si esperabas alguna, lo primero es mirar si el índice y los saltos responden."
+                title="El índice barrió y no encontró ninguna sesión"
+                hint={`Último barrido ${relativeTime(sessions.data.indexScannedAt)}. Aquí aparecen las sesiones de Claude, Codex y OpenCode que haya en las máquinas de la flota, así que esto dice algo de la flota, no del índice.`}
                 action={
                   <Link to="/health" className="btn">
                     <Glyph icon={NAV_ICON.health} />
-                    Ver el estado del índice
+                    Ver si los saltos responden
                   </Link>
                 }
               />

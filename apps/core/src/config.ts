@@ -79,6 +79,16 @@ export const config = {
   modelApiKey: env['JARVIS_MODEL_API_KEY'] || '',
   modelName: env['JARVIS_MODEL_NAME'] || 'claude-sonnet-5',
   /**
+   * Qué API habla el modelo: `anthropic` o cualquier endpoint compatible con OpenAI.
+   *
+   * Se puede fijar a mano, pero por defecto se deduce de la URL, que es lo que evita el fallo
+   * silencioso más probable: poner una credencial que la casa ya tiene y que el Assistant siga
+   * apagado —o peor, que conteste 400— porque el core habla el protocolo del otro proveedor.
+   */
+  modelProvider: (env['JARVIS_MODEL_PROVIDER']
+    || (/anthropic/i.test(env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com') ? 'anthropic' : 'openai')
+  ) as 'anthropic' | 'openai',
+  /**
    * Un modelo guionizado en vez del de verdad. Existe para desarrollo y pruebas: deja ejercitar
    * la durabilidad de un plan sin red, sin credencial y sin gastar cuota.
    */

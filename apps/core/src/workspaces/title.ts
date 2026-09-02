@@ -19,6 +19,7 @@
  */
 import type { Database as Db } from 'better-sqlite3';
 import type { Clock } from '../platform/clock.js';
+import { isSubstantive } from '../sessions/message-kind.js';
 
 export interface TitleModel {
   /** Devuelve un título corto, o null si no puede. Nunca lanza hacia arriba. */
@@ -49,8 +50,16 @@ export class OpenAiCompatibleTitleModel implements TitleModel {
 
   async summarize({ prompt, result }: { prompt: string; result: string | null }): Promise<string | null> {
     const controller = new AbortController();
-    // Nombrar es un adorno útil: si tarda, no vale la pena esperarlo.
-    const timer = setTimeout(() => controller.abort(), 8_000);
+    /*
+     * Quince segundos, no ocho.
+     *
+     * Medido contra el modelo real (`qwen/qwen3.6-27b` en Groq): con `reasoning_effort: "none"`
+     * contesta en 6,3 s, y sin él se va a 14,6 s pensando y devuelve `finish_reason: "length"` sin
+     * título. Con el corte en 8 s, un día lento abortaba una llamada que iba a contestar bien, y el
+     * workspace se quedaba con el nombre del heurístico sin que nada lo explicara. Nadie espera a
+     * esto: corre en segundo plano.
+     */
+    const timer = setTimeout(() => controller.abort(), 15_000);
     const family = this.#model.split('/').pop() ?? this.#model;
     try {
       const response = await fetch(`${this.#baseUrl}/v1/chat/completions`, {
@@ -65,10 +74,12 @@ export class OpenAiCompatibleTitleModel implements TitleModel {
           messages: [
             {
               role: 'system',
-              content: 'Nombra este trabajo en español con 3 a 6 palabras, en minúscula, sin comillas '
-                + 'ni punto final. Describe el asunto, no la acción de pedirlo. Si el texto trae '
-                + 'preámbulos de la herramienta (bloques <environment_context>, rutas, fechas), '
-                + 'ignóralos y nombra lo que la persona pide.',
+              content: 'Nombra en español, con 3 a 6 palabras en minúscula, sin comillas ni punto '
+                + 'final, el asunto del que trata esta sesión de trabajo. Resume de qué va el hilo '
+                + 'entero: no copies una frase suelta ni el último comentario. Describe el asunto, '
+                + 'no la acción de pedirlo. Ignora los preámbulos de la herramienta —bloques '
+                + '<environment_context>, comandos como /model o /clear, rutas y fechas— y nombra '
+                + 'el problema del que se habla.',
             },
             { role: 'user', content: `Petición: ${prompt.slice(0, 800)}\n\nResultado: ${(result ?? '').slice(0, 800)}` },
           ],
@@ -148,6 +159,10 @@ export function looksAutomatic(title: string | null | undefined, sessionId?: str
 export function titleFromPrompt(prompt: string): string {
   const withoutPreamble = prompt
     .replace(/<environment_context>[\s\S]*?<\/environment_context>/gi, ' ')
+    // Los comandos de la CLI se quitan enteros, con su contenido: dejar sólo las etiquetas fuera
+    // producía nombres como «/model model», que es lo que se veía en la lista.
+    .replace(/<command-(name|message|args)>[\s\S]*?<\/command-\1>/gi, ' ')
+    .replace(/<local-command-[a-z]+>[\s\S]*?<\/local-command-[a-z]+>/gi, ' ')
     .replace(/<[^>]{1,120}>/g, ' ');
   const blocks = withoutPreamble.split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
   const last = blocks.at(-1) ?? withoutPreamble;
@@ -261,7 +276,10 @@ export class TitleService {
     try {
       // El primero dice de qué iba esto; el último, en qué anda ahora. Los dos juntos nombran
       // mejor que cualquiera por separado, y es lo que una persona recordaría del hilo.
-      const useful = material.userMessages.map((message) => message.trim()).filter(Boolean);
+      // Nada que venga de la CLI en vez de una persona: un `/model` no dice de qué va la sesión.
+      const useful = material.userMessages
+        .map((message) => message.trim())
+        .filter((message) => message && isSubstantive(message));
       const first = useful[0] ?? '';
       const last = useful.at(-1) ?? '';
       const prompt = first === last ? first : `${first}\n\n${last}`;

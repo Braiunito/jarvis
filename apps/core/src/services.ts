@@ -25,7 +25,27 @@ import { AttachmentService } from './attachments/service.js';
 import { UsageService } from './usage/service.js';
 import { HealthService } from './health/service.js';
 import { TerminalService } from './terminal/service.js';
-import { AnthropicModel, ScriptedModel, type AssistantModel } from './assistant/model.js';
+import {
+  AnthropicModel, OpenAiCompatibleModel, ScriptedModel, type AssistantModel,
+} from './assistant/model.js';
+
+/**
+ * El modelo del Assistant, según el proveedor configurado.
+ *
+ * Un solo sitio donde se decide, porque el fallo que evita es el que no se ve: una credencial
+ * puesta y un Assistant que sigue sin funcionar porque el core habla otro protocolo.
+ */
+function buildAssistantModel(config: CoreConfig): AssistantModel {
+  const options = {
+    apiKey: config.modelApiKey,
+    baseUrl: config.modelBaseUrl,
+    model: config.modelName,
+    maxToolCalls: config.assistantMaxToolCalls,
+  };
+  return config.modelProvider === 'anthropic'
+    ? new AnthropicModel(options)
+    : new OpenAiCompatibleModel(options);
+}
 import { PlanService } from './plans/service.js';
 import { PlanSupervisor } from './plans/supervisor.js';
 import { ImportService } from './import/service.js';
@@ -139,12 +159,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const model = options.model !== undefined
     ? options.model
     : config.modelApiKey
-      ? new AnthropicModel({
-        apiKey: config.modelApiKey,
-        baseUrl: config.modelBaseUrl,
-        model: config.modelName,
-        maxToolCalls: config.assistantMaxToolCalls,
-      })
+      ? buildAssistantModel(config)
       : config.assistantScripted
         ? new ScriptedModel()
         : null;

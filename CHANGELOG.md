@@ -64,6 +64,17 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **Los títulos automáticos ya los escribe el modelo**: las variables del titulador estaban en el
+  `.env` y no llegaban al contenedor, así que el modelo nunca se llamó y todos los nombres salían
+  del heurístico local. De ahí «/model model» y frases sueltas sacadas de la mitad de un hilo.
+- **Lo que se teclea en la CLI deja de parecer un mensaje**: `/model` y su salida se enseñan como
+  una línea corta —comando, salida, aviso— en vez de como algo que escribió una persona, y no
+  entran en el material con el que se pone nombre a la sesión.
+- **Trabajo explica qué es un trabajo**: una sesión vive en la máquina y existe aunque Jarvis esté
+  apagado; un trabajo es una ejecución que lanzaste desde aquí sobre esa sesión, con destino,
+  permiso, eventos y resultado. Una sesión puede tener muchos trabajos.
+- **Una lista de sesiones vacía dice por qué lo está**: el índice todavía no ha barrido, barrió y
+  no encontró nada, o tus filtros no dejan pasar nada. Antes las tres se veían igual.
 - **El explorador enseñaba 50 sesiones de 73** y no lo decía: el core pedía al índice su página por
   defecto. Ahora pide muchas más y, cuando aun así se llena, la pantalla avisa de que hay más y de
   cómo llegar a ellas. Una lista recortada en silencio hace concluir que lo que falta no existe.

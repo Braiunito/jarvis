@@ -34,7 +34,10 @@ const duration = (run: Run): number | null =>
   run.startedAt && run.finishedAt ? Date.parse(run.finishedAt) - Date.parse(run.startedAt) : null;
 
 export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Element {
-  usePageMeta({ title: 'Trabajo', subtitle: 'Lo que se ha mandado a los agentes y cómo acabó' });
+  usePageMeta({
+    title: 'Trabajo',
+    subtitle: 'Cada cosa que has mandado ejecutar: dónde corrió, con qué permiso y qué dijo',
+  });
 
   const runs = useRuns();
   const metrics = useMetrics(24);
@@ -60,6 +63,35 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
 
   return (
     <div className="page">
+      {/*
+        * Sesión y trabajo se confunden, y con razón: los dos son «una conversación con un agente».
+        * La diferencia es de quién es cada cosa y dónde vive, y decirla una vez aquí ahorra
+        * explicarla cada vez que alguien pregunta qué está mirando. Va plegado porque el que ya lo
+        * sabe no necesita leerlo cada visita.
+        */}
+      <details className="explainer">
+        <summary>¿Qué es un trabajo, y en qué se diferencia de una sesión?</summary>
+        <div className="explainer-body">
+          <p>
+            Una <strong>sesión</strong> vive en la máquina. La crea el agente —Claude, Codex,
+            OpenCode— la primera vez que alguien habla con él, sigue existiendo aunque Jarvis esté
+            apagado, y se puede continuar desde la terminal sin pasar por aquí. Las tienes en{' '}
+            <Link to="/sessions">Sesiones</Link>.
+          </p>
+          <p>
+            Un <strong>trabajo</strong> es una ejecución que lanzaste tú desde Jarvis sobre una de
+            esas sesiones. Tiene destino (en qué máquina corrió), permiso (qué podía tocar), una
+            línea de eventos y un resultado. Vive en Jarvis, no en la máquina, y es lo que se puede
+            parar, reintentar y auditar.
+          </p>
+          <p className="small muted">
+            Una sesión puede tener muchos trabajos; un trabajo pertenece siempre a una sesión. En
+            esta pantalla están los de todas las sesiones, ordenados por cuándo pasaron; dentro de
+            un workspace, sólo los suyos.
+          </p>
+        </div>
+      </details>
+
       {/* Cuánto trabajo hay y en qué forma llega: el contexto antes de bajar a una fila. */}
       <div className="grid cols-4">
         <Card>

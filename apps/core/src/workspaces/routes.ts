@@ -17,19 +17,30 @@ import type { CoreServices } from '../services.js';
  */
 async function nameInBackground(services: CoreServices, workspace: Workspace): Promise<void> {
   const runs = services.runs.listByWorkspace(workspace.id, 20);
-  let userMessages: string[] = [];
+  const userMessages: string[] = [];
   try {
     const transcript = await services.sessions.transcript(workspace.ref, { last: 20 });
-    userMessages = transcript.messages
-      .filter((message) => message.role === 'user')
-      .map((message) => message.text);
+
+    /*
+     * El primer mensaje de la sesión sale del índice, no de la ventana.
+     *
+     * Se piden los últimos 20 mensajes —traer una sesión entera para ponerle nombre es caro— y
+     * durante un rato se trató el primero de esa ventana como «el primer mensaje». En una sesión
+     * larga eso es un mensaje cualquiera de la mitad, y de ahí salían títulos como «Bien, esa
+     * campanita debería ir en el». El índice ya guarda el primer turno aprovechable de la sesión.
+     */
+    if (transcript.preview) userMessages.push(transcript.preview);
+
+    // Y de la ventana sólo lo que escribió una persona: un `/model` tecleado en la CLI llega con
+    // `role: "user"` y titulaba la sesión como «/model model».
+    for (const message of transcript.messages) {
+      if (message.role === 'user' && message.kind === 'text') userMessages.push(message.text);
+    }
   } catch {
     // El índice puede estar caído: se nombra con lo que haya en casa antes que no nombrar.
   }
   if (userMessages.length === 0) {
-    userMessages = [...runs].reverse()
-      .map((run) => run.promptPreview ?? '')
-      .filter(Boolean);
+    userMessages.push(...[...runs].reverse().map((run) => run.promptPreview ?? '').filter(Boolean));
   }
   const lastResult = runs.find((run) => run.resultSummary)?.resultSummary ?? null;
   await services.titles.nameOnOpen(workspace.id, { userMessages, lastResult });

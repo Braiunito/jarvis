@@ -52,8 +52,10 @@ export interface SessionQuery {
 export interface SessionIndex {
   list(query: SessionQuery): Promise<{ rows: IndexRow[]; stale: boolean; error: string | null }>;
   hosts(): Promise<{ rows: IndexHostRow[]; stale: boolean; error: string | null }>;
-  transcript(ref: SessionRef, options?: { last?: number }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount?: number | null }>;
+  transcript(ref: SessionRef, options?: { last?: number }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount?: number | null; preview?: string | null }>;
   health(): Promise<{ ok: boolean; error: string | null; lastOkAt: string | null }>;
+  /** Cuándo barrió el índice. Opcional: uno antiguo no lo expone y se degrada a «no lo sé». */
+  status?(): Promise<{ lastScanAt: string | null }>;
 }
 
 /**
@@ -168,7 +170,7 @@ export class HttpSessionIndex implements SessionIndex {
     return this.#withFallback('hosts', () => this.#get<IndexHostRow[]>('/api/hosts'));
   }
 
-  async transcript(ref: SessionRef, { last }: { last?: number } = {}): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null }> {
+  async transcript(ref: SessionRef, { last }: { last?: number } = {}): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null; preview: string | null }> {
     // El índice indexa por `session_key`; se localiza por el id, que es lo único que Jarvis guarda.
     const listed = await this.#get<IndexRow[]>('/api/sessions', { limit: '500', host: ref.host, provider: ref.provider });
     const row = listed.find((candidate) => candidate.session_id === ref.sessionId);
@@ -187,7 +189,20 @@ export class HttpSessionIndex implements SessionIndex {
       // Cuántos mensajes tiene la sesión, no cuántos cabían en esta página. La fila del índice ya
       // se ha buscado para resolver la clave, así que el dato sale gratis.
       messageCount: (row.user_messages ?? 0) + (row.assistant_messages ?? 0),
+      // El índice ya guarda el primer turno aprovechable de la sesión: pedirlo aparte sería una
+      // consulta de más para un dato que viene en la fila que acabamos de leer.
+      preview: row.preview ?? null,
     };
+  }
+
+  async status(): Promise<{ lastScanAt: string | null }> {
+    try {
+      const payload = await this.#get<{ lastScanAt?: string | null }>('/api/status', {});
+      return { lastScanAt: payload.lastScanAt ?? null };
+    } catch {
+      // Un índice sin `/api/status` es uno viejo, no uno roto: se degrada a «no lo sé».
+      return { lastScanAt: null };
+    }
   }
 
   async health(): Promise<{ ok: boolean; error: string | null; lastOkAt: string | null }> {

@@ -241,6 +241,135 @@ export class AnthropicModel implements AssistantModel {
   }
 }
 
+interface OpenAiToolCall {
+  id?: string;
+  function?: { name?: string; arguments?: string };
+}
+
+interface OpenAiMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content?: string | null;
+  tool_calls?: OpenAiToolCall[];
+  tool_call_id?: string;
+}
+
+/**
+ * El mismo coordinador, contra un endpoint compatible con OpenAI.
+ *
+ * Existe porque el proveedor no es una preferencia estética: es la credencial que hay en la casa.
+ * Este despliegue heredó una de OpenAI del stack anterior —que es con la que el Assistant llevaba
+ * meses funcionando— y un core que sólo hablase con Anthropic lo dejaba apagado por un motivo que
+ * no tiene nada que ver con el producto.
+ *
+ * La forma del turno es idéntica a la de Anthropic y por el mismo motivo: se ofrecen las mismas
+ * herramientas, las lecturas se resuelven en el momento y la primera que decide cierra. Lo único
+ * que cambia es la forma del sobre: aquí las llamadas vienen en `tool_calls` con los argumentos
+ * como texto JSON, y sus resultados vuelven como mensajes de rol `tool`.
+ */
+export class OpenAiCompatibleModel implements AssistantModel {
+  readonly id: string;
+  readonly #apiKey: string;
+  readonly #baseUrl: string;
+  readonly #model: string;
+  readonly #maxToolCalls: number;
+  readonly #timeoutMs: number;
+  readonly #fetch: FetchLike;
+
+  constructor(options: AnthropicModelOptions) {
+    this.#apiKey = options.apiKey;
+    this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
+    this.#model = options.model;
+    this.#maxToolCalls = options.maxToolCalls ?? 6;
+    this.#timeoutMs = options.timeoutMs ?? 120_000;
+    this.#fetch = options.fetchImpl ?? ((url, init) => fetch(url, init));
+    this.id = options.model;
+  }
+
+  async decide(context: PlanContext, toolbox: AssistantToolbox): Promise<AssistantDecision> {
+    const messages: OpenAiMessage[] = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: renderContext(context) },
+    ];
+
+    for (let call = 0; call <= this.#maxToolCalls; call += 1) {
+      const decisionsOnly = call === this.#maxToolCalls;
+      const tools = toolbox.definitions({ decisionsOnly });
+      const message = await this.#ask(messages, tools);
+      const calls = message.tool_calls ?? [];
+
+      if (!calls.length || !calls[0]?.function?.name) {
+        const text = message.content ?? 'el modelo no propuso ningún paso';
+        return { kind: 'finish', summary: text.slice(0, 4000) };
+      }
+
+      /**
+       * Se responden **todas** las llamadas del mensaje, no sólo la primera.
+       *
+       * La API lo exige —«an assistant message with tool_calls must be followed by tool messages
+       * responding to each tool_call_id»— y devuelve 400 si falta alguna: el plan moría en el
+       * primer turno en que el modelo pedía dos lecturas a la vez, que es lo normal cuando quiere
+       * mirar dos cosas antes de decidir.
+       *
+       * Si una de ellas decide, el turno acaba ahí: lo que se ejecutó antes eran lecturas, y la
+       * conversación de este turno no vuelve a usarse.
+       */
+      const answers: OpenAiMessage[] = [];
+      for (const call of calls) {
+        const name = call.function?.name;
+        if (!name) continue;
+        let input: Record<string, unknown> = {};
+        try {
+          input = JSON.parse(call.function?.arguments || '{}') as Record<string, unknown>;
+        } catch {
+          // Argumentos que no son JSON: se trata como una llamada sin datos y la herramienta se
+          // queja con su propio mensaje, que es más útil que un fallo genérico del turno.
+        }
+        const outcome = await toolbox.invoke(name, input);
+        if (outcome.type === 'decision') return outcome.decision;
+        answers.push({
+          role: 'tool',
+          tool_call_id: call.id ?? '',
+          content: JSON.stringify(outcome.content).slice(0, 60_000),
+        });
+      }
+
+      messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: calls });
+      messages.push(...answers);
+    }
+
+    return { kind: 'finish', summary: 'se agotó el presupuesto de consultas de este turno' };
+  }
+
+  async #ask(messages: OpenAiMessage[], tools: ToolDefinition[]): Promise<OpenAiMessage> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
+    try {
+      const response = await this.#fetch(`${this.#baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#apiKey}` },
+        body: JSON.stringify({
+          model: this.#model,
+          messages,
+          tools: tools.map((tool) => ({
+            type: 'function',
+            function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+          })),
+          // Siempre una herramienta: lo que no es una acción del core no es una decisión.
+          tool_choice: 'required',
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`the model answered ${response.status}: ${(await response.text()).slice(0, 300)}`);
+      }
+      const body = await response.json() as { choices?: Array<{ message?: OpenAiMessage }> };
+      return body.choices?.[0]?.message ?? { role: 'assistant', content: null };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 /**
  * El contexto, en prosa breve y con lo justo.
  *

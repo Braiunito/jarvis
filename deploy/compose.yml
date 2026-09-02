@@ -87,6 +87,18 @@ services:
       JARVIS_ALLOW_YOLO: ${JARVIS_ALLOW_YOLO:-false}
       JARVIS_MODEL_API_KEY: ${JARVIS_MODEL_API_KEY:-}
       JARVIS_MODEL_NAME: ${JARVIS_MODEL_NAME:-claude-sonnet-5}
+      # Sin estas dos, una credencial de OpenAI acaba hablando con la API de Anthropic: el
+      # Assistant queda configurado y aun así no funciona, que es la peor forma de estar apagado.
+      JARVIS_MODEL_BASE_URL: ${JARVIS_MODEL_BASE_URL:-https://api.anthropic.com}
+      JARVIS_MODEL_PROVIDER: ${JARVIS_MODEL_PROVIDER:-}
+      # El modelo que pone nombre a los workspaces. Estaba en el `.env` y no se pasaba al
+      # contenedor, así que el core arrancaba sin él y **todos** los títulos salían del heurístico
+      # local: de ahí nombres como «/model model». Un ajuste configurado que no llega es peor que
+      # uno ausente, porque nadie vuelve a mirarlo.
+      JARVIS_TITLE_API_KEY: ${JARVIS_TITLE_API_KEY:-}
+      JARVIS_TITLE_BASE_URL: ${JARVIS_TITLE_BASE_URL:-https://api.groq.com/openai}
+      JARVIS_TITLE_MODEL: ${JARVIS_TITLE_MODEL:-llama-3.1-8b-instant}
+      JARVIS_TITLE_PER_MINUTE: ${JARVIS_TITLE_PER_MINUTE:-8}
       SSH_AUTH_SOCK: ${SSH_AUTH_SOCK:-}
     volumes:
       - jarvis-core-data:/var/lib/jarvis-core

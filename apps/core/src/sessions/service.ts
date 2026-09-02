@@ -7,6 +7,7 @@
 import type { HostFreshness, Provider, SessionRef, SessionSearchResult, SessionSummary, TranscriptMessage } from '@jarvis/contracts';
 import { JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
+import { classifyMessage } from './message-kind.js';
 import type { WorkspaceRepository } from '../workspaces/repository.js';
 import { freshnessFrom, rowToSummary, type SessionIndex, type SessionQuery } from './index-client.js';
 
@@ -40,9 +41,12 @@ export class SessionService {
      * se llena, se avisa.
      */
     const limit = query.limit ?? 300;
-    const [list, hosts] = await Promise.all([
+    const [list, hosts, status] = await Promise.all([
       index.list({ ...query, limit }),
       index.hosts().catch(() => ({ rows: [], stale: true, error: 'the index did not answer' })),
+      // Cuándo barrió el índice. Va aquí y no en otra llamada porque su único uso es explicar una
+      // lista vacía, y quien la mira la está mirando ahora.
+      index.status?.().catch(() => ({ lastScanAt: null })) ?? Promise.resolve({ lastScanAt: null }),
     ]);
 
     const known = new Map(workspaces.all().map((workspace) => [
@@ -71,24 +75,36 @@ export class SessionService {
       freshness,
       stale: list.stale,
       truncated: list.rows.length >= limit,
+      indexScannedAt: status.lastScanAt,
       fetchedAt: clock.nowIso(),
     };
   }
 
-  async transcript(ref: SessionRef, options: { last?: number } = {}): Promise<{ messages: TranscriptMessage[]; truncated: boolean; messageCount: number | null }> {
+  async transcript(
+    ref: SessionRef,
+    options: { last?: number } = {},
+  ): Promise<{ messages: TranscriptMessage[]; truncated: boolean; messageCount: number | null; preview: string | null }> {
     try {
       const payload = await this.#deps.index.transcript(ref, options);
       return {
-        messages: payload.messages.map((message) => ({
-          role: (['user', 'assistant', 'system', 'tool'].includes(message.role) ? message.role : 'system') as TranscriptMessage['role'],
-          at: message.at,
-          text: message.text,
-          // El transcript viene del CLI remoto: se marca como tal para que nunca se confunda con
-          // lo que Jarvis escribió.
-          provenance: 'remote-transcript',
-        })),
+        messages: payload.messages.map((message) => {
+          const { kind, label } = classifyMessage(message.text);
+          return {
+            role: (['user', 'assistant', 'system', 'tool'].includes(message.role) ? message.role : 'system') as TranscriptMessage['role'],
+            at: message.at,
+            text: message.text,
+            kind,
+            label,
+            // El transcript viene del CLI remoto: se marca como tal para que nunca se confunda con
+            // lo que Jarvis escribió.
+            provenance: 'remote-transcript' as const,
+          };
+        }),
         truncated: payload.truncated,
         messageCount: payload.messageCount ?? null,
+        // El primer mensaje aprovechable de la sesión, tal y como lo guardó el índice. Llega gratis
+        // con la fila que ya se busca para localizar el `session_key`.
+        preview: payload.preview ?? null,
       };
     } catch (error) {
       if (error instanceof JarvisError) throw error;
