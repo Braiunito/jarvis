@@ -34,6 +34,15 @@ type Availability = 'todas' | 'abiertas' | 'sin-abrir' | 'atencion';
  */
 const isEmptySession = (session: SessionSummary): boolean => session.empty;
 
+/**
+ * Y una en la que ya no se puede trabajar.
+ *
+ * No es lo mismo que estar vacía: una sesión estrenada desde Jarvis también lo está y funciona,
+ * porque su primer trabajo la crea. `resumable: false` es una afirmación comprobada contra la
+ * máquina —ni se reanuda ni se puede reutilizar su identificador—, así que aquí no se deduce nada.
+ */
+const isDead = (session: SessionSummary): boolean => session.resumable === false;
+
 /** El nombre que hay que enseñar: el que se le puso aquí gana al que trae el índice. */
 const sessionTitle = (session: SessionSummary): string =>
   session.workspaceTitle ?? session.title ?? session.ref.sessionId;
@@ -415,7 +424,7 @@ export function ExplorerScreen(): JSX.Element {
                   * garantizado veinte segundos después, así que lo primero que se ofrece es lo
                   * único que funciona, con la máquina y la carpeta ya puestas.
                   */}
-                {isEmptySession(selected) ? (
+                {isDead(selected) ? (
                   <button type="button" className="btn primary" onClick={() => openNewSession({
                     host: selected.ref.host,
                     provider: selected.ref.provider,
@@ -426,7 +435,7 @@ export function ExplorerScreen(): JSX.Element {
                   </button>
                 ) : null}
                 <button type="button"
-                  className={`btn ${isEmptySession(selected) ? '' : 'primary'}`}
+                  className={`btn ${isDead(selected) ? '' : 'primary'}`}
                   disabled={open.isPending}
                   onClick={() => void openSession(selected)}>
                   <Glyph icon={ACTION_ICON.open} />
@@ -440,7 +449,7 @@ export function ExplorerScreen(): JSX.Element {
               </div>
               <ErrorNote error={open.error} />
 
-              {isEmptySession(selected) ? (
+              {isDead(selected) ? (
                 <p className="note warn">
                   <Glyph icon={ACTION_ICON.empty} size={16} />
                   <span>
