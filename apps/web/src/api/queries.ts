@@ -28,6 +28,17 @@ export interface MetricsSnapshot {
   };
   workspaces: { total: number; openedInWindow: number };
   plans: { active: number; waitingApproval: number };
+  /** La ventana de cuota más apretada de cada cuenta, sin tocar la red. */
+  usage?: Array<{
+    provider: string;
+    executionHost: string;
+    plan: string | null;
+    label: string;
+    remainingPercent: number;
+    resetsAt: string | null;
+    fetchedAt: string;
+    stale: boolean;
+  }>;
   /**
    * Terminales interactivas abiertas en la flota.
    *

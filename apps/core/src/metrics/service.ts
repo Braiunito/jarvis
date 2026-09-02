@@ -33,6 +33,23 @@ export interface MetricsSnapshot {
     medianDurationMs: number | null;
     buckets: ActivityBucket[];
   };
+  /**
+   * La cuota que ya se sabe, sin tocar la red.
+   *
+   * Se lee de los snapshots persistidos —los que dejan el sondeo y los propios trabajos— y se
+   * queda con la ventana más apretada de cada cuenta, que es la que decide si conviene lanzar algo
+   * ahora. Sirve para enseñarla donde también se decide trabajar y no sólo dentro de un workspace.
+   */
+  usage: Array<{
+    provider: string;
+    executionHost: string;
+    plan: string | null;
+    label: string;
+    remainingPercent: number;
+    resetsAt: string | null;
+    fetchedAt: string;
+    stale: boolean;
+  }>;
   workspaces: { total: number; openedInWindow: number };
   plans: { active: number; waitingApproval: number };
   /** Terminales vivas, para el aviso de la navegación. Es lo último conocido, no una sonda. */
@@ -118,6 +135,7 @@ export class MetricsService {
         medianDurationMs,
         buckets: this.#buckets({ now, hours, buckets }),
       },
+      usage: this.#usage(),
       workspaces: {
         total: count('SELECT COUNT(*) AS n FROM workspaces'),
         openedInWindow: count('SELECT COUNT(*) AS n FROM workspaces WHERE last_opened_at >= ?', from),
@@ -131,6 +149,51 @@ export class MetricsService {
   }
 
   /** El histograma de actividad: un intervalo por barra, incluidos los vacíos. */
+  /**
+   * La ventana más apretada de cada cuenta.
+   *
+   * Un snapshot trae varias —sesión, cinco horas, semana— y en una lista general sólo cabe una:
+   * la que primero va a molestar. Las demás siguen en el workspace, que es donde se mira el
+   * detalle. No toca la red: lee lo que dejaron el sondeo y los propios trabajos.
+   */
+  #usage(): MetricsSnapshot['usage'] {
+    const rows = this.#db.prepare(
+      'SELECT provider, execution_host, account_json, limits_json, fetched_at, refresh_error FROM usage_snapshots',
+    ).all() as Array<{
+      provider: string; execution_host: string; account_json: string | null;
+      limits_json: string; fetched_at: string; refresh_error: string | null;
+    }>;
+
+    const out: MetricsSnapshot['usage'] = [];
+    for (const row of rows) {
+      let limits: Array<{ label: string; remainingPercent: number; resetsAt: string | null }> = [];
+      let plan: string | null = null;
+      try {
+        limits = JSON.parse(row.limits_json) as typeof limits;
+        plan = (JSON.parse(row.account_json ?? 'null') as { plan?: string } | null)?.plan ?? null;
+      } catch {
+        // Un snapshot ilegible no puede tumbar el panel: se salta y ya.
+        continue;
+      }
+      const tightest = limits.reduce<(typeof limits)[number] | null>(
+        (worst, limit) => (!worst || limit.remainingPercent < worst.remainingPercent ? limit : worst),
+        null,
+      );
+      if (!tightest) continue;
+      out.push({
+        provider: row.provider,
+        executionHost: row.execution_host,
+        plan,
+        label: tightest.label,
+        remainingPercent: tightest.remainingPercent,
+        resetsAt: tightest.resetsAt ?? null,
+        fetchedAt: row.fetched_at,
+        stale: row.refresh_error !== null,
+      });
+    }
+    return out.sort((a, b) => a.remainingPercent - b.remainingPercent);
+  }
+
   #buckets({ now, hours, buckets }: { now: number; hours: number; buckets: number }): ActivityBucket[] {
     const spanMs = (hours * 3600_000) / buckets;
     const rows = this.#db.prepare(`

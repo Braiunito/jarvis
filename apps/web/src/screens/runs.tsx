@@ -16,8 +16,10 @@ import {
 } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import { Empty, ErrorNote, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
-import { Sparkbars } from '../ui/charts.jsx';
-import { PERMISSION, RUN_STATUS, runTitle } from '../ui/labels.js';
+import { Meter, Sparkbars } from '../ui/charts.jsx';
+import {
+  PERMISSION, RUN_STATUS, runTitle, USAGE_LOW_PERCENT, usageWindowName,
+} from '../ui/labels.js';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
@@ -60,6 +62,8 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
         : all;
 
   const run = detail.data?.run;
+  // La cuenta que primero va a molestar: las métricas ya las devuelven ordenadas.
+  const tightest = metrics.data?.usage?.[0];
 
   return (
     <div className="page">
@@ -116,11 +120,30 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
           ) : null}
         </Card>
         <Card>
-          <Stat
-            value={metrics.data ? formatDuration(metrics.data.runs.medianDurationMs) : '—'}
-            label="duración típica"
-            hint="mediana de las últimas 24 h"
-          />
+          {/*
+            * Aquí también se decide lanzar: se reintenta un trabajo fallido y se manda otro. Saber
+            * que a la cuenta le queda un 8% después de pulsar es enterarse tarde, así que la
+            * ventana más apretada de la flota ocupa el sitio de la duración típica cuando está
+            * baja; si va sobrada, manda la duración, que es lo que se mira el resto del tiempo.
+            */}
+          {tightest && tightest.remainingPercent <= USAGE_LOW_PERCENT ? (
+            <>
+              <Stat
+                value={`${tightest.remainingPercent}%`}
+                label={`de ${usageWindowName(tightest.label)} en ${tightest.provider}`}
+                hint={`${tightest.executionHost}${tightest.stale ? ' · último dato bueno' : ''}`}
+              />
+              <Meter value={tightest.remainingPercent} max={100} tone="danger" />
+            </>
+          ) : (
+            <Stat
+              value={metrics.data ? formatDuration(metrics.data.runs.medianDurationMs) : '—'}
+              label="duración típica"
+              hint={tightest
+                ? `mediana de 24 h · cuota más justa ${tightest.remainingPercent}% (${tightest.provider})`
+                : 'mediana de las últimas 24 h'}
+            />
+          )}
         </Card>
         <Card>
           <Stat value={metrics.data?.runs.total ?? all.length} label="trabajos en 24 h"

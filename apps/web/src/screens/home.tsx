@@ -16,8 +16,10 @@ import type { Health, Run, Workspace } from '@jarvis/contracts';
 import { useHealth, useMetrics, useRuns, useWorkspaces } from '../api/queries.js';
 import { Empty, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
 import { Donut, Meter, Sparkbars, SERIES_COLORS } from '../ui/charts.jsx';
-import { ACTION_ICON, Glyph, HEALTH_ICON, NAV_ICON, RUN_STATUS_ICON, STATUS_ICON } from '../ui/icons.jsx';
-import { HEALTH } from '../ui/labels.js';
+import {
+  ACTION_ICON, Glyph, HEALTH_ICON, NAV_ICON, PROVIDER_ICON, RUN_STATUS_ICON, STATUS_ICON,
+} from '../ui/icons.jsx';
+import { HEALTH, USAGE_LOW_PERCENT, usageWindowName } from '../ui/labels.js';
 import { openNewSession } from '../ui/new-session.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { Card, formatDuration, Stat } from '../ui/primitives.jsx';
@@ -151,6 +153,7 @@ export function HomeScreen(): JSX.Element {
   const lastRun = last ? all.find((run) => run.workspaceId === last.id) : undefined;
 
   const providers = metrics.data?.runs.byProvider ?? [];
+  const usage = metrics.data?.usage ?? [];
   const groups = groupChecks(health.data);
 
   return (
@@ -309,6 +312,42 @@ export function HomeScreen(): JSX.Element {
               </div>
             </div>
           )}
+
+          {/*
+            * La cuota, donde ya se habla de agentes.
+            *
+            * Estaba sólo dentro de un workspace, y desde la portada también se decide lanzar
+            * trabajo: enterarse de que a una cuenta le queda un 8% **después** de mandar algo es
+            * enterarse tarde. Se enseña la ventana más apretada de cada cuenta; el detalle por
+            * ventana sigue en el workspace, que es donde hace falta.
+            */}
+          {usage.length ? (
+            <div style={{ marginTop: providers.length ? 14 : 0 }}>
+              <p className="tiny faint" style={{ margin: '0 0 8px' }}>Cuota de las cuentas</p>
+              <div className="stack" style={{ gap: 8 }}>
+                {usage.slice(0, 4).map((account) => (
+                  <div key={`${account.provider}:${account.executionHost}`}>
+                    <div className="spread" style={{ gap: 8 }}>
+                      <span className="row tight nowrap small" style={{ minWidth: 0 }}>
+                        <Glyph icon={PROVIDER_ICON[account.provider] ?? NAV_ICON.runs} size={13} />
+                        <span className="truncate">{account.provider}</span>
+                        <span className="tiny faint truncate">{account.executionHost}</span>
+                      </span>
+                      <span className={`tiny ${account.remainingPercent <= USAGE_LOW_PERCENT ? 'danger-text' : 'faint'}`}>
+                        {account.remainingPercent}% de {usageWindowName(account.label)}
+                        {account.stale ? ' · viejo' : ''}
+                      </span>
+                    </div>
+                    <Meter
+                      value={account.remainingPercent}
+                      max={100}
+                      tone={account.remainingPercent <= USAGE_LOW_PERCENT ? 'danger' : 'ok'}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </Card>
 
         <Card title="Acciones rápidas" icon={ACTION_ICON.new}>

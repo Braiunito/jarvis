@@ -447,6 +447,7 @@ a:hover { text-decoration: underline; }
 .card-foot { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 
 .muted { color: var(--text-muted); }
+.danger-text { color: var(--danger); font-weight: 600; }
 .faint { color: var(--text-faint); }
 .small { font-size: 12.5px; }
 .tiny { font-size: 11.5px; }

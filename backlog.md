@@ -449,10 +449,25 @@ los liste ni que enseñe su previsualización con procedencia. Es lo que la misi
 packets». Hasta que exista, un plan que dependa de un fichero adjunto tiene que pedirle a un run
 que lo lea.
 
-### TEC-07 · La cuota sólo se ve en el workspace
-`/api/usage` está sondeado y cacheado por host y proveedor, pero la portada y el Run Center —donde
-también se decide lanzar trabajo— no la enseñan. El dato ya está y es barato (`usage.lastKnown`
-no toca la red); falta decidir dónde cabe sin convertir cada pantalla en un panel de contadores.
+### [x] TEC-07 · La cuota sólo se ve en el workspace
+
+Hecho el 2026-09-02. Enterarse de que a una cuenta le queda un 8% **después** de mandar trabajo es
+enterarse tarde, y desde la portada y el Run Center también se lanza.
+
+`/api/metrics` devuelve ahora `usage`: la ventana **más apretada** de cada cuenta, leída de los
+snapshots que ya dejan el sondeo y los propios trabajos —no toca la red— y ordenada por lo que
+primero va a molestar. Una sola por cuenta a propósito: el detalle por ventana sigue en el
+workspace, que es donde hace falta.
+
+Dónde cabe sin convertir cada pantalla en un panel de contadores:
+
+- **portada**, dentro de «Reparto por agente», que es la tarjeta que ya habla de agentes: una barra
+  por cuenta con su restante, en rojo por debajo del 15%;
+- **Run Center**, en el sitio de «duración típica» **sólo cuando la cuota está baja**. Si va
+  sobrada manda la duración, que es lo que se mira el resto del tiempo, con el restante como pista
+  en la línea de abajo.
+
+Ficheros: `apps/core/src/metrics/service.ts`, `apps/web/src/screens/{home,runs}.tsx`.
 
 ### [x] TEC-09 · La cuota se aprende del propio trabajo
 
@@ -510,6 +525,58 @@ máquina; conviene revisarlo en cada actualización del CLI. Codex ya se pregunt
 es como debería ser en los tres.
 
 ---
+
+## Cierre de la migración
+
+Vienen del plan (`migration-mission/04-migration-plan.md`) y no estaban anotados aquí, que es lo
+que el propio plan pedía en su fase 7. **Los dos piden días de calendario**: repartir manos no los
+acelera, así que lo que se cierra es su parte ejecutable y el resto queda con fecha de revisión.
+
+### MIG-06 · Gate M6 · convivencia
+
+Criterio de cierre, tal cual el plan:
+
+- siete días de uso normal sin fallo P0/P1 de autenticación, destino, pérdida o durabilidad;
+- copia diaria y un restore de muestra comprobado;
+- los smokes corren después de **cada** despliegue;
+- el rollback **ensayado**, no sólo escrito;
+- el stack viejo disponible pero sin recibir escrituras — hecho el 2026-09-02: `jarvis-bridge-1`
+  parado con `restart=no` y `jarvis.service` pendiente de desactivar.
+
+Ejecutable ya: el ensayo de rollback, los smokes tras despliegue y el restore de muestra.
+
+### MIG-07 · Gate M7 · cierre
+
+- ampliar la ventana a 30 días según criticidad;
+- exportar la última bitácora del stack viejo;
+- retirar los contenedores viejos **sin borrar copias**;
+- archivar LiteChat en solo lectura con la etiqueta del último despliegue;
+- actualizar `runbook` y `CLAUDE.md` del repo nuevo;
+- cerrar sólo tareas cuyo criterio esté demostrado.
+
+## Pendientes del plan que nadie había anotado
+
+El plan los llamaba «después del corte» y se quedaron dentro de él. Se anotan aquí para que existan
+como tareas, no para hacerlos ya: el orden lo decide el uso.
+
+### TEC-12 · Aprobaciones de diff y de despliegue
+
+Hoy una aprobación describe la acción con un digest, pero lo que se autoriza sigue siendo texto. Un
+cambio de ficheros o un despliegue se aprueban mejor viendo **qué cambia**: el diff, los ficheros
+tocados y el destino. Encaja con el Assistant, que ya pide permiso antes de lo que tiene efectos.
+
+### TEC-13 · Políticas por workspace y por host
+
+El perfil de permisos se elige por trabajo y se olvida entre uno y otro. Una política —«en este
+host nunca `yolo`», «este workspace siempre `safe`»— es lo que evita elegir bien doce veces y mal
+la trece. Requiere decidir qué gana cuando la política y la elección se contradicen: hoy no hay
+respuesta escrita.
+
+### TEC-14 · Handoff entre sesiones
+
+Pasar un contexto de un agente a otro —de Claude a Codex, o entre máquinas— sin copiar y pegar a
+mano. El material ya existe (transcript, evidencia de runs, adjuntos); falta decidir qué viaja y
+qué se queda, que es la parte difícil.
 
 ## Hallazgos
 

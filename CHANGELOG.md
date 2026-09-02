@@ -64,6 +64,9 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **La cuota se ve donde también se decide lanzar**: en la portada, dentro de la tarjeta que ya
+  habla de agentes, y en Trabajo cuando está baja. Antes sólo aparecía dentro de un workspace, así
+  que enterarse de que a una cuenta le quedaba un 8% pasaba después de mandar el trabajo.
 - **Se puede empezar una sesión desde cero**: eliges agente, máquina, carpeta y permiso, y si
   quieres un trabajo o una terminal viva. Antes había que ir a la máquina, arrancarla a mano y
   esperar a que el índice la viera. Las combinaciones que no existen —una máquina sin ese agente—
