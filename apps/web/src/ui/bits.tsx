@@ -1,0 +1,159 @@
+/**
+ * Piezas compartidas de la interfaz.
+ *
+ * Cada estado se dice con palabra y forma, no sólo con color: quien no distingue el verde del
+ * rojo tiene que poder operar esto igual.
+ */
+import type { JSX, ReactNode } from 'react';
+import type { HostFreshness, Run, RunStatus, TargetPlan } from '@jarvis/contracts';
+import { navigate } from '../router.js';
+
+const STATUS_TONE: Record<RunStatus, string> = {
+  queued: 'neutral',
+  preparing: 'neutral',
+  running: 'running',
+  waiting: 'warn',
+  cancelling: 'warn',
+  completed: 'ok',
+  failed: 'danger',
+  cancelled: 'neutral',
+  timed_out: 'danger',
+};
+
+const STATUS_LABEL: Record<RunStatus, string> = {
+  queued: 'en cola',
+  preparing: 'preparando',
+  running: 'ejecutando',
+  waiting: 'esperando',
+  cancelling: 'cancelando',
+  completed: 'completado',
+  failed: 'fallido',
+  cancelled: 'cancelado',
+  timed_out: 'tiempo agotado',
+};
+
+export function RunStatusBadge({ status }: { status: RunStatus }): JSX.Element {
+  return (
+    <span className={`badge ${STATUS_TONE[status]}`}>
+      <span className="dot" aria-hidden="true" />
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
+
+/**
+ * El destino y el permiso, siempre juntos y siempre antes de Send.
+ *
+ * Enviar trabajo a la máquina equivocada es el error caro de este producto; que la etiqueta y la
+ * ejecución digan lo mismo es la mitad de la defensa, y la otra mitad es que se vea.
+ */
+export function TargetChip({ target }: { target: TargetPlan | undefined }): JSX.Element {
+  if (!target) return <span className="badge neutral">destino desconocido</span>;
+  const strategy = target.strategy === 'A'
+    ? `en ${target.executionHost} → trabaja sobre ${target.workHost}`
+    : `en ${target.executionHost}`;
+  return (
+    <>
+      <span className="badge neutral" title={target.reason ?? undefined}>
+        {target.provider} · {strategy}
+      </span>
+      <span className={`badge ${target.permissionProfile === 'safe' ? 'ok' : target.permissionProfile === 'auto' ? 'warn' : 'danger'}`}>
+        permiso: {target.permissionProfile}
+      </span>
+      {target.cwd ? <span className="badge neutral mono">{target.cwd}</span> : null}
+    </>
+  );
+}
+
+export function StaleNote({ freshness, stale }: { freshness?: HostFreshness[]; stale?: boolean }): JSX.Element | null {
+  const failed = (freshness ?? []).filter((host) => host.status === 'failed' || host.status === 'stale');
+  if (!stale && failed.length === 0) return null;
+  return (
+    <p className="stale-note" role="status">
+      <span aria-hidden="true">⚠</span>
+      <span>
+        {stale ? 'Estos datos son los últimos buenos conocidos. ' : ''}
+        {failed.map((host) => `${host.host}: ${host.error ?? 'sin sincronizar'}`).join(' · ')}
+      </span>
+    </p>
+  );
+}
+
+export function ErrorNote({ error, action }: { error: unknown; action?: ReactNode }): JSX.Element | null {
+  if (!error) return null;
+  const typed = error as { code?: string; message?: string; requestId?: string; retryable?: boolean };
+  return (
+    <div className="error-note" role="alert">
+      <strong>{typed.code ?? 'ERROR'}</strong>
+      <p style={{ margin: '4px 0' }}>{typed.message ?? String(error)}</p>
+      <p className="small muted" style={{ margin: 0 }}>
+        {typed.retryable ? 'Se puede reintentar. ' : ''}
+        {typed.requestId ? `petición ${typed.requestId}` : null}
+      </p>
+      {action ? <div style={{ marginTop: 8 }}>{action}</div> : null}
+    </div>
+  );
+}
+
+export function Empty({ title, hint }: { title: string; hint?: string }): JSX.Element {
+  return (
+    <div className="card" style={{ textAlign: 'center', padding: 28 }}>
+      <p style={{ margin: 0, fontWeight: 600 }}>{title}</p>
+      {hint ? <p className="muted small" style={{ margin: '6px 0 0' }}>{hint}</p> : null}
+    </div>
+  );
+}
+
+export function Loading({ rows = 3 }: { rows?: number }): JSX.Element {
+  return (
+    <div className="list" aria-busy="true" aria-live="polite">
+      <span className="visually-hidden">Cargando…</span>
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} className="skeleton" style={{ height: 44 }} />
+      ))}
+    </div>
+  );
+}
+
+export function Link({ to, children, ...rest }: { to: string; children: ReactNode } & Record<string, unknown>): JSX.Element {
+  return (
+    <a
+      href={to}
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+        event.preventDefault();
+        navigate(to);
+      }}
+      {...rest}
+    >
+      {children}
+    </a>
+  );
+}
+
+export function RunRow({ run, onOpen }: { run: Run; onOpen: (run: Run) => void }): JSX.Element {
+  return (
+    <button type="button" className="list-item" onClick={() => onOpen(run)}>
+      <span className="row">
+        <RunStatusBadge status={run.status} />
+        <span className="small muted mono">{run.id.slice(0, 8)}</span>
+        <span className="small muted">{run.provider} · {run.executionHost}</span>
+        {run.strategy === 'A' ? <span className="badge warn">estrategia A → {run.workHost}</span> : null}
+      </span>
+      <span className="small muted">
+        {new Date(run.createdAt).toLocaleString()}
+        {run.errorMessage ? ` · ${run.errorMessage}` : ''}
+      </span>
+    </button>
+  );
+}
+
+export const relativeTime = (iso: string | null): string => {
+  if (!iso) return 'nunca';
+  const seconds = Math.round((Date.now() - Date.parse(iso)) / 1000);
+  if (Number.isNaN(seconds)) return 'desconocido';
+  if (seconds < 60) return `hace ${seconds}s`;
+  if (seconds < 3600) return `hace ${Math.round(seconds / 60)} min`;
+  if (seconds < 86_400) return `hace ${Math.round(seconds / 3600)} h`;
+  return `hace ${Math.round(seconds / 86_400)} d`;
+};

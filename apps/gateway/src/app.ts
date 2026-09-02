@@ -5,6 +5,7 @@
  * con una identidad interna firmada, y la cookie no cruza esa frontera (ADR-001).
  */
 import { randomUUID } from 'node:crypto';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { config } from './config.js';
 import { parseCookies, session, SESSION_COOKIE } from './lib/session.js';
@@ -18,8 +19,9 @@ const CORE_PREFIXES = ['/api', '/events'];
 const isCorePath = (pathname: string): boolean =>
   CORE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
-export function currentUser(request: FastifyRequest): SessionUser | null {
-  const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+/** La sesión se resuelve desde las cabeceras, vengan de Fastify o del servidor crudo. */
+export function userFromHeaders(cookieHeader: string | undefined): SessionUser | null {
+  const token = parseCookies(cookieHeader)[SESSION_COOKIE];
   if (!token) return null;
   const claims = session.read(token);
   if (!claims) return null;
@@ -29,41 +31,66 @@ export function currentUser(request: FastifyRequest): SessionUser | null {
   return { sub: claims.sub, username: user.username };
 }
 
+export const currentUser = (request: FastifyRequest): SessionUser | null =>
+  userFromHeaders(request.headers.cookie);
+
 export function buildGateway(options: { logger?: boolean } = {}): FastifyInstance {
+  /**
+   * El proxy hacia el core se resuelve en el servidor HTTP, antes que Fastify.
+   *
+   * Es la única forma de reenviar el cuerpo tal cual: en cuanto el framework mira la petición,
+   * el stream deja de estar donde el proxy lo espera y la llamada se cuelga esperando bytes que
+   * ya nadie va a mandar. Y es también lo que permite subir un adjunto de 20 MiB sin que el
+   * gateway lo acumule en memoria.
+   */
+  const handleRaw = (req: IncomingMessage, res: ServerResponse, fastifyHandler: (req: IncomingMessage, res: ServerResponse) => void): void => {
+    let pathname: string;
+    try {
+      pathname = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).pathname;
+    } catch {
+      res.writeHead(400).end();
+      return;
+    }
+    if (!isCorePath(pathname)) {
+      fastifyHandler(req, res);
+      return;
+    }
+    const requestId = `req_${randomUUID()}`;
+    const user = userFromHeaders(req.headers.cookie);
+    if (!user) {
+      const body = JSON.stringify({
+        error: { code: 'UNAUTHENTICATED', message: 'authentication required', retryable: false, requestId },
+      });
+      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+      return;
+    }
+    proxyToCore(req, res, { path: pathname, user: { userId: user.sub, username: user.username }, requestId });
+  };
+
   const app = Fastify({
     logger: options.logger ?? false,
     trustProxy: config.trustProxy,
     disableRequestLogging: true,
     genReqId: () => `req_${randomUUID()}`,
+    // Apagar no puede depender de que todos los clientes se despidan: un socket de terminal
+    // abierto dejaría el contenedor colgado hasta que Docker lo matara por timeout.
+    forceCloseConnections: true,
+    serverFactory: (fastifyHandler) => createServer((req, res) => handleRaw(req, res, fastifyHandler)),
   });
 
   app.get('/healthz', async (_request, reply) => reply.send({ ok: true, service: 'jarvis-gateway' }));
 
   registerAuthRoutes(app, currentUser);
 
-  /**
-   * Todo lo demás. Fastify no participa del cuerpo aquí: el proxy trabaja sobre el stream crudo,
-   * que es lo que permite que SSE y subidas grandes no se acumulen en memoria.
-   */
+  /** Todo lo que no es del core es la aplicación: un solo origen, una sola SPA. */
   app.all('/*', async (request, reply) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
 
-    if (isCorePath(pathname)) {
-      const user = currentUser(request);
-      if (!user) return reply.code(401).send({
-        error: { code: 'UNAUTHENTICATED', message: 'authentication required', retryable: false, requestId: request.id },
-      });
-      reply.hijack();
-      proxyToCore(request.raw, reply.raw, {
-        path: pathname,
-        user: { userId: user.sub, username: user.username },
-        requestId: String(request.id),
-      });
-      return reply;
-    }
-
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-      return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'unknown endpoint', retryable: false, requestId: request.id } });
+      return reply.code(404).send({
+        error: { code: 'NOT_FOUND', message: 'unknown endpoint', retryable: false, requestId: request.id },
+      });
     }
 
     // La SPA se sirve autenticado o no: no lleva datos, y ella misma pide el login. Así hay una

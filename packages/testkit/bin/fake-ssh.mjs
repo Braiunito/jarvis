@@ -15,6 +15,7 @@
  * Raíz de trabajo: $JARVIS_FAKE_SSH_ROOT (por defecto /tmp/jarvis-fake-ssh).
  */
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,14 @@ if (separator < 1) {
 }
 const host = argv[separator - 1];
 const rawCommand = argv.slice(separator + 1).join(' ');
+/**
+ * `-tt` significa «reserva un pseudo-terminal en el otro lado».
+ *
+ * Sin uno de verdad, `tmux attach` responde «open terminal failed: not a terminal» y la terminal
+ * no se puede probar en absoluto. `script` crea ese pty con las mismas herramientas que ya hay en
+ * cualquier Linux, así que el ssh falso lo usa cuando el llamante pide TTY.
+ */
+const wantsTty = argv.includes('-tt');
 
 if (host === 'deadhost' || !HOSTS[host]) {
   process.stderr.write(`Warning: Permanently added '${host}' (ED25519) to the list of known hosts.\n`);
@@ -82,12 +91,16 @@ for (const optional of ['git', 'python3']) {
   }
 }
 
-/** Un tmux por host, cada uno con su socket: list-sessions no ve las sesiones del vecino. */
+/**
+ * Un tmux por host *y por raíz*, cada uno con su socket.
+ *
+ * El host solo no basta: dos suites que corren a la vez usarían el mismo servidor tmux, y el
+ * `kill-server` de la que termina primero se llevaría por delante los runs de la otra.
+ */
+const socketName = `jarvis-${host}-${createHash('sha1').update(ROOT).digest('hex').slice(0, 8)}`;
 if (spec.tmux) {
   const wrapper = join(homeBin, 'tmux');
-  if (!existsSync(wrapper)) {
-    writeFileSync(wrapper, `#!/bin/sh\nexec /usr/bin/tmux -L jarvis-${host} "$@"\n`, { mode: 0o755 });
-  }
+  writeFileSync(wrapper, `#!/bin/sh\nexec /usr/bin/tmux -L ${socketName} "$@"\n`, { mode: 0o755 });
 }
 for (const agent of spec.agents) {
   link(join(here, 'agents', `${agent}.mjs`), join(homeBin, agent));
@@ -103,7 +116,11 @@ const shadowSystemDir = join(hostDir, 'usr-local-bin');
 mkdirSync(shadowSystemDir, { recursive: true });
 const command = rawCommand.split('/usr/local/bin').join(shadowSystemDir);
 
-const child = spawn('/bin/sh', ['-c', command], {
+const [shellBin, shellArgs] = wantsTty
+  ? ['/usr/bin/script', ['-qfec', command, '/dev/null']]
+  : ['/bin/sh', ['-c', command]];
+
+const child = spawn(shellBin, shellArgs, {
   stdio: ['pipe', 'pipe', 'pipe'],
   env: {
     ...process.env,

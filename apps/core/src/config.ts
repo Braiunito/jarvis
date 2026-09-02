@@ -68,6 +68,12 @@ export const config = {
   modelBaseUrl: env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com',
   modelApiKey: env['JARVIS_MODEL_API_KEY'] || '',
   modelName: env['JARVIS_MODEL_NAME'] || 'claude-sonnet-5',
+  /**
+   * Un modelo guionizado en vez del de verdad. Existe para desarrollo y pruebas: deja ejercitar
+   * la durabilidad de un plan sin red, sin credencial y sin gastar cuota.
+   */
+  assistantScripted: bool(env['JARVIS_ASSISTANT_SCRIPTED'], false),
+  planIntervalMs: Number(env['JARVIS_PLAN_INTERVAL_MS'] || 1500),
 
   verbose: bool(env['JARVIS_VERBOSE'], false),
 } as const;

@@ -38,6 +38,9 @@ export default defineConfig({
           name: 'contracts',
           include: ['packages/legacy-contract-tests/test/**/*.test.ts'],
           environment: 'node',
+          // Los contratos del runner arrancan tmux y procesos de verdad: no caben en 5 segundos.
+          testTimeout: 60_000,
+          fileParallelism: false,
         },
       },
       {

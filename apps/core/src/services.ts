@@ -25,6 +25,9 @@ import { AttachmentService } from './attachments/service.js';
 import { UsageService } from './usage/service.js';
 import { HealthService } from './health/service.js';
 import { TerminalService } from './terminal/service.js';
+import { AnthropicModel, ScriptedModel, type AssistantModel } from './assistant/model.js';
+import { PlanService } from './plans/service.js';
+import { PlanSupervisor } from './plans/supervisor.js';
 
 export const VERSION = '0.1.0';
 
@@ -47,6 +50,8 @@ export interface CoreServices {
   usage: UsageService;
   health: HealthService;
   terminal: TerminalService;
+  plans: PlanService;
+  planSupervisor: PlanSupervisor;
   close(): void;
 }
 
@@ -55,6 +60,8 @@ export interface BuildServicesOptions {
   clock?: Clock;
   index?: SessionIndex;
   db?: Db;
+  /** Sólo para tests y desarrollo: un modelo determinista en vez del de verdad. */
+  model?: AssistantModel | null;
   onSupervisorError?: (error: Error, runId: string) => void;
 }
 
@@ -114,15 +121,31 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     ...(options.onSupervisorError ? { onError: options.onSupervisorError } : {}),
   });
 
+  /**
+   * El modelo del Assistant. Sin credencial no hay Assistant, y se dice: es mejor que la interfaz
+   * ofrezca lo que existe a que falle al pulsar.
+   */
+  const model = options.model !== undefined
+    ? options.model
+    : config.modelApiKey
+      ? new AnthropicModel({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName })
+      : config.assistantScripted
+        ? new ScriptedModel()
+        : null;
+
   const usage = new UsageService({ db, clock, sshConfig, ttlMs: config.usageTtlMs, probeTimeoutMs: config.usageProbeTimeoutMs });
   const health = new HealthService({ db, clock, fleet, index, runs: runRepository, version: VERSION });
   const terminal = new TerminalService({ sshConfig, clock, audit, capabilities, bastionHost: config.bastionHost });
+  const plans = new PlanService({ db, clock, runs, workspaces, model, audit });
+  const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
+    plans, planSupervisor,
     close() {
       supervisor.stop();
+      planSupervisor.stop();
       db.close();
     },
   };

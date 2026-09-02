@@ -5,9 +5,10 @@
  * de recuperación que sólo se prueba con dobles no prueba nada: lo que falla en producción es el
  * quoting, los permisos y el orden de escritura.
  */
-import { statSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
   buildCancelCommand, buildPollCommand, buildPrepareCommand, claudeAdapter, defaultSshConfig,
   parsePollOutput, parsePrepareOutput, remoteScript, RunnerError, spoolLayout, sshExec, tmuxRunName,
@@ -15,8 +16,11 @@ import {
 import type { TargetPlan } from '@jarvis/contracts';
 
 const fakeSsh = resolve(import.meta.dirname, '../../testkit/bin/fake-ssh.mjs');
-process.env['JARVIS_FAKE_SSH_ROOT'] = '/tmp/jarvis-contract-runner';
-const SPOOL_ROOT = '/tmp/jarvis-contract-runner/spool';
+// Un directorio por ejecución: un spool heredado de la vez anterior haría que el arranque
+// idempotente respondiera «ya terminó» y el test dejaría de probar nada.
+const ROOT = mkdtempSync(join(tmpdir(), 'jarvis-contract-runner-'));
+process.env['JARVIS_FAKE_SSH_ROOT'] = ROOT;
+const SPOOL_ROOT = join(ROOT, 'spool');
 
 const config = defaultSshConfig({
   sshCommand: fakeSsh, hosts: ['bastion'], bastionHost: 'bastion', knownHostsFile: '',
@@ -65,6 +69,7 @@ async function pollUntil(layout: ReturnType<typeof spoolLayout>, predicate: (p: 
 
 afterAll(async () => {
   await exec('tmux kill-server 2>/dev/null || true');
+  rmSync(ROOT, { recursive: true, force: true });
 });
 
 describe('RUNNER-SPOOL-01: layout y arranque', () => {

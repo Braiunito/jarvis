@@ -1,0 +1,1 @@
+{"version":1,"runId":"rembsyph46k6j9bhp","provider":"claude","target":{"workHost":"bastion","executionHost":"bastion","strategy":"bastion","reason":null,"cwd":"/srv/app","provider":"claude","permissionProfile":"safe"},"createdAt":"2026-09-02T05:25:15.800Z","createdBy":"braian","wrapper":"v1"}

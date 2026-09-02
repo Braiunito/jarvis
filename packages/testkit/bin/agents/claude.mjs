@@ -21,7 +21,29 @@ const directive = (name) => {
   return match ? Number(match[1] ?? 1) : null;
 };
 
+/**
+ * Sin `-p` esto es la CLI interactiva: se queda viva esperando lo que se teclee, que es lo que
+ * hace que una tmux tenga sentido y que se pueda probar el attach de verdad.
+ */
+function interactive() {
+  process.stdout.write('\r\n Claude Code (falso)  sesión ' + sessionId + '  modo ' + permissionMode + '\r\n');
+  process.stdout.write(' > ');
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => {
+    // Eco como haría un TTY, para que el test pueda comprobar que la entrada llegó.
+    process.stdout.write(chunk.replace(/\r/g, '\r\n'));
+    if (chunk.includes('\r') || chunk.includes('\n')) process.stdout.write(' > ');
+  });
+  process.stdin.on('end', () => process.exit(0));
+  setInterval(() => {}, 60_000);
+}
+
 async function main() {
+  if (promptIndex === -1) {
+    interactive();
+    return;
+  }
+
   emit({ type: 'system', subtype: 'init', session_id: sessionId, model: 'claude-opus-5',
     cwd: process.cwd(), permissionMode, tools: ['Bash', 'Read'] });
 

@@ -13,6 +13,7 @@ const app = buildApp({ services, logger: true });
 async function start(): Promise<void> {
   // Reconciliar antes de aceptar escrituras: lo primero es enterarse de qué quedó vivo.
   const reconciled = await services.supervisor.start();
+  services.planSupervisor.start();
   console.log(`jarvis-core ${VERSION} starting`);
   console.log(`  database   : ${config.database}`);
   console.log(`  hosts      : ${config.hosts.join(', ')}`);

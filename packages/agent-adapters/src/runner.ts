@@ -170,15 +170,18 @@ export function parsePrepareOutput(stdout: string): PrepareOutcome {
  * el core, el segundo es identidad pública. Confundirlos es lo que produce duplicados.
  */
 export function buildPollCommand({
-  layout, offset, maxBytes = 512 * 1024,
-}: { layout: SpoolLayout; offset: number; maxBytes?: number }): string {
+  layout, offset, maxBytes = 512 * 1024, stderrTailBytes = 2048,
+}: { layout: SpoolLayout; offset: number; maxBytes?: number; stderrTailBytes?: number }): string {
   if (!Number.isSafeInteger(offset) || offset < 0) throw new RunnerError('offset must be a non-negative integer');
   const events = shellQuote(layout.events);
   return [
     `SIZE=$(wc -c < ${events} 2>/dev/null || echo 0)`,
     `STATUS=$(cat ${shellQuote(layout.status)} 2>/dev/null | base64 | tr -d '\\n' || true)`,
+    // La cola de stderr viaja siempre: cuando un run falla sin escribir un solo evento, esto es
+    // lo único que explica por qué, y pedirlo después sería una segunda vuelta que puede no llegar.
+    `ERR=$(tail -c ${stderrTailBytes} ${shellQuote(layout.stderr)} 2>/dev/null | base64 | tr -d '\\n' || true)`,
     `if tmux has-session -t ${shellQuote(`=${layout.tmuxName}`)} 2>/dev/null; then ALIVE=1; else ALIVE=0; fi`,
-    `printf '${SPOOL_MARKER}\\nsize %s\\nalive %s\\nstatus %s\\ndata\\n' "$SIZE" "$ALIVE" "$${'{'}STATUS:--}"`,
+    `printf '${SPOOL_MARKER}\\nsize %s\\nalive %s\\nstatus %s\\nstderr %s\\ndata\\n' "$SIZE" "$ALIVE" "$${'{'}STATUS:--}" "$${'{'}ERR:--}"`,
     `tail -c +${offset + 1} ${events} 2>/dev/null | head -c ${maxBytes} || true`,
   ].join('\n');
 }
@@ -196,6 +199,8 @@ export interface PollResult {
   size: number;
   alive: boolean;
   status: RemoteStatus | null;
+  /** Cola de `stderr.log`, para poder explicar un fallo que no llegó a producir eventos. */
+  stderr: string;
   chunk: string;
 }
 
@@ -211,10 +216,14 @@ export function parsePollOutput(stdout: string): PollResult {
   let size = 0;
   let alive = false;
   let status: RemoteStatus | null = null;
+  let stderr = '';
   for (const line of header.split('\n')) {
     if (line.startsWith('size ')) size = Number(line.slice(5).trim()) || 0;
     else if (line.startsWith('alive ')) alive = line.slice(6).trim() === '1';
-    else if (line.startsWith('status ')) {
+    else if (line.startsWith('stderr ')) {
+      const encoded = line.slice(7).trim();
+      if (encoded && encoded !== '-') stderr = Buffer.from(encoded, 'base64').toString('utf8');
+    } else if (line.startsWith('status ')) {
       const encoded = line.slice(7).trim();
       if (encoded && encoded !== '-') {
         try {
@@ -227,7 +236,7 @@ export function parsePollOutput(stdout: string): PollResult {
       }
     }
   }
-  return { size, alive, status, chunk };
+  return { size, alive, status, stderr, chunk };
 }
 
 /**

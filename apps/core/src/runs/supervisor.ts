@@ -263,7 +263,7 @@ export class RunSupervisor {
   }
 
   async #finishFromRemote(runId: string, remoteState: NonNullable<PollResult['status']>['state'], poll: PollResult): Promise<void> {
-    const { runs, repository } = this.#deps;
+    const { runs, repository, clock } = this.#deps;
     const current = repository.find(runId) as Run;
     let status = statusToRunStatus(remoteState);
 
@@ -275,12 +275,20 @@ export class RunSupervisor {
 
     const exitCode = poll.status?.exitCode ?? null;
     const failed = status === 'failed';
+    // Un fallo que ocurre antes del primer evento —un cwd que no existe, un binario que no está—
+    // sólo deja rastro en stderr. Sin esto, el operador recibe «salió con código 2» y a buscarse
+    // la vida.
+    const stderrTail = poll.stderr.trim().split('\n').filter(Boolean).at(-1) ?? null;
+    const extraEvents = failed && stderrTail
+      ? [{ type: 'agent.error' as const, at: clock.nowIso(), payload: { message: stderrTail, code: 'AGENT_FAILED' } }]
+      : [];
     runs.transition(runId, status, {
       reason: `runner reported ${remoteState}`,
       exitCode,
+      ...(extraEvents.length ? { extraEvents } : {}),
       ...(failed ? {
         errorCode: current.errorCode ?? 'AGENT_FAILED',
-        errorMessage: current.errorMessage ?? `the agent exited with code ${String(exitCode)}`,
+        errorMessage: current.errorMessage ?? stderrTail ?? `the agent exited with code ${String(exitCode)}`,
       } : {}),
       ...(current.resultOk === null && status === 'completed' ? { resultOk: true } : {}),
     });

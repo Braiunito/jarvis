@@ -57,6 +57,18 @@ export const killSessionCommand = (name: string): string => {
   return `tmux kill-session -t ${shellQuote(sessionTarget(name))}`;
 };
 
+/**
+ * Despedirse del cliente antes de cerrar el transporte.
+ *
+ * Matar el proceso del attach a lo bruto deja al servidor tmux con un cliente cuyo terminal se
+ * evaporó, y en esa situación se ha visto llevarse la sesión por delante. Un `detach-client` es
+ * una línea y convierte «desconectar» en lo que dice ser: dejar de mirar.
+ */
+export const detachClientCommand = (name: string): string => {
+  assertOurs(name);
+  return `tmux detach-client -s ${shellQuote(sessionTarget(name))} 2>/dev/null || true`;
+};
+
 export const listSessionsCommand = (): string => {
   const format = '#{session_name}\t#{session_created}\t#{session_attached}\t#{session_windows}';
   return `tmux list-sessions -F ${shellQuote(format)} 2>/dev/null || true`;

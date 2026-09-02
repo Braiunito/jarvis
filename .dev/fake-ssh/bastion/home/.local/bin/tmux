@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/tmux -L jarvis-bastion-19ac7723 "$@"

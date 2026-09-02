@@ -16,6 +16,8 @@ import { registerAttachmentRoutes } from './attachments/routes.js';
 import { registerUsageRoutes } from './usage/routes.js';
 import { registerHealthRoutes } from './health/routes.js';
 import { registerTerminalRoutes } from './terminal/routes.js';
+import { registerPlanRoutes } from './plans/routes.js';
+import { closeAllTerminals, handleTerminalUpgrade } from './terminal/gateway-upgrade.js';
 import type { CoreServices } from './services.js';
 
 declare module 'fastify' {
@@ -36,6 +38,9 @@ export function buildApp({ services, logger = false, trustAllIdentities = false 
     logger,
     genReqId: () => newRequestId(),
     bodyLimit: 2 * 1024 * 1024,
+    // Apagar no puede depender de que todos los clientes se despidan: un socket de terminal
+    // abierto dejaría el contenedor colgado hasta que Docker lo matara por timeout.
+    forceCloseConnections: true,
   });
 
   /**
@@ -107,6 +112,26 @@ export function buildApp({ services, logger = false, trustAllIdentities = false 
   registerAttachmentRoutes(app, services);
   registerUsageRoutes(app, services);
   registerTerminalRoutes(app, services);
+  registerPlanRoutes(app, services);
+
+  /**
+   * La terminal es lo único bidireccional del producto, y por eso lo único que usa WebSocket.
+   * El upgrade se atiende sobre el servidor crudo: a partir del 101 esto ya no es HTTP.
+   */
+  app.server.on('upgrade', (request, socket, head) => {
+    handleTerminalUpgrade(request, socket, head, {
+      sshConfig: services.sshConfig,
+      audit: services.audit,
+      allowedHosts: services.config.hosts,
+      ...(trustAllIdentities ? { trustAllIdentities: true } : {}),
+    });
+  });
+
+  // Apagar es apagar: los sockets de terminal se cierran a propósito en vez de dejar que el
+  // proceso muera por timeout con ellos abiertos.
+  app.addHook('onClose', async () => {
+    closeAllTerminals();
+  });
 
   return app;
 }

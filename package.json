@@ -22,7 +22,10 @@
     "dev:core": "node --experimental-strip-types apps/core/src/main.ts",
     "dev:gateway": "node --experimental-strip-types apps/gateway/src/main.ts",
     "dev:web": "npm run -w @jarvis/web dev",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "dev:local": "node scripts/dev-local.mjs",
+    "dev:user": "JARVIS_DATA_DIR=$PWD/.dev/gateway node apps/gateway/dist/bin/jarvis-users.js",
+    "build:apps": "tsc -b tsconfig.build.json && npm run -w @jarvis/web build"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

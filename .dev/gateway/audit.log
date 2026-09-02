@@ -1,0 +1,6 @@
+{"at":"2026-09-02T05:13:14.746Z","event":"login.success.insecure","username":"braian","ip":"127.0.0.1","steps":["password"],"insecure":true}
+{"at":"2026-09-02T05:13:58.666Z","event":"login.success.insecure","username":"braian","ip":"127.0.0.1","steps":["password"],"insecure":true}
+{"at":"2026-09-02T05:18:19.695Z","event":"login.success.insecure","username":"braian","ip":"127.0.0.1","steps":["password"],"insecure":true}
+{"at":"2026-09-02T05:20:26.296Z","event":"login.success.insecure","username":"braian","ip":"127.0.0.1","steps":["password"],"insecure":true}
+{"at":"2026-09-02T05:22:24.647Z","event":"login.success.insecure","username":"braian","ip":"127.0.0.1","steps":["password"],"insecure":true}
+{"at":"2026-09-02T05:23:53.621Z","event":"login.success.insecure","username":"braian","ip":"127.0.0.1","steps":["password"],"insecure":true}
