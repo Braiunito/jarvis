@@ -13,6 +13,7 @@ import { Command } from 'cmdk';
 import { useHosts, useOpenWorkspace, useSessions, useWorkspaces } from '../api/queries.js';
 import { navigate } from '../router.js';
 import { relativeTime } from './bits.jsx';
+import { ACTION_ICON, Glyph, NAV_ICON } from './icons.jsx';
 
 /** Abrir la paleta desde cualquier parte, sin pasar el estado por media aplicación. */
 export const openCommandPalette = (): void => {
@@ -85,7 +86,10 @@ export function CommandPalette(): JSX.Element | null {
                   value={`${workspace.title ?? ''} ${workspace.ref.sessionId} ${workspace.ref.host}`}
                   onSelect={() => go(`/w/${workspace.id}`)}
                 >
-                  <span>{workspace.title ?? workspace.ref.sessionId}</span>
+                  <span className="row" style={{ gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
+                    <Glyph icon={ACTION_ICON.open} />
+                    <span className="palette-label">{workspace.title ?? workspace.ref.sessionId}</span>
+                  </span>
                   <span className="palette-hint">
                     {workspace.ref.provider} · {workspace.ref.host} · {relativeTime(workspace.lastOpenedAt)}
                   </span>
@@ -110,7 +114,10 @@ export function CommandPalette(): JSX.Element | null {
                         }).then((result) => go(`/w/${result.workspace.id}`));
                       }}
                     >
-                      <span>{session.title ?? session.ref.sessionId}</span>
+                      <span className="row" style={{ gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
+                        <Glyph icon={ACTION_ICON.session} />
+                        <span className="palette-label">{session.title ?? session.ref.sessionId}</span>
+                      </span>
                       <span className="palette-hint">
                         abrir · {session.ref.provider} · {session.ref.host}
                       </span>
@@ -126,17 +133,36 @@ export function CommandPalette(): JSX.Element | null {
                   value={`terminal ${host.host}`}
                   onSelect={() => go(`/terminal?host=${encodeURIComponent(host.host)}`)}
                 >
-                  <span>Terminal en {host.host}</span>
+                  <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                    <Glyph icon={NAV_ICON.terminal} />
+                    Terminal en {host.host}
+                  </span>
                   <span className="palette-hint">{host.providers.join(', ') || 'sin agentes'}</span>
                 </Command.Item>
               ))}
             </Command.Group>
 
             <Command.Group heading="Ir a">
-              <Command.Item value="inicio portada" onSelect={() => go('/')}>Inicio</Command.Item>
-              <Command.Item value="sesiones buscar" onSelect={() => go('/sessions')}>Buscar sesiones</Command.Item>
-              <Command.Item value="runs trabajo" onSelect={() => go('/runs')}>Trabajo en curso</Command.Item>
-              <Command.Item value="salud diagnostico" onSelect={() => go('/health')}>Salud y diagnóstico</Command.Item>
+              <Command.Item value="inicio portada" onSelect={() => go('/')}>
+                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                  <Glyph icon={NAV_ICON.home} />Inicio
+                </span>
+              </Command.Item>
+              <Command.Item value="sesiones buscar" onSelect={() => go('/sessions')}>
+                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                  <Glyph icon={NAV_ICON.sessions} />Buscar sesiones
+                </span>
+              </Command.Item>
+              <Command.Item value="runs trabajo" onSelect={() => go('/runs')}>
+                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                  <Glyph icon={NAV_ICON.runs} />Trabajo en curso
+                </span>
+              </Command.Item>
+              <Command.Item value="salud diagnostico" onSelect={() => go('/health')}>
+                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                  <Glyph icon={NAV_ICON.health} />Salud y diagnóstico
+                </span>
+              </Command.Item>
             </Command.Group>
           </Command.List>
         </Command>

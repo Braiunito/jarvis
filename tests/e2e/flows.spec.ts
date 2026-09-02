@@ -21,7 +21,7 @@ async function login(page: Page): Promise<void> {
 async function openWorkspace(page: Page, title: string): Promise<string> {
   await page.getByRole('link', { name: 'Sesiones' }).click();
   await page.getByRole('button', { name: new RegExp(title, 'i') }).click();
-  await page.getByRole('button', { name: /workspace/i }).click();
+  await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
   await expect(page).toHaveURL(/\/w\//);
   return page.url();
 }
@@ -43,7 +43,7 @@ test('flujo 1 · retomar trabajo: buscar, previsualizar y abrir', async ({ page 
   await page.getByRole('button', { name: /timeout del pool/i }).click();
   await expect(page.getByText('el pool se queda sin conexiones')).toBeVisible();
 
-  await page.getByRole('button', { name: /workspace/i }).click();
+  await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
   await expect(page).toHaveURL(/\/w\//);
   // El transcript remoto se ve, y dice de dónde salió.
   await expect(page.getByText('escrito en la máquina').first()).toBeVisible();

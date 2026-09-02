@@ -39,7 +39,7 @@ Entran, y sólo cuando llegue el ticket que las necesita:
 | primitivas accesibles (diálogo, menú, popover, tabs) | **Radix Primitives**, por componente | estable, publicado hace semanas, y se instala uno a uno: `react-dialog` son ~15 KiB, no un framework |
 | paleta de comandos (UX-04) | **cmdk** | resuelve filtrado, teclado y accesibilidad de una lista de comandos; escribirlo bien cuesta más que 6 KiB |
 | listas largas (explorador de sesiones) | **@tanstack/react-virtual** | mismo autor que la capa de datos que ya usamos, sin estilos impuestos |
-| iconos | **lucide-react**, importados uno a uno | el bundler sólo se lleva los que se usan |
+| iconos | **lucide-react**, importados uno a uno | ISC, 6.144 iconos publicados y el bundler sólo se lleva los que se usan |
 
 No entran:
 
@@ -62,6 +62,22 @@ No entran:
    gzip, algo se queda fuera.
 4. Lo que se adopte no dicta el aspecto: los tokens, el tema y los tamaños táctiles siguen siendo
    nuestros. Las primitivas ponen el comportamiento accesible, no el diseño.
+
+## Altas efectuadas
+
+| Fecha | Paquete | Versión | Coste en bundle | Ticket |
+|---|---|---|---|---|
+| 2026-09-02 | `cmdk` | 1.1.1 | 156 → 176 KiB gzip | UX-04, paleta de comandos |
+| 2026-09-02 | `lucide-react` | 1.39.0 | 176 → 180 KiB gzip (≈40 iconos) | iconografía |
+
+El coste de los iconos es de 4 KiB para cuarenta siluetas porque se importan por nombre y el
+paquete es ESM: sólo viaja lo que se usa. Importar `import * as icons` costaría el paquete entero,
+así que no se hace.
+
+Dónde se usan y por qué ahí, en `apps/web/src/ui/icons.tsx`: la regla es que un icono acompaña al
+texto y nunca lo sustituye, salvo en la barra estrecha del móvil, donde el botón lleva su etiqueta
+accesible. Los estados —de trabajo, de plan, de salud— llevan icono **además** de color, para que
+distinguir «terminado» de «falló» no dependa de ver bien el verde y el rojo.
 
 ## Consecuencias
 

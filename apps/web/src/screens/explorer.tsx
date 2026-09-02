@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { useOpenWorkspace, useSessions } from '../api/queries.js';
 import { navigate } from '../router.js';
 import { Empty, ErrorNote, Loading, StaleNote, relativeTime } from '../ui/bits.jsx';
+import { ACTION_ICON, Glyph, NAV_ICON } from '../ui/icons.jsx';
 import type { SessionSummary } from '@jarvis/contracts';
 
 export function ExplorerScreen(): JSX.Element {
@@ -31,10 +32,11 @@ export function ExplorerScreen(): JSX.Element {
   return (
     <div className="page">
       <div className="card">
-        <div className="row">
+        <div className="row search-row">
+          <Glyph icon={NAV_ICON.sessions} size={17} className="search-glyph" />
           <input
             className="input"
-            style={{ flex: '1 1 260px' }}
+            style={{ flex: '1 1 240px' }}
             placeholder="Buscar en prompts y respuestas…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -103,6 +105,7 @@ export function ExplorerScreen(): JSX.Element {
               </dl>
               <button type="button" className="btn primary" disabled={open.isPending}
                 onClick={() => void openSession(selected)}>
+                <Glyph icon={ACTION_ICON.open} />
                 {open.isPending ? 'Abriendo…' : selected.workspaceId ? 'Ir al workspace' : 'Abrir workspace'}
               </button>
               <ErrorNote error={open.error} />

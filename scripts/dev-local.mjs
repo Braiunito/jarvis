@@ -37,6 +37,9 @@ const coreEnv = {
   JARVIS_ATTACHMENT_ROOT: join(state, 'attachments'),
   JARVIS_INDEX_URL: 'http://127.0.0.1:8765',
   JARVIS_POLL_INTERVAL_MS: '400',
+  // Un modelo guionizado para poder probar el Assistant en local sin credencial ni cuota.
+  JARVIS_ASSISTANT_SCRIPTED: 'true',
+  JARVIS_PLAN_INTERVAL_MS: '800',
 };
 
 const gatewayEnv = {

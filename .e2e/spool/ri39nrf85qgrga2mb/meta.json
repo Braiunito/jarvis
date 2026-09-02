@@ -1,0 +1,1 @@
+{"version":1,"runId":"ri39nrf85qgrga2mb","provider":"claude","target":{"workHost":"bastion","executionHost":"bastion","strategy":"bastion","reason":null,"cwd":"/tmp/jarvis-demo/app","provider":"claude","permissionProfile":"safe"},"createdAt":"2026-09-02T13:28:29.257Z","createdBy":"braian","wrapper":"v1"}

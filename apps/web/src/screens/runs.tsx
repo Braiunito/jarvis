@@ -10,6 +10,7 @@ import { useCancelRun, useRetryRun, useRun, useRuns } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import { ErrorNote, Empty, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
 import { EVENT_KIND, PERMISSION } from '../ui/labels.js';
+import { ACTION_ICON, Glyph, PERMISSION_ICON } from '../ui/icons.jsx';
 
 export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Element {
   const runs = useRuns();
@@ -104,17 +105,30 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                       : 'en la propia máquina'}
                     {detail.data.run.strategyReason ? ` · ${detail.data.run.strategyReason}` : ''}
                   </dd>
-                  <dt className="muted">Podía</dt><dd style={{ margin: 0 }}>{PERMISSION[detail.data.run.permissionProfile].name}</dd>
+                  <dt className="muted">Podía</dt>
+                  <dd className="row" style={{ margin: 0, gap: 6 }}>
+                    <Glyph icon={PERMISSION_ICON[detail.data.run.permissionProfile]} />
+                    {PERMISSION[detail.data.run.permissionProfile].name}
+                  </dd>
                   <dt className="muted">Creado</dt><dd style={{ margin: 0 }}>{new Date(detail.data.run.createdAt).toLocaleString()}</dd>
                   {detail.data.run.finishedAt ? (<><dt className="muted">Terminado</dt><dd style={{ margin: 0 }}>{new Date(detail.data.run.finishedAt).toLocaleString()}</dd></>) : null}
                   {detail.data.run.errorCode ? (<><dt className="muted">Error</dt><dd style={{ margin: 0 }}>{detail.data.run.errorCode}</dd></>) : null}
                 </dl>
                 <div className="row">
-                  <Link to={`/w/${detail.data.run.workspaceId}`} className="btn small">Ir al workspace</Link>
+                  <Link to={`/w/${detail.data.run.workspaceId}`} className="btn small">
+                    <Glyph icon={ACTION_ICON.open} />
+                    Ir al workspace
+                  </Link>
                   {['queued', 'preparing', 'running', 'waiting'].includes(detail.data.run.status) ? (
-                    <button type="button" className="btn small danger" onClick={() => cancel.mutate(detail.data.run.id)}>Parar</button>
+                    <button type="button" className="btn small danger" onClick={() => cancel.mutate(detail.data.run.id)}>
+                      <Glyph icon={ACTION_ICON.stop} />
+                      Parar
+                    </button>
                   ) : (
-                    <button type="button" className="btn small" onClick={() => retry.mutate(detail.data.run.id)}>Reintentar</button>
+                    <button type="button" className="btn small" onClick={() => retry.mutate(detail.data.run.id)}>
+                      <Glyph icon={ACTION_ICON.retry} />
+                      Reintentar
+                    </button>
                   )}
                 </div>
                 <ErrorNote error={cancel.error ?? retry.error} />

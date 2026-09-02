@@ -11,6 +11,7 @@ import { get, post, UnauthenticatedError } from './api/client.js';
 import { useRoute } from './router.js';
 import { Link } from './ui/bits.jsx';
 import { CommandPalette, openCommandPalette } from './ui/command-palette.jsx';
+import { ACTION_ICON, Glyph, NAV_ICON } from './ui/icons.jsx';
 import { useRuns } from './api/queries.js';
 import { LoginScreen } from './screens/login.jsx';
 import { HomeScreen } from './screens/home.jsx';
@@ -73,31 +74,52 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
       <header className="topbar">
         <span className="brand">Jarvis</span>
         <nav className="nav" aria-label="Secciones">
-          <Link to="/" aria-current={current('/')}>Inicio</Link>
-          <Link to="/sessions" aria-current={current('/sessions')}>Sesiones</Link>
+          <Link to="/" aria-current={current('/')}>
+            <Glyph icon={NAV_ICON.home} size={17} />
+            <span className="nav-text">Inicio</span>
+          </Link>
+          <Link to="/sessions" aria-current={current('/sessions')}>
+            <Glyph icon={NAV_ICON.sessions} size={17} />
+            <span className="nav-text">Sesiones</span>
+          </Link>
           <Link to="/runs" aria-current={current('/runs')}>
-            Trabajo
+            <Glyph icon={NAV_ICON.runs} size={17} />
+            <span className="nav-text">Trabajo</span>
             {attention > 0 ? (
               <span className="count attention" title={`${attention} necesitan que mires`}>{attention}</span>
             ) : working > 0 ? (
               <span className="count" title={`${working} en marcha`}>{working}</span>
             ) : null}
           </Link>
-          <Link to="/terminal" aria-current={current('/terminal')}>Terminal</Link>
-          <Link to="/health" aria-current={current('/health')}>Salud</Link>
+          <Link to="/terminal" aria-current={current('/terminal')}>
+            <Glyph icon={NAV_ICON.terminal} size={17} />
+            <span className="nav-text">Terminal</span>
+          </Link>
+          <Link to="/health" aria-current={current('/health')}>
+            <Glyph icon={NAV_ICON.health} size={17} />
+            <span className="nav-text">Salud</span>
+          </Link>
         </nav>
         <div className="topbar-right">
           <button type="button" className="btn small palette-button" onClick={openCommandPalette}
-            title="Ir a un workspace, una sesión o un host">
-            Ir a… <span className="kbd">Ctrl K</span>
+            title="Buscar y saltar a cualquier sitio (Ctrl+K)">
+            <Glyph icon={NAV_ICON.sessions} />
+            <span className="palette-button-text">Ir a…</span>
+            <span className="kbd">Ctrl K</span>
           </button>
           {me.insecureLogin ? (
-            <span className="badge warn" title="La entrada por contraseña sobre HTTP sigue abierta">
-              HTTP sin cifrar
+            <span className="badge warn insecure-badge" role="status"
+              title="La entrada por contraseña sobre HTTP sigue abierta: todo viaja en claro">
+              <Glyph icon={ACTION_ICON.insecure} />
+              <span className="insecure-text">HTTP sin cifrar</span>
+              <span className="visually-hidden">La conexión no está cifrada</span>
             </span>
           ) : null}
-          <span className="small muted">{me.user.displayName}</span>
-          <button type="button" className="btn small" onClick={onLogout}>Salir</button>
+          <span className="small muted topbar-user">{me.user.displayName}</span>
+          <button type="button" className="btn small" onClick={onLogout}>
+            <Glyph icon={ACTION_ICON.logout} />
+            <span className="logout-text">Salir</span>
+          </button>
         </div>
       </header>
       <main>{content}</main>

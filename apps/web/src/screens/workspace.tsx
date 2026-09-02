@@ -18,6 +18,7 @@ import { useRunStream } from '../api/run-stream.js';
 import { ErrorNote, Link, Loading, RunStatusBadge, StaleNote, TargetChip, relativeTime } from '../ui/bits.jsx';
 import { AssistantPanel } from '../ui/assistant.jsx';
 import { EVENT_KIND, PERMISSION, PROVENANCE } from '../ui/labels.js';
+import { ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVENANCE_ICON } from '../ui/icons.jsx';
 
 const PROFILES: PermissionProfile[] = ['safe', 'auto', 'yolo'];
 
@@ -26,6 +27,25 @@ const draftMirrorKey = (workspaceId: string): string => `jarvis.draft.${workspac
 
 function eventText(event: RunEvent): string {
   const payload = event.payload as Record<string, unknown>;
+  // El primer evento es el destino con el que se lanzó. Enseñarlo en crudo obliga a leer JSON
+  // para saber algo que cabe en una línea.
+  if (event.type === 'run.target') {
+    const target = payload['target'] as {
+      executionHost: string; workHost: string; strategy: string; cwd: string | null;
+      provider: string; permissionProfile: PermissionProfile;
+    } | undefined;
+    if (!target) return JSON.stringify(payload);
+    const where = target.strategy === 'A'
+      ? `${target.provider} en ${target.executionHost}, trabajando sobre ${target.workHost}`
+      : `${target.provider} en ${target.executionHost}`;
+    const attachments = Array.isArray(payload['attachmentIds']) ? (payload['attachmentIds'] as unknown[]).length : 0;
+    return [
+      where,
+      PERMISSION[target.permissionProfile].name.toLowerCase(),
+      target.cwd ?? 'sin directorio de trabajo',
+      attachments ? `${attachments} adjunto(s)` : null,
+    ].filter(Boolean).join(' · ');
+  }
   if (typeof payload?.['text'] === 'string') return payload['text'] as string;
   if (event.type === 'agent.tool') {
     const tool = payload['tool'] as { name?: string; status?: string; output?: string; truncated?: boolean };
@@ -155,7 +175,10 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   onChange={(event) => setEditingTitle(event.target.value)}
                   onKeyDown={(event) => { if (event.key === 'Escape') setEditingTitle(null); }}
                 />
-                <button type="submit" className="btn small primary">Guardar</button>
+                <button type="submit" className="btn small primary">
+                  <Glyph icon={ACTION_ICON.approve} />
+                  Guardar
+                </button>
               </form>
             )}
             <p className="small muted mono" style={{ margin: 0 }}>
@@ -172,7 +195,10 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
               </span>
             ) : null}
             <Link to={`/terminal?host=${encodeURIComponent(workspace.ref.host)}&provider=${workspace.ref.provider}&sessionId=${encodeURIComponent(workspace.ref.sessionId)}`}
-              className="btn small">Terminal</Link>
+              className="btn small">
+              <Glyph icon={NAV_ICON.terminal} />
+              Terminal
+            </Link>
           </div>
         </div>
       </div>
@@ -192,6 +218,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   {!stream.connected && !stream.ended ? <span className="badge warn">reconectando…</span> : null}
                   {['queued', 'preparing', 'running', 'waiting'].includes(activeRun.status) ? (
                     <button type="button" className="btn small danger" onClick={() => cancelRun.mutate(activeRun.id)}>
+                      <Glyph icon={ACTION_ICON.stop} />
                       Parar
                     </button>
                   ) : null}
@@ -251,11 +278,15 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
               </label>
               <button type="button" className="btn primary" disabled={createRun.isPending || !body.trim()}
                 onClick={() => void send()}>
+                <Glyph icon={ACTION_ICON.send} />
                 {createRun.isPending ? 'Enviando…' : 'Enviar'}
               </button>
             </div>
             <ErrorNote error={createRun.error} />
-            <p className="small muted" style={{ margin: 0 }}>{PERMISSION[profile].help}</p>
+            <p className="small muted permission-help" style={{ margin: 0 }}>
+              <Glyph icon={PERMISSION_ICON[profile]} />
+              <span>{PERMISSION[profile].help}</span>
+            </p>
           </div>
         </div>
 
@@ -275,7 +306,10 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                 <div key={index} className={`message ${message.role}`}>
                   <div className="who">
                     <span>{message.role}</span>
-                    <span className="badge neutral">{PROVENANCE[message.provenance] ?? message.provenance}</span>
+                    <span className="badge neutral">
+                      <Glyph icon={PROVENANCE_ICON[message.provenance] ?? PROVENANCE_ICON['system'] as never} size={13} />
+                      {PROVENANCE[message.provenance] ?? message.provenance}
+                    </span>
                     {message.at ? <span>{new Date(message.at).toLocaleString()}</span> : null}
                   </div>
                   <div className="body">{message.text}</div>
@@ -296,7 +330,10 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   <span className="row">
                     <RunStatusBadge status={run.status} />
                     <span className="small muted mono">{run.id.slice(0, 8)}</span>
-                    <span className="badge neutral">{PERMISSION[run.permissionProfile].name}</span>
+                    <span className="badge neutral">
+                      <Glyph icon={PERMISSION_ICON[run.permissionProfile]} size={13} />
+                      {PERMISSION[run.permissionProfile].name}
+                    </span>
                   </span>
                   <span className="small muted">{relativeTime(run.createdAt)}</span>
                 </button>

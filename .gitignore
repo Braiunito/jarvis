@@ -11,3 +11,4 @@ deploy/data/
 *.db
 *.db-wal
 *.db-shm
+evidence/*.png

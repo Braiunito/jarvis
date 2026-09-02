@@ -102,3 +102,18 @@ export const EVENT_KIND: Record<string, string> = {
   'agent.error': 'error',
   'agent.raw': 'salida sin clasificar',
 };
+
+/**
+ * Los checks de salud se identifican por una clave técnica —la que va en «copiar diagnóstico» y
+ * la que se nombra al pedir ayuda—, pero al lado conviene decir qué es cada cosa.
+ */
+export function checkName(key: string): { title: string; id: string } {
+  if (key.startsWith('ssh:')) return { title: `Conexión con ${key.slice(4)}`, id: key };
+  const known: Record<string, string> = {
+    database: 'Base de datos del core',
+    aisessions: 'Índice de sesiones',
+    runs: 'Trabajos en curso',
+    runnerSweep: 'Limpieza de spools',
+  };
+  return { title: known[key] ?? key, id: key };
+}

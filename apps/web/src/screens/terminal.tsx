@@ -13,6 +13,7 @@ import type { Provider } from '@jarvis/contracts';
 import { post } from '../api/client.js';
 import { useHosts, useTerminals } from '../api/queries.js';
 import { ErrorNote, relativeTime } from '../ui/bits.jsx';
+import { ACTION_ICON, Glyph, NAV_ICON, RUN_STATUS_ICON } from '../ui/icons.jsx';
 
 /** Las teclas que un teléfono no tiene y una terminal necesita. */
 const MOBILE_KEYS: Array<{ label: string; bytes: string }> = [
@@ -145,11 +146,13 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
             </select>
           </label>
           <button type="button" className="btn primary" onClick={() => void open()} disabled={!host}>
+            <Glyph icon={attached ? ACTION_ICON.retry : ACTION_ICON.connect} />
             {attached ? 'Reconectar' : 'Conectar'}
           </button>
           {attached ? (
             <span className={`badge ${connected ? 'ok' : 'warn'}`}>
-              <span className="dot" aria-hidden="true" />{connected ? 'conectada' : 'desconectada'}
+              <Glyph icon={connected ? ACTION_ICON.connect : RUN_STATUS_ICON.cancelling} />
+              {connected ? 'conectada' : 'desconectada'}
             </span>
           ) : null}
           {attached ? <span className="small muted mono">{attached.name}</span> : null}
@@ -180,7 +183,10 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
               <button key={session.name} type="button" className="list-item"
                 onClick={() => setAttached({ name: session.name, host: session.host })}>
                 <span className="row">
-                  <span className={`badge ${session.kind === 'run' ? 'running' : 'neutral'}`}>{session.kind}</span>
+                  <span className={`badge ${session.kind === 'run' ? 'running' : 'neutral'}`}>
+                    <Glyph icon={session.kind === 'run' ? RUN_STATUS_ICON.running : NAV_ICON.terminal} size={13} />
+                    {session.kind === 'run' ? 'trabajo' : 'interactiva'}
+                  </span>
                   <span className="mono small">{session.name}</span>
                   {session.attached ? <span className="badge warn">alguien mirando</span> : null}
                 </span>

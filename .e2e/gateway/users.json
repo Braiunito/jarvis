@@ -2,12 +2,12 @@
   "version": 1,
   "users": [
     {
-      "userId": "hpJh14JhHTNfKZGrY_JZbGGLFEX7OpImscaAPMaxTyU",
+      "userId": "pY792BhuB6_yikYPbX6oP_ntkhk29jLjFnWJDjR-Y0w",
       "username": "braian",
       "displayName": "Braian",
       "enabled": true,
-      "createdAt": "2026-09-02T06:54:31.041Z",
-      "passwordHash": "scrypt$16384$8$1$z1SwDJ9M9C7H2iwWiIa6xQ==$T1vAmxtvX6VD/wsvtvMhL7zjzi5Vz6ftDwdW+4qF3kHey8ecLIw64hfVIBEkdIGPXAde1879WyJf6t5X0W86hQ==",
+      "createdAt": "2026-09-02T13:28:09.306Z",
+      "passwordHash": "scrypt$16384$8$1$d4hsQ0G1zgptmsDKY+asIg==$o4tkqcdo7uD/spUsMKElJLmIBxzDTCWNeKZB950hpP+ZEX0ZhsLdCBhTZggwBAfyFDe5yjTS7uGlWmkiK2gMDQ==",
       "credentials": [],
       "enrollment": null,
       "totp": null

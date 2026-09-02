@@ -8,12 +8,15 @@ import type { JSX, ReactNode } from 'react';
 import type { HostFreshness, Run, RunStatus, TargetPlan } from '@jarvis/contracts';
 import { navigate } from '../router.js';
 import { PERMISSION, RUN_STATUS } from './labels.js';
+import { ACTION_ICON, Glyph, PERMISSION_ICON, RUN_STATUS_ICON } from './icons.jsx';
 
 export function RunStatusBadge({ status }: { status: RunStatus }): JSX.Element {
   const label = RUN_STATUS[status];
+  // El icono es la mitad del mensaje: sin él, «trabajando» y «falló» sólo se diferencian por el
+  // color, y eso deja fuera a quien no lo distingue.
   return (
     <span className={`badge ${label.tone}`} title={label.help}>
-      <span className="dot" aria-hidden="true" />
+      <Glyph icon={RUN_STATUS_ICON[status]} className={status === 'running' ? 'spin' : undefined} />
       {label.name}
     </span>
   );
@@ -37,6 +40,7 @@ export function TargetChip({ target }: { target: TargetPlan | undefined }): JSX.
         {target.provider} · {strategy}
       </span>
       <span className={`badge ${permission.tone}`} title={permission.help}>
+        <Glyph icon={PERMISSION_ICON[target.permissionProfile]} />
         {permission.name}
       </span>
       {target.cwd ? <span className="badge neutral mono">{target.cwd}</span> : null}
@@ -49,7 +53,7 @@ export function StaleNote({ freshness, stale }: { freshness?: HostFreshness[]; s
   if (!stale && failed.length === 0) return null;
   return (
     <p className="stale-note" role="status">
-      <span aria-hidden="true">⚠</span>
+      <Glyph icon={ACTION_ICON.timer} size={16} />
       <span>
         {stale ? 'Estos datos son los últimos buenos conocidos. ' : ''}
         {failed.map((host) => `${host.host}: ${host.error ?? 'sin sincronizar'}`).join(' · ')}
@@ -63,7 +67,10 @@ export function ErrorNote({ error, action }: { error: unknown; action?: ReactNod
   const typed = error as { code?: string; message?: string; requestId?: string; retryable?: boolean };
   return (
     <div className="error-note" role="alert">
-      <strong>{typed.code ?? 'ERROR'}</strong>
+      <strong className="row" style={{ gap: 6 }}>
+        <Glyph icon={ACTION_ICON.error} size={16} />
+        {typed.code ?? 'ERROR'}
+      </strong>
       <p style={{ margin: '4px 0' }}>{typed.message ?? String(error)}</p>
       <p className="small muted" style={{ margin: 0 }}>
         {typed.retryable ? 'Se puede reintentar. ' : ''}
@@ -76,7 +83,8 @@ export function ErrorNote({ error, action }: { error: unknown; action?: ReactNod
 
 export function Empty({ title, hint }: { title: string; hint?: string }): JSX.Element {
   return (
-    <div className="card" style={{ textAlign: 'center', padding: 28 }}>
+    <div className="card empty" style={{ textAlign: 'center', padding: 28 }}>
+      <Glyph icon={ACTION_ICON.empty} size={28} className="empty-glyph" />
       <p style={{ margin: 0, fontWeight: 600 }}>{title}</p>
       {hint ? <p className="muted small" style={{ margin: '6px 0 0' }}>{hint}</p> : null}
     </div>

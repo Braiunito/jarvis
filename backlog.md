@@ -40,9 +40,14 @@ tiene que decir qué puede hacer el agente, no cómo se llama la bandera por den
 
 ### [x] UX-02 · Elegir librerías de interfaz (decisión con ADR)
 
-Hecho 2026-09-02 · [ADR-008](docs/adr/0008-ui-libraries.md). Entra `cmdk` con UX-04; Radix por
-componente cuando llegue el ticket que lo pida. Base UI se revisa cuando publique estable — su
-1.0 sigue saliendo como `rc` en npm. Bundle: 156 → 176 KiB gzip, techo 400.
+Hecho 2026-09-02 · [ADR-008](docs/adr/0008-ui-libraries.md). Entraron `cmdk` (paleta) y
+`lucide-react` (iconos, ISC). Radix por componente cuando llegue el ticket que lo pida; Base UI se
+revisa cuando publique estable — su 1.0 sigue saliendo como `rc` en npm. Bundle: 156 → 180 KiB
+gzip, techo 400.
+
+Los iconos están mapeados en `apps/web/src/ui/icons.tsx`, en paralelo al vocabulario: navegación,
+estados de trabajo y de plan, permisos, salud, procedencia, acciones y paleta. Un estado se
+distingue por forma además de por color.
 
 Hoy el front es React + CSS propio, sin dependencias de UI. Funciona, pero hay piezas que no
 merece la pena escribir a mano: menús accesibles, diálogos con foco atrapado, paleta de comandos,

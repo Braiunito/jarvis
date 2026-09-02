@@ -12,12 +12,15 @@ import { useCancelPlan, useCreatePlan, usePlan, usePlans, useResolveApproval } f
 import { ErrorNote, relativeTime } from './bits.jsx';
 
 import { PERMISSION, PLAN_STATUS, PLAN_STEP_KIND } from './labels.js';
+import { ACTION_ICON, Glyph, PERMISSION_ICON, PLAN_STATUS_ICON } from './icons.jsx';
 
 function PlanBadge({ status }: { status: string }): JSX.Element {
   const label = PLAN_STATUS[status];
+  const icon = PLAN_STATUS_ICON[status] ?? PLAN_STATUS_ICON['ready'];
+  const spinning = status === 'running' || status === 'waiting_run';
   return (
     <span className={`badge ${label?.tone ?? 'neutral'}`} title={label?.help}>
-      <span className="dot" aria-hidden="true" />
+      {icon ? <Glyph icon={icon} className={spinning ? 'spin' : undefined} /> : null}
       {label?.name ?? status}
     </span>
   );
@@ -32,12 +35,16 @@ function ApprovalCard({ approval, onDecide, pending }: {
   const expiresIn = Math.max(0, Math.round((Date.parse(approval.expiresAt) - Date.now()) / 60_000));
   return (
     <div className="card" style={{ borderColor: 'var(--warn)' }}>
-      <h3 style={{ color: 'var(--warn)' }}>Necesita tu permiso</h3>
+      <h3 className="row" style={{ color: 'var(--warn)', gap: 6 }}>
+        <Glyph icon={PLAN_STATUS_ICON['waiting_approval'] as never} size={16} />
+        Necesita tu permiso
+      </h3>
       <p style={{ margin: '0 0 8px' }}>{approval.summary}</p>
       <div className="row small" style={{ marginBottom: 8 }}>
         <span className="badge neutral">{approval.actionType}</span>
         {target.host ? <span className="badge neutral mono">{target.host}</span> : null}
         <span className={`badge ${PERMISSION[target.permissionProfile as 'auto' | 'yolo']?.tone ?? 'warn'}`}>
+          <Glyph icon={PERMISSION_ICON[target.permissionProfile as 'auto' | 'yolo'] ?? PERMISSION_ICON.auto} />
           {PERMISSION[target.permissionProfile as 'auto' | 'yolo']?.name ?? target.permissionProfile}
         </span>
         <span className="muted">caduca en {expiresIn} min</span>
@@ -49,9 +56,11 @@ function ApprovalCard({ approval, onDecide, pending }: {
       ) : null}
       <div className="row">
         <button type="button" className="btn primary" disabled={pending} onClick={() => onDecide('approved')}>
+          <Glyph icon={ACTION_ICON.approve} />
           Autorizar
         </button>
         <button type="button" className="btn danger" disabled={pending} onClick={() => onDecide('rejected')}>
+          <Glyph icon={ACTION_ICON.reject} />
           Rechazar
         </button>
       </div>
@@ -109,7 +118,10 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
 
   return (
     <div className="card">
-      <h2>Assistant</h2>
+      <h2 className="row" style={{ gap: 7 }}>
+        <Glyph icon={ACTION_ICON.delegate} size={16} />
+        Assistant
+      </h2>
       <p className="small muted" style={{ marginTop: 0 }}>
         Describe un objetivo y el asistente lo parte en pasos. Cada paso es trabajo real en la
         máquina; lo que tenga efectos te lo pedirá antes.
@@ -127,6 +139,7 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn primary" disabled={create.isPending || !objective.trim()}
             onClick={() => void submit()}>
+            <Glyph icon={ACTION_ICON.delegate} />
             {create.isPending ? 'Preparando…' : 'Delegar objetivo'}
           </button>
         </div>
@@ -150,7 +163,10 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
             <span className="small muted">{relativeTime(detail.data.plan.updatedAt)}</span>
             {!['completed', 'failed', 'cancelled'].includes(detail.data.plan.status) ? (
               <button type="button" className="btn small danger"
-                onClick={() => cancel.mutate(detail.data.plan.id)}>Parar el plan</button>
+                onClick={() => cancel.mutate(detail.data.plan.id)}>
+                <Glyph icon={ACTION_ICON.stop} />
+                Parar el plan
+              </button>
             ) : null}
           </div>
           <p className="small" style={{ margin: 0 }}>{detail.data.plan.objective}</p>

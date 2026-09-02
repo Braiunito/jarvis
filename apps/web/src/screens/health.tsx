@@ -8,7 +8,8 @@ import type { JSX } from 'react';
 import { useState } from 'react';
 import { useHealth, useHosts } from '../api/queries.js';
 import { ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
-import { HEALTH } from '../ui/labels.js';
+import { checkName, HEALTH } from '../ui/labels.js';
+import { ACTION_ICON, Glyph, HEALTH_ICON } from '../ui/icons.jsx';
 
 export function HealthScreen(): JSX.Element {
   const health = useHealth();
@@ -42,6 +43,7 @@ export function HealthScreen(): JSX.Element {
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <h2 style={{ margin: 0 }}>Estado por salto</h2>
           <button type="button" className="btn small" onClick={copyDiagnostics}>
+            <Glyph icon={copied ? ACTION_ICON.approve : ACTION_ICON.copy} />
             {copied ? 'Copiado' : 'Copiar diagnóstico'}
           </button>
         </div>
@@ -53,9 +55,11 @@ export function HealthScreen(): JSX.Element {
             <div key={name} className="list-item" style={{ cursor: 'default' }}>
               <span className="row">
                 <span className={`badge ${HEALTH[check.status]?.tone ?? 'neutral'}`}>
-                  <span className="dot" aria-hidden="true" />{HEALTH[check.status]?.name ?? check.status}
+                  <Glyph icon={HEALTH_ICON[check.status] ?? HEALTH_ICON['unknown'] as never} />
+                  {HEALTH[check.status]?.name ?? check.status}
                 </span>
-                <span className="mono small">{name}</span>
+                <span>{checkName(name).title}</span>
+                <span className="mono small muted">{name}</span>
                 {check.code ? <span className="small muted">{check.code}</span> : null}
               </span>
               {check.message ? <span className="small">{check.message}</span> : null}
@@ -73,7 +77,9 @@ export function HealthScreen(): JSX.Element {
             <div key={host.host} className="list-item" style={{ cursor: 'default' }}>
               <span className="row">
                 <span className={`badge ${host.reachable ? (host.stale ? 'warn' : 'ok') : 'danger'}`}>
-                  <span className="dot" aria-hidden="true" />
+                  <Glyph icon={host.reachable
+                    ? (host.stale ? HEALTH_ICON['stale'] as never : HEALTH_ICON['ok'] as never)
+                    : HEALTH_ICON['failed'] as never} />
                   {host.reachable ? (host.stale ? 'sin refrescar' : 'bien') : 'no responde'}
                 </span>
                 <span className="mono">{host.host}</span>
