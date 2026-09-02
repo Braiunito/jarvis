@@ -653,11 +653,24 @@ Se guardan enteras y no se resumen aquí a propósito: cada hallazgo trae su evi
 línea, y ese detalle es lo que permite arreglarlo sin volver a investigarlo. Lo que sí vive aquí es
 **quién lleva qué**, porque somos tres trabajando en el mismo árbol.
 
-| Zona | Quién | Hallazgos |
-|---|---|---|
-| Core, adaptadores, Assistant | `litechat-ea` | A1, A2 (+A2b), A3, A6, A7, A8, A9, M1–M24, N01, N04–N09, N12, N14–N19 |
-| Despliegue, gateway, seguridad | `jarvis-69` | M31, M32, M33, N02, N10, N11, N13 |
-| Consola web | esta sesión | A4 (mitad de interfaz), A5, M25–M30, N03, N20 |
+**Alcance decidido el 2026-09-02: se arreglan sólo los críticos y altos.** Es decir, la serie `A`
+de la primera auditoría y los `P0`/`P1` (`N01`–`N12`) de la diferencial. Los medios y bajos —`M`,
+`B` y `P2`— **quedan anotados y sin tocar**: siguen enteros en los documentos, con su evidencia,
+para cuando se decida abrirlos. No se borran ni se resumen; simplemente no se hacen ahora.
+
+| Zona | Quién | Se arregla ahora | Anotado, sin tocar |
+|---|---|---|---|
+| Core, adaptadores, Assistant | `litechat-ea` | A1, A2 (+A2b), A3, A6, A7, A8, A9, N01, N04–N09, N12 | M1–M24, N14–N19 |
+| Despliegue, gateway, seguridad | `jarvis-69` | N10, N11, N13 | M31, M32, M33 |
+| Consola web | esta sesión | A4 (mitad de interfaz), A5, N03 | M25–M30, N20 |
+
+Dos avisos sobre lo que queda fuera, porque no todo lo «medio» pesa igual:
+
+- **M31** (el `.env` que no llega al contenedor) es medio por gravedad pero **hace inertes ajustes
+  que sí importan**, incluidos `JARVIS_SWEEP_INTERVAL_MS` y `JARVIS_SPOOL_RETENTION_DAYS`: el
+  barrido de spools corre hoy con los valores por defecto, no con los configurados.
+- **M32** (`known_hosts` en `/tmp`) repite el TOFU en cada arranque. Bajo por probabilidad, no por
+  consecuencia.
 
 **Lo primero es A1 y A2**, y no por gusto: sin ellos «parar» y «durable» son promesas falsas.
 Cancelar mata el subshell y deja al agente vivo gastando cuota y tocando ficheros con el permiso
