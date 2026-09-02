@@ -1,0 +1,18 @@
+# Superposición para la red local, mientras no hay certificado.
+#
+# Publica el gateway directamente y deja fuera a Caddy. Con esto **no hay passkeys**: el navegador
+# no expone WebAuthn fuera de un contexto seguro, así que la entrada es la escotilla de contraseña
+# o un túnel SSH que convierta localhost en el origen.
+#
+#   ssh -L 8080:127.0.0.1:8080 usuario@bastion   → http://localhost:8080 con JARVIS_RP_ID=localhost
+services:
+  caddy:
+    profiles: ["no-lan"]
+
+  gateway:
+    ports:
+      - "${JARVIS_LAN_BIND:-127.0.0.1}:8080:8080"
+    environment:
+      # Sin Caddi delante, X-Forwarded-For es lo que quiera mandar quien llame.
+      JARVIS_TRUST_PROXY: "false"
+      JARVIS_INSECURE_COOKIES: "true"

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "users": [
+    {
+      "userId": "KcJeX28d1cMTbK4-iATrvFHvvx7kLS8ABo-pI5B1W7U",
+      "username": "braian",
+      "displayName": "Braian",
+      "enabled": true,
+      "createdAt": "2026-09-02T06:12:15.352Z",
+      "passwordHash": "scrypt$16384$8$1$/Lh+LkGdnkRK5ZOs25I1gQ==$v+Rs/uFh6NH4wNQ/J/gkDjjw1DlApx2bUzydw3xEnK3RG4ODcAtVc6h1hwVJHY3k4MbxeZB6K6p3B1IW/WeINA==",
+      "credentials": [],
+      "enrollment": null,
+      "totp": null
+    }
+  ]
+}

@@ -6,8 +6,8 @@
  */
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type {
-  Attachment, Draft, Health, HostCapabilities, Run, RunEvent, SessionSearchResult, TargetPlan,
-  TerminalSession, UsageSnapshot, Workspace,
+  Approval, Attachment, Draft, Health, HostCapabilities, Plan, PlanStep, Run, RunEvent,
+  SessionSearchResult, TargetPlan, TerminalSession, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
 import { get, post, put } from './client.js';
 
@@ -24,6 +24,8 @@ export const keys = {
   runs: ['runs'] as const,
   usage: (workspaceId: string) => ['usage', workspaceId] as const,
   terminals: (host: string) => ['terminals', host] as const,
+  plans: (workspaceId: string) => ['plans', workspaceId] as const,
+  plan: (planId: string) => ['plan', planId] as const,
 };
 
 export interface SessionQuery {
@@ -132,12 +134,77 @@ export const useUsage = (workspaceId: string | null): UseQueryResult<UsageSnapsh
   retry: 0,
 });
 
+/**
+ * Las sesiones de terminal cambian por acciones que no pasan por esta pestaña —otra persona, un
+ * run, uno mismo desde el móvil—, así que al volver a la pantalla se vuelven a pedir. Servir la
+ * caché de hace un rato aquí significa enseñar una lista vacía cuando la sesión existe.
+ */
 export const useTerminals = (host: string | null): UseQueryResult<{ sessions: TerminalSession[] }> => useQuery({
   queryKey: keys.terminals(host ?? 'none'),
   queryFn: () => get<{ sessions: TerminalSession[] }>(`/api/terminal/sessions?host=${encodeURIComponent(host as string)}`),
   enabled: Boolean(host),
-  staleTime: 10_000,
+  staleTime: 2_000,
+  refetchOnMount: 'always',
 });
+
+export interface PlanListResult {
+  plans: Plan[];
+  approvals: Approval[];
+  assistantAvailable: boolean;
+}
+
+export const usePlans = (workspaceId: string | null): UseQueryResult<PlanListResult> => useQuery({
+  queryKey: keys.plans(workspaceId ?? 'none'),
+  queryFn: () => get<PlanListResult>(`/api/plans?workspaceId=${workspaceId as string}`),
+  enabled: Boolean(workspaceId),
+  staleTime: 2_000,
+  // Un plan avanza solo en el servidor: la interfaz lo mira de vez en cuando en lugar de
+  // mantener una conexión abierta esperando.
+  refetchInterval: 4_000,
+});
+
+export const usePlan = (planId: string | null) => useQuery({
+  queryKey: keys.plan(planId ?? 'none'),
+  queryFn: () => get<{ plan: Plan; steps: PlanStep[]; approvals: Approval[] }>(`/api/plans/${planId as string}`),
+  enabled: Boolean(planId),
+  staleTime: 1_000,
+  refetchInterval: 3_000,
+});
+
+export function useCreatePlan(workspaceId: string | null) {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (objective: string) => post<{ plan: Plan }>('/api/plans', { workspaceId, objective }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.plans(workspaceId ?? 'none') });
+    },
+  });
+}
+
+export function useResolveApproval() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: ({ id, decision }: { id: string; decision: 'approved' | 'rejected' }) =>
+      post<{ approval: Approval }>(`/api/approvals/${id}`, { decision }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['plans'] });
+      void client.invalidateQueries({ queryKey: ['plan'] });
+    },
+  });
+}
+
+export function useCancelPlan() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (planId: string) => post<{ plan: Plan }>(`/api/plans/${planId}/cancel`),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['plans'] });
+    },
+  });
+}
 
 export function useOpenWorkspace() {
   const client = useQueryClient();

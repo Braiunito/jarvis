@@ -1,0 +1,115 @@
+# El stack completo. Cinco servicios y ni uno más: no hay un contenedor por módulo de dominio.
+#
+# La regla que ordena este fichero es el límite de privilegio (ADR-001): el gateway es lo que se
+# expone y no tiene clave SSH; el core tiene la clave y no publica puerto.
+name: jarvis
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # Lo único publicado hacia fuera.
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      JARVIS_PUBLIC_HOST: ${JARVIS_PUBLIC_HOST:-localhost}
+      JARVIS_ACME_EMAIL: ${JARVIS_ACME_EMAIL:-admin@example.com}
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    image: jarvis-gateway:${JARVIS_VERSION:-dev}
+    restart: unless-stopped
+    # Sin puertos publicados: sólo Caddy llega hasta aquí.
+    expose:
+      - "8080"
+    environment:
+      JARVIS_BIND: 0.0.0.0
+      JARVIS_PORT: "8080"
+      JARVIS_DATA_DIR: /var/lib/jarvis
+      JARVIS_CORE_URL: http://core:8770
+      JARVIS_RP_ID: ${JARVIS_RP_ID:-localhost}
+      JARVIS_ORIGINS: ${JARVIS_ORIGINS:-}
+      JARVIS_AUTH_POLICY: ${JARVIS_AUTH_POLICY:-passkey}
+      # Caddy está delante de verdad, así que aquí sí se puede creer a X-Forwarded-For.
+      JARVIS_TRUST_PROXY: "true"
+      JARVIS_INTERNAL_SECRET: ${JARVIS_INTERNAL_SECRET:?define JARVIS_INTERNAL_SECRET en .env}
+      # REVISAR EN CADA DESPLIEGUE: la escotilla de HTTP plano.
+      JARVIS_INSECURE_LOGIN: ${JARVIS_INSECURE_LOGIN:-false}
+      JARVIS_INSECURE_LOGIN_LAN_ONLY: ${JARVIS_INSECURE_LOGIN_LAN_ONLY:-true}
+      JARVIS_INSECURE_COOKIES: ${JARVIS_INSECURE_COOKIES:-false}
+    volumes:
+      - jarvis-auth:/var/lib/jarvis
+    depends_on:
+      core:
+        condition: service_healthy
+
+  core:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.core
+    image: jarvis-core:${JARVIS_VERSION:-dev}
+    restart: unless-stopped
+    expose:
+      - "8770"
+    environment:
+      JARVIS_CORE_BIND: 0.0.0.0
+      JARVIS_CORE_PORT: "8770"
+      JARVIS_CORE_DB: /var/lib/jarvis-core/core.db
+      JARVIS_HOSTS: ${JARVIS_HOSTS:?define la allowlist de hosts en .env}
+      JARVIS_BASTION_HOST: ${JARVIS_BASTION_HOST:-bastion}
+      JARVIS_INDEX_URL: http://aisessions:8765
+      JARVIS_INDEX_TOKEN: ${JARVIS_INDEX_TOKEN:-}
+      JARVIS_SPOOL_ROOT: ${JARVIS_SPOOL_ROOT:-/var/lib/jarvis-spool/runs}
+      JARVIS_ATTACHMENT_ROOT: ${JARVIS_ATTACHMENT_ROOT:-/tmp/jarvis-attachments}
+      JARVIS_INTERNAL_SECRET: ${JARVIS_INTERNAL_SECRET:?define JARVIS_INTERNAL_SECRET en .env}
+      JARVIS_ALLOW_YOLO: ${JARVIS_ALLOW_YOLO:-false}
+      JARVIS_MODEL_API_KEY: ${JARVIS_MODEL_API_KEY:-}
+      JARVIS_MODEL_NAME: ${JARVIS_MODEL_NAME:-claude-sonnet-5}
+      SSH_AUTH_SOCK: ${SSH_AUTH_SOCK:-}
+    volumes:
+      - jarvis-core-data:/var/lib/jarvis-core
+      # La clave de la flota, de sólo lectura y sólo aquí.
+      - ${JARVIS_SSH_DIR:-./secrets/ssh}:/home/node/.ssh:ro
+    depends_on:
+      aisessions:
+        condition: service_started
+
+  # El índice histórico: sólo lectura y reconstruible. Se reutiliza tal cual del repo aiSessions.
+  aisessions:
+    image: ${JARVIS_AISESSIONS_IMAGE:-aisessions:latest}
+    restart: unless-stopped
+    command: ["serve", "--bind", "0.0.0.0", "--port", "8765"]
+    expose:
+      - "8765"
+    volumes:
+      - aisessions-data:/var/lib/aisessions
+      - ${JARVIS_SSH_DIR:-./secrets/ssh}:/home/app/.ssh:ro
+
+  # La sincronización con los hosts remotos, aparte del servidor que sirve las consultas.
+  aisessions-sync:
+    image: ${JARVIS_AISESSIONS_IMAGE:-aisessions:latest}
+    restart: unless-stopped
+    command: ["sync-loop", "--interval", "${JARVIS_SYNC_INTERVAL:-300}"]
+    volumes:
+      - aisessions-data:/var/lib/aisessions
+      - ${JARVIS_SSH_DIR:-./secrets/ssh}:/home/app/.ssh:ro
+    depends_on:
+      aisessions:
+        condition: service_started
+
+volumes:
+  caddy-data:
+  caddy-config:
+  jarvis-auth:
+  jarvis-core-data:
+  aisessions-data:

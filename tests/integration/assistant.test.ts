@@ -4,7 +4,6 @@
  * Lo que se prueba es lo que hace durable a un plan: ninguna llamada abierta esperando, el
  * checkpoint antes del efecto, la aprobación de un solo uso y la supervivencia a un reinicio.
  */
-import { createHmac } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,13 +21,6 @@ const root = mkdtempSync(join(tmpdir(), 'jarvis-plan-'));
 process.env['JARVIS_FAKE_SSH_ROOT'] = join(root, 'fake-ssh');
 const INTERNAL_SECRET = process.env['JARVIS_INTERNAL_SECRET'] as string;
 const dbPath = join(root, 'core.db');
-
-const identity = (): string => {
-  const payload = { userId: 'u1', username: 'braian', requestId: 'req_plan', exp: Math.floor(Date.now() / 1000) + 300 };
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const mac = createHmac('sha256', Buffer.from(INTERNAL_SECRET, 'utf8')).update(body).digest('base64url');
-  return `${body}.${mac}`;
-};
 
 interface Harness { services: CoreServices; app: FastifyInstance }
 

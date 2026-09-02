@@ -25,7 +25,10 @@
     "check": "npm run typecheck && npm run lint && npm run test",
     "dev:local": "node scripts/dev-local.mjs",
     "dev:user": "JARVIS_DATA_DIR=$PWD/.dev/gateway node apps/gateway/dist/bin/jarvis-users.js",
-    "build:apps": "tsc -b tsconfig.build.json && npm run -w @jarvis/web build"
+    "build:apps": "tsc -b tsconfig.build.json && npm run -w @jarvis/web build",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

@@ -1,0 +1,52 @@
+# El gateway: el borde autenticado. Sirve la SPA y proxya al core.
+#
+# Aquí no hay clave SSH ni configuración de hosts, y es deliberado: este es el proceso expuesto
+# (ADR-001). Si algún día necesita una clave para algo, es que el diseño se torció.
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/agent-adapters/package.json packages/agent-adapters/
+COPY packages/testkit/package.json packages/testkit/
+COPY packages/legacy-contract-tests/package.json packages/legacy-contract-tests/
+COPY apps/core/package.json apps/core/
+COPY apps/gateway/package.json apps/gateway/
+COPY apps/web/package.json apps/web/
+# Sólo los workspaces del borde: el gateway no necesita —ni debe tener— el driver de la base del
+# core, que además exige un compilador que esta imagen no lleva.
+RUN npm ci --include-workspace-root --workspace @jarvis/contracts --workspace @jarvis/gateway --workspace @jarvis/web
+
+COPY tsconfig.base.json tsconfig.json tsconfig.build.json ./
+COPY packages/contracts packages/contracts
+COPY apps/gateway apps/gateway
+COPY apps/web apps/web
+RUN npx tsc -b apps/gateway && npm run -w @jarvis/web build
+
+# Las dependencias de ejecución se instalan de cero en vez de podar las de desarrollo: `prune`
+# vuelve a pasar por el árbol entero y acaba intentando compilar el driver de SQLite, que aquí ni
+# se usa ni tiene con qué compilarse.
+RUN rm -rf node_modules \
+  && npm ci --omit=dev --include-workspace-root --workspace @jarvis/contracts --workspace @jarvis/gateway
+
+FROM node:24-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
+COPY --from=build /app/packages/contracts/package.json ./packages/contracts/
+COPY --from=build /app/apps/gateway/dist ./apps/gateway/dist
+COPY --from=build /app/apps/gateway/package.json ./apps/gateway/
+COPY --from=build /app/apps/web/dist /srv/jarvis-web
+COPY --from=build /app/package.json ./
+
+RUN mkdir -p /var/lib/jarvis && chown -R node:node /var/lib/jarvis /app
+USER node
+
+ENV JARVIS_STATIC_DIR=/srv/jarvis-web
+EXPOSE 8080
+HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "apps/gateway/dist/src/main.js"]

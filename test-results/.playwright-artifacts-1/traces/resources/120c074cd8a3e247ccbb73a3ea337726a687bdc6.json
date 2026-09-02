@@ -1,0 +1,1 @@
+{"target":{"workHost":"bastion","executionHost":"bastion","strategy":"bastion","reason":null,"cwd":"/tmp/jarvis-demo/app","provider":"claude","permissionProfile":"safe"}}

@@ -46,7 +46,12 @@ const parseJsonLines = (text: string): Array<Record<string, unknown>> =>
     }
   });
 
-/** Quita secuencias ANSI y bloques de dibujo: lo que queda es texto que se puede leer. */
+/**
+ * Quita secuencias ANSI y bloques de dibujo: lo que queda es texto que se puede leer.
+ *
+ * Los caracteres de control aquí son el objeto del ejercicio, no un descuido.
+ */
+/* eslint-disable no-control-regex */
 function cleanTerminal(text: string): string {
   return String(text)
     .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, ' ')
@@ -56,6 +61,7 @@ function cleanTerminal(text: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+/* eslint-enable no-control-regex */
 
 function claudeLimit(text: string, heading: string, label: string): UsageLimit | null {
   const start = text.toLowerCase().indexOf(heading.toLowerCase());

@@ -17,7 +17,6 @@ import { buildServices, type CoreServices } from '../../apps/core/src/services.j
 import { openDatabase } from '../../apps/core/src/platform/db.js';
 import type { FastifyInstance } from 'fastify';
 
-const user = { userId: 'u1', username: 'braian' };
 const root = mkdtempSync(join(tmpdir(), 'jarvis-m3-'));
 const dbPath = join(root, 'core.db');
 const spoolRoot = join(root, 'spool');

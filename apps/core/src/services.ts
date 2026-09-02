@@ -28,6 +28,7 @@ import { TerminalService } from './terminal/service.js';
 import { AnthropicModel, ScriptedModel, type AssistantModel } from './assistant/model.js';
 import { PlanService } from './plans/service.js';
 import { PlanSupervisor } from './plans/supervisor.js';
+import { ImportService } from './import/service.js';
 
 export const VERSION = '0.1.0';
 
@@ -52,6 +53,7 @@ export interface CoreServices {
   terminal: TerminalService;
   plans: PlanService;
   planSupervisor: PlanSupervisor;
+  imports: ImportService;
   close(): void;
 }
 
@@ -138,11 +140,12 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const terminal = new TerminalService({ sshConfig, clock, audit, capabilities, bastionHost: config.bastionHost });
   const plans = new PlanService({ db, clock, runs, workspaces, model, audit });
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
+  const imports = new ImportService({ db, clock, workspaces: workspaceRepository, audit, bastionHost: config.bastionHost });
 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
-    plans, planSupervisor,
+    plans, planSupervisor, imports,
     close() {
       supervisor.stop();
       planSupervisor.stop();

@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Operación del stack. Todo lo que hace falta saber para levantar, mirar y parar esto.
+#
+# No presupone Node ni npm en la máquina: lo único que hace falta es Docker. El repositorio del
+# bastión se actualiza con `git pull --ff-only` y después `bin/jarvis up`.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+compose_file="$here/deploy/compose.yml"
+env_file="$here/deploy/.env"
+overlay=()
+
+# La superposición de LAN existe porque sin certificado no hay passkeys; se elige con JARVIS_MODE.
+if [[ "${JARVIS_MODE:-}" == "lan" ]]; then
+  overlay=(-f "$here/deploy/compose.lan.yml")
+fi
+
+compose() {
+  docker compose -f "$compose_file" "${overlay[@]}" --env-file "$env_file" "$@"
+}
+
+usage() {
+  cat <<'TXT'
+jarvis — operación del stack
+
+  up            construye lo que haga falta y levanta todo
+  down          para el stack (los volúmenes se quedan)
+  restart <s>   reinicia un servicio
+  logs [s]      sigue los registros
+  ps            qué está corriendo y con qué salud
+  smoke         comprueba que el stack responde de verdad
+  backup        copia verificada de la base y del almacén de autenticación
+  users ...     cuentas: add, enroll, list, disable, set-password…
+  config        muestra la configuración efectiva de compose
+
+  JARVIS_MODE=lan  usa la superposición de red local (sin TLS, sin passkeys)
+TXT
+}
+
+case "${1:-}" in
+  up)
+    [[ -f "$env_file" ]] || { echo "falta deploy/.env — copia deploy/.env.example y rellénalo"; exit 1; }
+    compose up -d --build
+    echo
+    compose ps
+    ;;
+  down)   compose down ;;
+  restart) shift; compose restart "$@" ;;
+  logs)   shift; compose logs -f --tail=100 "$@" ;;
+  ps)     compose ps ;;
+  config) compose config ;;
+  smoke)
+    shift
+    compose exec -T gateway node -e "
+      fetch('http://127.0.0.1:8080/healthz')
+        .then(async (r) => { console.log('gateway', r.status, await r.text()); })
+        .then(() => fetch('http://core:8770/internal/health'))
+        .then(async (r) => { console.log('core   ', r.status, await r.text()); process.exit(r.ok ? 0 : 1); })
+        .catch((e) => { console.error(e.message); process.exit(1); });
+    "
+    ;;
+  backup)
+    shift
+    # La copia se hace desde dentro del contenedor del core, que es quien tiene la base montada.
+    compose exec -T core node /app/scripts/backup.mjs "$@" || {
+      echo "el core no lleva los scripts dentro; hazlo desde el repo:"
+      echo "  node scripts/backup.mjs --core-db=<ruta> --auth-dir=<ruta> --out=<destino>"
+      exit 1
+    }
+    ;;
+  users)
+    shift
+    compose exec -T gateway node /app/apps/gateway/dist/bin/jarvis-users.js "$@"
+    ;;
+  *) usage ;;
+esac

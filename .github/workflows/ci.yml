@@ -1,0 +1,80 @@
+name: ci
+
+# Lo que este pipeline protege: que los contratos congelados sigan valiendo, que el tipo cuadre y
+# que el stack se pueda levantar. Los tests de integración arrancan tmux de verdad, así que el
+# runner necesita tenerlo.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: sudo apt-get update && sudo apt-get install -y tmux util-linux
+      - run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: lint
+        run: npm run lint
+
+      - name: contratos, unidad e integración
+        run: npm run test
+
+      - name: build de la consola
+        run: npm run -w @jarvis/web build
+
+      - name: versiones efectivas
+        run: |
+          node -e "console.log(JSON.stringify({
+            node: process.version,
+            sqlite: new (require('better-sqlite3'))(':memory:').prepare('select sqlite_version() v').get().v,
+          }, null, 2))" | tee build-info.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-info
+          path: build-info.json
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y tmux util-linux
+      - run: npm ci
+      - run: npm run build:apps
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: la configuración de compose es válida en los dos modos
+        run: |
+          export JARVIS_INTERNAL_SECRET=ci JARVIS_HOSTS=bastion
+          docker compose -f deploy/compose.yml config > /dev/null
+          docker compose -f deploy/compose.yml -f deploy/compose.lan.yml config > /dev/null
+
+      - name: las imágenes construyen
+        run: |
+          docker build -f deploy/Dockerfile.core -t jarvis-core:ci .
+          docker build -f deploy/Dockerfile.gateway -t jarvis-gateway:ci .

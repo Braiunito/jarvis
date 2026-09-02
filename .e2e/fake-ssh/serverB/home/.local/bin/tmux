@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/tmux -L jarvis-serverB-10930c5d "$@"

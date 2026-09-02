@@ -1,0 +1,58 @@
+# El core: dominio, base operativa y la única pieza con clave SSH.
+#
+# Multi-stage a propósito: la imagen final no lleva compilador, ni dependencias de desarrollo, ni
+# el código TypeScript. Sólo Node, lo compilado y lo que hace falta para hablar con los hosts.
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+
+# `better-sqlite3` trae binarios precompilados para las plataformas habituales, pero si no hay uno
+# para ésta hace falta compilarlo: sin esto el fallo aparece en `npm ci` y no dice por qué.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/agent-adapters/package.json packages/agent-adapters/
+COPY packages/testkit/package.json packages/testkit/
+COPY packages/legacy-contract-tests/package.json packages/legacy-contract-tests/
+COPY apps/core/package.json apps/core/
+COPY apps/gateway/package.json apps/gateway/
+COPY apps/web/package.json apps/web/
+RUN npm ci
+
+COPY tsconfig.base.json tsconfig.json tsconfig.build.json ./
+COPY packages/contracts packages/contracts
+COPY packages/agent-adapters packages/agent-adapters
+COPY packages/testkit packages/testkit
+COPY apps/core apps/core
+RUN npx tsc -b apps/core
+
+# Sólo las dependencias de producción viajan a la imagen final.
+RUN npm prune --omit=dev
+
+FROM node:24-bookworm-slim AS runtime
+WORKDIR /app
+
+# `ssh` y `tmux` son el transporte del producto; `ca-certificates` lo necesita el cliente del modelo.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
+COPY --from=build /app/packages/contracts/package.json ./packages/contracts/
+COPY --from=build /app/packages/agent-adapters/dist ./packages/agent-adapters/dist
+COPY --from=build /app/packages/agent-adapters/package.json ./packages/agent-adapters/
+COPY --from=build /app/apps/core/dist ./apps/core/dist
+COPY --from=build /app/apps/core/package.json ./apps/core/
+COPY --from=build /app/package.json ./
+
+# Un usuario sin privilegios; el volumen de datos es suyo.
+RUN mkdir -p /var/lib/jarvis-core && chown -R node:node /var/lib/jarvis-core /app
+USER node
+
+EXPOSE 8770
+HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8770/internal/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "apps/core/dist/main.js"]

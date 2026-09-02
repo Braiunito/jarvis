@@ -15,6 +15,7 @@ import {
 } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import { ErrorNote, Link, Loading, RunStatusBadge, StaleNote, TargetChip, relativeTime } from '../ui/bits.jsx';
+import { AssistantPanel } from '../ui/assistant.jsx';
 
 const PROFILES: PermissionProfile[] = ['safe', 'auto', 'yolo'];
 
@@ -247,6 +248,8 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
               ))}
             </div>
           </div>
+
+          <AssistantPanel workspaceId={workspaceId} />
 
           <div className="card">
             <h2>Runs de este workspace</h2>

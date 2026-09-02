@@ -267,7 +267,7 @@ export function buildSweepCommand(root: string, olderThanDays: number): string {
   return [
     `find ${shellQuote(root)} -mindepth 1 -maxdepth 1 -type d -mtime +${days} -exec sh -c '`,
     `  if [ -f "$1/status.json" ] && grep -q \\'"state":"\\\\(completed\\\\|failed\\\\|cancelled\\\\|timed_out\\\\)"\\' "$1/status.json"; then rm -rf -- "$1"; fi`,
-    "' sh {} \; 2>/dev/null || true",
+    "' sh {} ';' 2>/dev/null || true",
     'printf \'%s\\n\' "jarvis:swept"',
   ].join('\n');
 }
