@@ -13,6 +13,7 @@ import { Command } from 'cmdk';
 import { useHosts, useOpenWorkspace, useSessions, useWorkspaces } from '../api/queries.js';
 import { navigate } from '../router.js';
 import { relativeTime } from './bits.jsx';
+import { openNewSession } from './new-session.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON } from './icons.jsx';
 
 /** Abrir la paleta desde cualquier parte, sin pasar el estado por media aplicación. */
@@ -145,6 +146,17 @@ export function CommandPalette(): JSX.Element | null {
                   <span className="palette-hint">{host.providers.join(', ') || 'sin agentes'}</span>
                 </Command.Item>
               ))}
+            </Command.Group>
+
+            <Command.Group heading="Empezar">
+              <Command.Item value="nueva sesion empezar de cero estrenar"
+                onSelect={() => { setOpen(false); openNewSession(); }}>
+                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                  <Glyph icon={ACTION_ICON.new} />
+                  Empezar una sesión desde cero
+                </span>
+                <span className="palette-hint">elige agente, máquina y carpeta</span>
+              </Command.Item>
             </Command.Group>
 
             <Command.Group heading="Ir a">

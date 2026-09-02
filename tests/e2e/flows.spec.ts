@@ -182,3 +182,28 @@ test('cerrar la terminal sí la mata, y lo dice antes de hacerlo', async ({ page
   await expect(page.locator('.list-item').filter({ hasText: /jarvis-claude/ }))
     .toHaveCount(0, { timeout: 20_000 });
 });
+
+/**
+ * Estrenar una sesión, que es lo que antes obligaba a ir a la máquina.
+ *
+ * Se prueba el camino sin prompt a propósito: crea el workspace vacío y deja escribir la primera
+ * tarea en el compositor, como en cualquier otro. Es el que más se parece al resto del producto y
+ * el que deja el estado raro —una sesión que existe aquí y todavía no en la máquina—, que es justo
+ * lo que la pantalla tiene que saber contar.
+ */
+test('empezar una sesión desde cero', async ({ page }) => {
+  await nav(page, 'Sesiones').click();
+  await page.getByRole('button', { name: 'Empezar una sesión' }).click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('Un trabajo')).toBeVisible();
+  await dialog.getByLabel('Máquina', { exact: true }).selectOption('bastion');
+  await dialog.getByLabel('Agente', { exact: true }).selectOption('claude');
+  await dialog.getByRole('button', { name: 'Crear el workspace' }).click();
+
+  await expect(page).toHaveURL(/\/w\//);
+  // La sesión existe aquí y todavía no al otro lado: la pantalla lo dice en vez de enseñar un
+  // historial vacío como si se hubiera perdido.
+  await expect(page.getByText('sin estrenar')).toBeVisible();
+  await expect(page.getByLabel('Qué quieres que haga el agente')).toBeVisible();
+});

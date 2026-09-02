@@ -277,6 +277,24 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                 <Glyph icon={STATUS_ICON.host} />
                 {workspace.ref.host}
               </span>
+              {/*
+                * Una sesión estrenada aquí no existe al otro lado hasta el primer trabajo, y su
+                * identificador puede cambiar si el agente elige el suyo. Decirlo evita dos malas
+                * lecturas: que el historial vacío parezca perdido, y que alguien copie un id que
+                * dentro de un minuto no valdrá.
+                */}
+              {workspace.sessionLaunched === false ? (
+                <span className="badge warn" title="El agente todavía no ha abierto esta sesión en la máquina">
+                  <Glyph icon={ACTION_ICON.new} />
+                  sin estrenar
+                </span>
+              ) : null}
+              {workspace.sessionPending ? (
+                <span className="badge neutral" title={`${workspace.ref.provider} elige su propio identificador y lo dirá al arrancar`}>
+                  <Glyph icon={STATUS_ICON.clock} />
+                  id asignándose
+                </span>
+              ) : null}
               {workspace.cwd ? (
                 <span className="badge neutral mono" title={workspace.cwd}>
                   <Glyph icon={STATUS_ICON.folder} />
@@ -434,8 +452,12 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                     <Empty
                       tight
                       icon={ACTION_ICON.message}
-                      title="Esta sesión todavía no tiene mensajes"
-                      hint="Aparecerán aquí en cuanto el agente hable en la máquina, lo mandes tú desde abajo o alguien trabaje en esa sesión por su cuenta."
+                      title={workspace.sessionLaunched === false
+                        ? 'Esta sesión todavía no existe en la máquina'
+                        : 'Esta sesión todavía no tiene mensajes'}
+                      hint={workspace.sessionLaunched === false
+                        ? 'Se estrenó desde aquí y el agente la abrirá con la primera tarea que le mandes. Hasta entonces no hay nada que traer.'
+                        : 'Aparecerán aquí en cuanto el agente hable en la máquina, lo mandes tú desde abajo o alguien trabaje en esa sesión por su cuenta.'}
                     />
                   ) : null}
                 </div>
@@ -453,7 +475,9 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                     <span className="mono">{workspace.cwd ?? 'sin carpeta'}</span>
                   </DataRow>
                   <DataRow label="Sesión del agente">
-                    <span className="mono">{workspace.ref.sessionId}</span>
+                    <span className="mono">
+                      {workspace.sessionPending ? 'asignándose…' : workspace.ref.sessionId}
+                    </span>
                   </DataRow>
                 </div>
 
@@ -501,7 +525,9 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   <DataRow label="Máquina">{workspace.ref.host}</DataRow>
                   <DataRow label="Agente">{workspace.ref.provider}</DataRow>
                   <DataRow label="Sesión">
-                    <span className="mono">{workspace.ref.sessionId}</span>
+                    <span className="mono">
+                      {workspace.sessionPending ? 'asignándose…' : workspace.ref.sessionId}
+                    </span>
                   </DataRow>
                   <DataRow label="Creado">{relativeTime(workspace.createdAt)}</DataRow>
                 </div>

@@ -338,6 +338,42 @@ export function useCancelPlan() {
   });
 }
 
+/**
+ * Estrenar una sesión.
+ *
+ * Dos formas que no son la misma cosa: un trabajo deja evidencia y una terminal es un TTY. Y en
+ * la primera, el prompt es opcional: sin él se crea el workspace vacío y la primera tarea se
+ * escribe en el compositor, como en cualquier otro.
+ */
+export interface StartSessionResult {
+  mode: 'task' | 'terminal';
+  workspace: Workspace;
+  run?: Run;
+  terminal: { name: string; host: string; created: boolean };
+}
+
+export function useStartSession() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (input: {
+      host: string;
+      provider: string;
+      mode: 'task' | 'terminal';
+      cwd?: string | null;
+      permissionProfile?: string;
+      prompt?: string;
+    }) => post<StartSessionResult>('/api/sessions/new', input),
+    onSuccess: (_data, variables) => {
+      void client.invalidateQueries({ queryKey: ['sessions'] });
+      void client.invalidateQueries({ queryKey: keys.workspaces });
+      void client.invalidateQueries({ queryKey: keys.runs });
+      void client.invalidateQueries({ queryKey: keys.terminals(variables.host) });
+      void client.invalidateQueries({ queryKey: ['metrics'] });
+    },
+  });
+}
+
 export function useOpenWorkspace() {
   const client = useQueryClient();
   return useMutation({

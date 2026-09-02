@@ -18,6 +18,7 @@ import { Empty, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.j
 import { Donut, Meter, Sparkbars, SERIES_COLORS } from '../ui/charts.jsx';
 import { ACTION_ICON, Glyph, HEALTH_ICON, NAV_ICON, RUN_STATUS_ICON, STATUS_ICON } from '../ui/icons.jsx';
 import { HEALTH } from '../ui/labels.js';
+import { openNewSession } from '../ui/new-session.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { Card, formatDuration, Stat } from '../ui/primitives.jsx';
 
@@ -312,21 +313,22 @@ export function HomeScreen(): JSX.Element {
 
         <Card title="Acciones rápidas" icon={ACTION_ICON.new}>
           <div className="grid cols-2" style={{ gap: 8 }}>
+            {/* Empezar de cero va primero: es lo que no se podía hacer y lo que más se busca. */}
+            <button type="button" className="btn tall primary" onClick={openNewSession}>
+              <Glyph icon={ACTION_ICON.new} />
+              Empezar una sesión
+            </button>
             <Link to="/sessions" className="btn tall">
               <Glyph icon={NAV_ICON.sessions} />
               Buscar una sesión
-            </Link>
-            <Link to="/terminal" className="btn tall">
-              <Glyph icon={NAV_ICON.terminal} />
-              Abrir una terminal
             </Link>
             <Link to="/runs" className="btn tall">
               <Glyph icon={NAV_ICON.runs} />
               Ver el trabajo
             </Link>
-            <Link to="/health" className="btn tall">
-              <Glyph icon={NAV_ICON.health} />
-              Diagnosticar
+            <Link to="/terminal" className="btn tall">
+              <Glyph icon={NAV_ICON.terminal} />
+              Abrir una terminal
             </Link>
           </div>
           {metrics.data && metrics.data.plans.waitingApproval > 0 ? (

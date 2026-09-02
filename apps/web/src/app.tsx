@@ -20,6 +20,7 @@ import { useRoute } from './router.js';
 import { Announcer } from './ui/announce.jsx';
 import { Link } from './ui/bits.jsx';
 import { CommandPalette, openCommandPalette } from './ui/command-palette.jsx';
+import { NewSessionDialog } from './ui/new-session.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, PLAN_STATUS_ICON, STATUS_ICON } from './ui/icons.jsx';
 import { PageMetaProvider, usePageMetaValue } from './ui/page-meta.jsx';
 import { formatDuration } from './ui/primitives.jsx';
@@ -279,6 +280,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
       </div>
 
       <CommandPalette />
+      <NewSessionDialog />
       <Announcer />
     </div>
   );

@@ -489,11 +489,15 @@ export function EventTimeline({ events, empty, limit, userMessage }: {
             <div key={item.event.seq} className={`tl-row ${isAnswer(item.event) ? 'answer' : ''}`}>
               <div className="tl-time">
                 {timeOf(item.from)}
+                {/*
+                  * El final va en su propia línea, no seguido.
+                  *
+                  * La columna de la hora es estrecha y no crece: en línea, «7:18:32 PM → 7:18:40 PM»
+                  * se cortaba a media hora y el rango de un grupo quedaba ilegible justo donde
+                  * explica cuánto duró.
+                  */}
                 {item.count > 1 && item.to !== item.from ? (
-                  <>
-                    <span className="faint"> → </span>
-                    {timeOf(item.to)}
-                  </>
+                  <span className="tl-time__to faint">→ {timeOf(item.to)}</span>
                 ) : null}
               </div>
               <div className="tl-rail">

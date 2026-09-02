@@ -262,6 +262,31 @@ Cerrada el 2026-09-02, con el core de la sesión paralela (`acknowledged_at`, `P
 - **Chip de terminales abiertas** junto a Terminal, y sólo cuando el core las ha contado alguna vez
   (`terminals.at !== null`). Un cero que en realidad es «no lo sé» es peor que no pintar nada.
 
+### [x] UX-14 · Empezar una sesión desde cero (front de TEC-10)
+
+Cerrada el 2026-09-02 sobre el core de la sesión paralela (`POST /api/sessions/new`). Hasta ahora
+sólo se podía continuar lo que ya existía: para abrir una conversación nueva había que ir a la
+máquina, arrancarla a mano y esperar a que el índice la viera.
+
+- **Trabajo y terminal viva se eligen a la vista**, con el control segmentado y una línea que dice
+  qué hace cada uno. No son la misma cosa —uno deja evidencia, el otro es un TTY— y esconder la
+  elección en un desplegable hace que se acabe eligiendo por descarte.
+- **No se ofrece lo imposible**: goro1 no tiene ningún agente y OpenCode sólo está en dos máquinas,
+  así que las combinaciones que no existen salen deshabilitadas y con el motivo. Pero «no lo he
+  comprobado» no es «no lo tiene»: mientras el sondeo no conteste no se deshabilita nada, que es la
+  lección de HZ-04.
+- **El prompt es opcional**: sin él se crea el workspace vacío y la primera tarea se escribe en el
+  compositor, como en cualquier otro. Con él, además se lanza.
+- **Dos estados nuevos que la pantalla sabe contar**: `sessionLaunched: false` («sin estrenar»: la
+  conversación no existe aún en la máquina, así que un historial vacío no es una pérdida) y
+  `sessionPending` («id asignándose»: Codex y OpenCode eligen el suyo y lo dicen al arrancar, así
+  que ese identificador no se ofrece para copiar todavía).
+
+Entradas: botón en el explorador —buscar sirve para continuar; cuando no hay nada que continuar, se
+empieza—, primera acción rápida de la portada, la paleta con Ctrl+K, y el estado vacío del
+explorador. Prueba E2E: «empezar una sesión desde cero», por el camino sin prompt, que es el que
+deja el estado raro.
+
 ### [x] UX-13 · La línea de tiempo no repite lo mismo cuatro veces
 
 Cerrada el 2026-09-02. Un agente que razona emite el mismo evento cada pocos segundos, y la
@@ -446,11 +471,30 @@ disponible, semana 95%, con sus horas de reinicio. Es más fresco, más barato y
 versión del CLI que haya en cada máquina; el sondeo queda de respaldo para cuando no hay actividad
 reciente.
 
-### TEC-10 · No se puede empezar una sesión nueva desde Jarvis
-Todo run hace `resume` de una sesión existente. Para estrenar una conversación en una máquina hay
-que crearla fuera y esperar a que el índice la vea. El stack anterior tenía `resume: false` en su
-herramienta; aquí no hay equivalente, y se notó al probar OpenCode en vultr, donde no había ninguna
-sesión indexada que reanudar.
+### [x] TEC-10 · Empezar una sesión desde cero
+
+Hecho 2026-09-02 · `POST /api/sessions/new`, migración 9, `workspaces/{use-cases,repository}.ts`,
+`runs/service.ts`, `adapters/claude.ts`
+
+Se elige agente, máquina, carpeta opcional y qué se quiere: **un trabajo** o **una terminal viva**.
+Antes sólo se podía continuar lo que ya existía, así que estrenar obligaba a ir a la máquina,
+arrancar la conversación a mano y esperar a que el índice la viera.
+
+Lo que costó decidir fue de quién es el identificador. **Claude acepta `--session-id`**, así que
+Jarvis lo pone y el workspace nace con su identidad definitiva. **Codex y OpenCode** generan el
+suyo y lo dicen en su primer evento: hasta entonces el workspace lleva uno provisional
+(`sessionPending`) y lo **adopta una sola vez** — la identidad de un workspace no cambia por ningún
+otro motivo (ADR-005).
+
+El `prompt` es opcional: sin él se crea la sesión y se escribe la primera instrucción en el
+compositor, como en cualquier otra. Quien decide si un trabajo estrena o continúa es el core, no
+quien llama: mirar `sessionLaunched` es más fiable que pedirle a la interfaz que se acuerde.
+
+Comprobado contra las máquinas: Claude en el bastión (`SESION-NUEVA-OK`), Codex adoptando su id
+real (`01a06448-…`, `CODEX-NUEVA-OK`) y una tmux estrenada desde cero.
+
+Esto obligó a cambiar un contrato congelado —`ADAPT-CLAUDE-01/no-resume` ahora lleva el
+`--session-id`—; el fixture lleva la nota de por qué, y se añadió el caso contrario.
 
 ### TEC-11 · Una sesión sin `cwd` conocido no se puede reanudar, y el error no lo dice
 Claude Code guarda las conversaciones por directorio: `claude --resume <id>` desde otro sitio

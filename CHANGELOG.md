@@ -64,6 +64,11 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **Se puede empezar una sesión desde cero**: eliges agente, máquina, carpeta y permiso, y si
+  quieres un trabajo o una terminal viva. Antes había que ir a la máquina, arrancarla a mano y
+  esperar a que el índice la viera. Las combinaciones que no existen —una máquina sin ese agente—
+  no se ofrecen, y si dejas la primera tarea en blanco se crea el workspace vacío y la escribes
+  allí, como en cualquier otro.
 - **La actividad deja de repetir lo mismo**: los eventos idénticos seguidos —un agente razonando
   emite uno cada pocos segundos— se cuentan una vez, con cuántas veces pasó y desde cuándo hasta
   cuándo. Lo distinto no se junta: dos respuestas seguidas siguen siendo dos. Y lo que llegaba como
@@ -139,6 +144,10 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   antes de lo que tenga efectos, y cierra con una síntesis que cita los trabajos por su id y
   ofrece qué hacer a continuación. Habla tanto con la API de Anthropic como con cualquier
   endpoint compatible con OpenAI, que es lo que permite usar la credencial que ya hubiera.
+
+- **Empezar una sesión desde cero**: se elige agente, máquina y carpeta, y si se quiere mandar un
+  trabajo o abrir una terminal viva. La conversación se estrena desde la consola en vez de tener
+  que ir a la máquina a crearla y esperar a que el índice la vea.
 
 ### Corregido durante la migración
 

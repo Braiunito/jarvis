@@ -18,6 +18,7 @@ import { navigate } from '../router.js';
 import { Empty, ErrorNote, Link, Loading, RunStatusBadge, StaleNote, relativeTime } from '../ui/bits.jsx';
 import { Donut, Meter, SERIES_COLORS } from '../ui/charts.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, STATUS_ICON } from '../ui/icons.jsx';
+import { NewSessionButton } from '../ui/new-session.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { Card, DataRow, Stat } from '../ui/primitives.jsx';
 
@@ -165,6 +166,9 @@ export function ExplorerScreen(): JSX.Element {
             </button>
           ) : null}
 
+          {/* Buscar sirve para continuar; cuando no hay nada que continuar, se empieza. */}
+          <NewSessionButton className="btn small primary" />
+
           {filtersActive ? (
             <button type="button" className="btn small ghost" onClick={() => {
               setQuery('');
@@ -289,10 +293,13 @@ export function ExplorerScreen(): JSX.Element {
                 title="El índice barrió y no encontró ninguna sesión"
                 hint={`Último barrido ${relativeTime(sessions.data.indexScannedAt)}. Aquí aparecen las sesiones de Claude, Codex y OpenCode que haya en las máquinas de la flota, así que esto dice algo de la flota, no del índice.`}
                 action={
-                  <Link to="/health" className="btn">
-                    <Glyph icon={NAV_ICON.health} />
-                    Ver si los saltos responden
-                  </Link>
+                  <>
+                    <NewSessionButton />
+                    <Link to="/health" className="btn">
+                      <Glyph icon={NAV_ICON.health} />
+                      Ver si los saltos responden
+                    </Link>
+                  </>
                 }
               />
             )
