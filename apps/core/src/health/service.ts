@@ -28,12 +28,25 @@ const STARTED_AT = new Date();
 export class HealthService {
   readonly #deps: HealthServiceDeps;
   #lastSweepAt: string | null = null;
+  #lastRetentionAt: string | null = null;
+  #lastRetention: { compactedEvents: number; droppedEvents: number; bytesFreed: number } | null = null;
 
   constructor(deps: HealthServiceDeps) {
     this.#deps = deps;
   }
 
   noteSweep(at: string): void { this.#lastSweepAt = at; }
+
+  /**
+   * Lo mismo para la retención de eventos (ADR-007), y con el mismo motivo.
+   *
+   * Se guarda además lo que hizo la última pasada: un barrido que dice «ok» sin decir cuánto
+   * limpió no distingue «no hacía falta» de «no encontró nada porque está roto».
+   */
+  noteRetention(at: string, report: { compactedEvents: number; droppedEvents: number; bytesFreed: number }): void {
+    this.#lastRetentionAt = at;
+    this.#lastRetention = report;
+  }
 
   async snapshot({ probeHosts = true }: { probeHosts?: boolean } = {}): Promise<Health> {
     const checks: Record<string, HealthCheck> = {};
@@ -71,6 +84,11 @@ export class HealthService {
       : { status: 'ok', detail: { active: this.#deps.runs.countActive() } };
 
     checks['runnerSweep'] = { status: this.#lastSweepAt ? 'ok' : 'unknown', lastAt: this.#lastSweepAt };
+    checks['eventRetention'] = {
+      status: this.#lastRetentionAt ? 'ok' : 'unknown',
+      lastAt: this.#lastRetentionAt,
+      ...(this.#lastRetention ? { detail: { ...this.#lastRetention } } : {}),
+    };
 
     const statuses = Object.values(checks).map((check) => check.status);
     const status: Health['status'] = statuses.includes('failed')

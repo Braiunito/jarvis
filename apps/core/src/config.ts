@@ -62,6 +62,18 @@ export const config = {
   sweepIntervalMs: Number(env['JARVIS_SWEEP_INTERVAL_MS'] || 6 * 60 * 60 * 1000),
   spoolRetentionDays: Number(env['JARVIS_SPOOL_RETENTION_DAYS'] || 7),
 
+  /**
+   * Retención de eventos en la base del core (ADR-007).
+   *
+   * Lo que pesa del event log no es la historia —quién ejecutó qué y cómo acabó— sino las
+   * salidas de herramienta y los volcados crudos, que dejan de mirarse a los pocos días. A los
+   * 7 se sustituyen por su huella y un resumen; a los 30 queda sólo el esqueleto del trabajo.
+   */
+  eventCompactAfterDays: Number(env['JARVIS_EVENT_COMPACT_AFTER_DAYS'] || 7),
+  eventDropAfterDays: Number(env['JARVIS_EVENT_DROP_AFTER_DAYS'] || 30),
+  eventSummaryChars: Number(env['JARVIS_EVENT_SUMMARY_CHARS'] || 200),
+  retentionIntervalMs: Number(env['JARVIS_RETENTION_INTERVAL_MS'] || 6 * 60 * 60 * 1000),
+
   capabilityTtlMs: Number(env['JARVIS_CAPABILITY_TTL_MS'] || 10 * 60 * 1000),
   usageTtlMs: Number(env['JARVIS_USAGE_TTL_MS'] || 5 * 60 * 1000),
   usageProbeTimeoutMs: Number(env['JARVIS_USAGE_PROBE_TIMEOUT_MS'] || 20_000),

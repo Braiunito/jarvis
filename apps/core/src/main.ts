@@ -14,6 +14,8 @@ async function start(): Promise<void> {
   // Reconciliar antes de aceptar escrituras: lo primero es enterarse de qué quedó vivo.
   const reconciled = await services.supervisor.start();
   services.planSupervisor.start();
+  // Limpiar no depende de la flota: la base es local y esto corre aunque no haya hosts.
+  services.retention.start();
   console.log(`jarvis-core ${VERSION} starting`);
   console.log(`  database   : ${config.database}`);
   console.log(`  hosts      : ${config.hosts.join(', ')}`);

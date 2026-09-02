@@ -21,6 +21,7 @@ import { RunEventBus } from './runs/events-bus.js';
 import { RemoteRunner } from './runs/remote-runner.js';
 import { RunService } from './runs/service.js';
 import { RunSupervisor } from './runs/supervisor.js';
+import { RetentionSupervisor } from './runs/retention.js';
 import { AttachmentService } from './attachments/service.js';
 import { UsageService } from './usage/service.js';
 import { HealthService } from './health/service.js';
@@ -69,6 +70,7 @@ export interface CoreServices {
   runRepository: RunRepository;
   runs: RunService;
   supervisor: RunSupervisor;
+  retention: RetentionSupervisor;
   attachments: AttachmentService;
   usage: UsageService;
   health: HealthService;
@@ -187,6 +189,20 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     maxToolCalls: config.assistantMaxToolCalls,
   });
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
+
+  /**
+   * La retención de eventos (ADR-007), que a diferencia del barrido de spools no necesita que
+   * ninguna máquina responda: la base es local y se limpia aunque la flota esté apagada entera.
+   */
+  const retention = new RetentionSupervisor({
+    db, clock, intervalMs: config.retentionIntervalMs,
+    policy: {
+      compactAfterDays: config.eventCompactAfterDays,
+      dropAfterDays: config.eventDropAfterDays,
+      summaryChars: config.eventSummaryChars,
+    },
+  });
+  retention.onSweep = (at, report) => health.noteRetention(at, report);
   const imports = new ImportService({ db, clock, workspaces: workspaceRepository, audit, bastionHost: config.bastionHost });
   const titles = new TitleService({
     perMinute: config.titlePerMinute,
@@ -221,10 +237,11 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
-    plans, planSupervisor, imports, titles, metrics,
+    plans, planSupervisor, retention, imports, titles, metrics,
     close() {
       supervisor.stop();
       planSupervisor.stop();
+      retention.stop();
       db.close();
     },
   };

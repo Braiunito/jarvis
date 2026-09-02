@@ -432,8 +432,37 @@ Hoy OpenCode va por `opencode run` como los demás. Su servidor HTTP/SSE daría 
 ### TEC-02 · Recetas y runbooks tipados
 Sólo cuando haya datos de qué se repite de verdad. No inventar un motor de workflows antes.
 
-### TEC-03 · Compactación de eventos antiguos
-La política está en ADR-007; falta el trabajo periódico que la aplica.
+### [x] TEC-03 · Compactación de eventos antiguos
+
+Hecho el 2026-09-02 · `apps/core/src/runs/retention.ts` (nuevo), `apps/core/test/retention.test.ts`
+(nuevo, 12 pruebas), enganchado en `services.ts` y `main.ts`, ajustes en `config.ts`, check
+`eventRetention` en `health/service.ts`.
+
+La política del ADR-007 ya estaba decidida y nadie la aplicaba: el event log crecía para siempre.
+Ahora un barrido periódico —al arrancar y cada 6 h, como el de spools— la ejecuta sobre la base
+local:
+
+- **Entre 7 y 30 días** se compacta sólo el payload pesado (`agent.tool`, `agent.raw`,
+  `runner.stderr`): se sustituye por su huella `sha256`, el tamaño original y un resumen de una
+  línea. El texto y el razonamiento se dejan enteros, que es lo que alguien vuelve a leer.
+- **Pasados los 30** sobreviven los estructurales —estado, destino, arranque, resultado, error—,
+  que son los que hacen que un trabajo antiguo siga siendo legible como historia.
+- **Lo vivo no se toca nunca**, y `seq` no se renumera jamás: los huecos se quedan como huecos,
+  porque es identidad pública y durable (ADR-005 en espíritu, RUN-EVENT-01 en la letra).
+
+Dos decisiones que conviene no deshacer sin motivo. **Sin esquema nuevo**: se pregunta primero a
+`runs` quién ha caducado y se baja después a los eventos de cada uno por su clave primaria
+`(run_id, seq)`, así que no hace falta índice; al revés se lee entera la tabla grande cada seis
+horas para descubrir que casi nada ha caducado. Y **no depende de la flota**: la base es local y se
+limpia aunque no haya un solo host alcanzable, a diferencia del barrido de spools.
+
+La prueba **ejecuta el barrido** contra una base real con trabajos de distintas edades y mira qué
+quedó — no compara la consulta que se generaría. En este proyecto ya pasó lo contrario: una
+limpieza estuvo meses «implementada» porque su test comprobaba la cadena del comando en vez de
+correrlo.
+
+Queda fuera a propósito el «export opcional» que el ADR menciona para lo de más de 30 días: es
+opcional y nadie lo ha pedido todavía.
 
 ### TEC-04 · Migración del almacén de autenticación
 `users.json` → SQLite y/o SimpleWebAuthn. Es una misión aparte con verificador dual y rollback

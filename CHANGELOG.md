@@ -152,6 +152,13 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   trabajo o abrir una terminal viva. La conversación se estrena desde la consola en vez de tener
   que ir a la máquina a crearla y esperar a que el índice la vea.
 
+- **El historial deja de crecer para siempre**: lo que pesa de un trabajo viejo no es su historia
+  —quién lo lanzó, dónde y cómo acabó— sino las salidas de herramienta y los volcados crudos. A
+  los 7 días se sustituyen por su huella y un resumen de una línea; a los 30 queda el esqueleto
+  del trabajo. Nada desaparece en silencio: un evento compactado dice que lo está y cuánto
+  ocupaba, y su número de orden sigue siendo el suyo, así que un enlace a un evento concreto
+  nunca apunta a otro. `/api/health` enseña cuándo fue la última limpieza y cuánto liberó.
+
 ### Corregido durante la migración
 
 Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer el código:
