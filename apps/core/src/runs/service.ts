@@ -15,7 +15,7 @@ import type {
 } from '@jarvis/contracts';
 import { canTransition, isTerminalStatus, JarvisError, PERMISSION_PROFILES } from '@jarvis/contracts';
 import {
-  getAdapter, remoteScript, resolveTarget, strategyPreamble, tmuxRunName,
+  explainResumeFailure, getAdapter, remoteScript, resolveTarget, strategyPreamble, tmuxRunName,
   type CapabilityCache, type RunnerMeta, type SshConfig,
 } from '@jarvis/agent-adapters';
 import type { Clock } from '../platform/clock.js';
@@ -38,6 +38,12 @@ export interface RunServiceDeps {
   clock: Clock;
   sshConfig: SshConfig;
   attachments?: AttachmentService;
+  /**
+   * Encuentra el directorio de una sesión cuyo workspace no lo sabe (TEC-11). Opcional: sin él
+   * todo sigue funcionando, sólo que una sesión sin `cwd` volverá a fallar con «no encuentro esa
+   * conversación» en vez de arreglarse sola.
+   */
+  cwd?: { resolve(ref: { host: string; provider: Provider; sessionId: string }): Promise<{ cwd: string; source: 'index' | 'derived'; alsoMatched: string[] } | null> };
   limits: {
     maxConcurrentRuns: number;
     defaultPermissionProfile: PermissionProfile;
@@ -158,6 +164,31 @@ export class RunService {
     return resolveSpoolRoot(this.#deps.limits.spoolRoot, host, home);
   }
 
+  /**
+   * Aprende el directorio de una sesión y lo deja escrito en su workspace.
+   *
+   * Sin lanzar: si el índice no responde o el host no contesta, se devuelve el workspace tal cual
+   * y el trabajo sigue su camino. Perder la deducción es peor que no tenerla, pero mucho mejor que
+   * no poder lanzar nada.
+   */
+  async #learnCwd(workspace: Workspace): Promise<Workspace> {
+    try {
+      const found = await this.#deps.cwd?.resolve(workspace.ref);
+      if (!found) return workspace;
+      this.#deps.workspaces.setCwd?.(workspace.id, found.cwd, found.source);
+      this.#deps.audit.record({
+        actorUser: 'system',
+        eventType: 'workspace.cwd_resolved',
+        workspaceId: workspace.id,
+        host: workspace.ref.host,
+        payload: { cwd: found.cwd, source: found.source, alsoMatched: found.alsoMatched },
+      });
+      return { ...workspace, cwd: found.cwd, cwdSource: found.source };
+    } catch {
+      return workspace;
+    }
+  }
+
   /** El root con el que se creó un run. Se lee del propio run, no de la configuración de hoy. */
   #spoolRootOf(run: Run): string | undefined {
     return spoolRootOf(this.#deps.repository.row(run.id)?.remote_spool_dir, run.id);
@@ -214,7 +245,18 @@ export class RunService {
      * recordara un estado que el servidor ya conoce.
      */
     const startsSession = request.startsSession ?? workspace.sessionLaunched === false;
-    const target = await this.planTarget(workspace, request);
+    /**
+     * Una sesión que ya existe pero cuyo directorio no sabemos.
+     *
+     * Claude archiva por carpeta: sin el `cwd` correcto, `--resume` no la encuentra y el trabajo
+     * muere diciendo que no existe. Se intenta averiguar aquí, una vez, y el resultado se guarda
+     * en el workspace para que el siguiente trabajo ya no pague la consulta. Si no se consigue, el
+     * trabajo sale igual: fallará, pero con una explicación que dice de verdad qué pasó.
+     */
+    const effective = !workspace.cwd && !startsSession && this.#deps.cwd
+      ? await this.#learnCwd(workspace)
+      : workspace;
+    const target = await this.planTarget(effective, request);
     // El spool vive en el host que ejecuta, así que su raíz se resuelve con el home de ESE host.
     const executionCapabilities = await this.#deps.capabilities.detect(target.executionHost);
     const spoolRoot = this.#spoolRootFor(target.executionHost, executionCapabilities.home);
@@ -509,6 +551,27 @@ export class RunService {
           resultSummary = typeof event.text === 'string' && event.text.trim()
             ? event.text.slice(0, 4000)
             : lastText;
+          /**
+           * «No conversation found with session ID» no significa lo que parece.
+           *
+           * El CLI archiva por directorio, así que ese mensaje quiere decir «aquí no está», no
+           * «no existe». Quien lo lee ve la sesión listada en Jarvis y concluye que se ha perdido
+           * algo. Se traduce a lo que de verdad pasó, y se deja como resultado del trabajo: es el
+           * único texto que se mira cuando algo termina en rojo.
+           */
+          if (!event.ok) {
+            const hint = explainResumeFailure({
+              provider: run.provider,
+              text: resultSummary,
+              sessionId: run.sessionId,
+              cwd: run.cwd,
+              workHost: run.workHost,
+            });
+            if (hint) {
+              events.push({ type: 'agent.error', at, payload: { message: hint, code: 'SESSION_NOT_IN_CWD' } });
+              resultSummary = hint;
+            }
+          }
         }
       }
     }

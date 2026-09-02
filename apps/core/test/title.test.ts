@@ -400,3 +400,45 @@ describe('el ruido de la CLI no titula', () => {
     expect(calls).toBe(0);
   });
 });
+
+/**
+ * Estrenar una sesión: elegir agente y máquina y empezar de cero.
+ *
+ * Hasta ahora sólo se podía continuar lo que ya existía en la máquina. Lo que se prueba aquí es lo
+ * que hace que eso funcione sin dejar identidades a medias: quién pone el identificador, quién
+ * decide que un trabajo arranca el agente limpio, y que adoptar el id del agente ocurra una vez.
+ */
+describe('empezar una sesión desde cero', () => {
+  it('Claude nace con el identificador puesto por Jarvis', () => {
+    const workspace = services.workspaces.startSession(
+      { host: 'bastion', provider: 'claude', cwd: '/srv/app' }, user,
+    );
+    // Claude acepta `--session-id`, así que la identidad es definitiva desde el principio.
+    expect(workspace.ref.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(workspace.sessionPending).toBe(false);
+    // Todavía no existe al otro lado: el primer trabajo será el que la estrene.
+    expect(workspace.sessionLaunched).toBe(false);
+  });
+
+  it('Codex queda esperando el identificador que diga el agente, y lo adopta una sola vez', () => {
+    const workspace = services.workspaces.startSession({ host: 'bastion', provider: 'codex' }, user);
+    expect(workspace.sessionPending).toBe(true);
+    const provisional = workspace.ref.sessionId;
+
+    services.workspaces.adoptSession(workspace.id, 'thread-de-verdad');
+    const adoptado = services.workspaces.require(workspace.id);
+    expect(adoptado.ref.sessionId).toBe('thread-de-verdad');
+    expect(adoptado.sessionPending).toBe(false);
+    expect(adoptado.ref.sessionId).not.toBe(provisional);
+
+    // Y no vuelve a cambiar: la identidad de un workspace no es negociable (ADR-005).
+    services.workspaces.adoptSession(workspace.id, 'otro-thread');
+    expect(services.workspaces.require(workspace.id).ref.sessionId).toBe('thread-de-verdad');
+  });
+
+  it('una sesión ya estrenada no vuelve a marcarse como nueva', () => {
+    const workspace = services.workspaces.startSession({ host: 'bastion', provider: 'claude' }, user);
+    services.workspaces.markSessionLaunched(workspace.id);
+    expect(services.workspaces.require(workspace.id).sessionLaunched).toBe(true);
+  });
+});

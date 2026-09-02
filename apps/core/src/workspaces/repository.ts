@@ -21,6 +21,7 @@ export interface WorkspaceRow {
   source_conversation_id: string | null;
   session_pending: number | null;
   session_launched: number | null;
+  cwd_source: string | null;
 }
 
 export const toWorkspace = (row: WorkspaceRow): Workspace => ({
@@ -36,6 +37,7 @@ export const toWorkspace = (row: WorkspaceRow): Workspace => ({
   provenance: row.provenance as Workspace['provenance'],
   sessionPending: row.session_pending === 1,
   sessionLaunched: row.session_launched !== 0,
+  cwdSource: (row.cwd_source as Workspace['cwdSource']) ?? null,
 });
 
 export class WorkspaceRepository {
@@ -68,15 +70,31 @@ export class WorkspaceRepository {
     this.#db.prepare(`INSERT INTO workspaces
       (id, session_host, provider, session_id, cwd, source_root, title, created_by, created_at,
        updated_at, last_opened_at, provenance, source_installation_id, source_conversation_id,
-       session_pending, session_launched)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+       session_pending, session_launched, cwd_source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       workspace.id, workspace.ref.host, workspace.ref.provider, workspace.ref.sessionId,
       workspace.cwd, workspace.sourceRoot, workspace.title, workspace.createdBy,
       workspace.createdAt, workspace.updatedAt, workspace.lastOpenedAt, workspace.provenance,
       source?.installationId ?? null, source?.conversationId ?? null,
       workspace.sessionPending ? 1 : 0,
       workspace.sessionLaunched === false ? 0 : 1,
+      workspace.cwd ? workspace.cwdSource ?? 'index' : null,
     );
+  }
+
+  /**
+   * Fija el directorio de trabajo y de dónde salió.
+   *
+   * Una deducción (`derived`) no pisa nunca lo que escribió una persona (`user`): la condición
+   * está en el SQL y no en quien llama, porque el sitio donde se decide quién gana tiene que ser
+   * uno solo. Un directorio escrito a mano es la corrección de la deducción, no su víctima.
+   */
+  setCwd(workspaceId: string, cwd: string, source: 'index' | 'derived' | 'user', at: string): boolean {
+    const guard = source === 'user' ? '' : " AND COALESCE(cwd_source, '') <> 'user'";
+    const result = this.#db.prepare(
+      `UPDATE workspaces SET cwd = ?, cwd_source = ?, updated_at = ? WHERE id = ?${guard}`,
+    ).run(cwd, source, at, workspaceId);
+    return result.changes > 0;
   }
 
   /** La conversación ya existe en la máquina: el siguiente trabajo continúa en vez de estrenar. */
@@ -117,13 +135,20 @@ export class WorkspaceRepository {
         last_opened_at = ?,
         updated_at = ?,
         cwd = COALESCE(?, cwd),
+        -- Lo que llega aquí es lo que declaraba el transcript. Se anota como tal para poder
+        -- distinguirlo de un directorio deducido, y sin pisar el que escribió una persona.
+        cwd_source = CASE
+          WHEN cwd_source = 'user' THEN cwd_source
+          WHEN ? IS NULL THEN cwd_source
+          ELSE 'index' END,
         source_root = COALESCE(?, source_root),
         -- Ni el que escribió una persona ni el que generamos aquí: los dos son mejores que el del
         -- índice, que es lo que puso la CLI y suele ser un hash. Proteger sólo 'user' hacía que
         -- volver al explorador y pulsar la misma sesión deshiciera el nombre automático, y desde
         -- fuera eso se ve como que el título no se guarda.
         title = CASE WHEN title_source IN ('user', 'auto') THEN title ELSE COALESCE(?, title) END
-      WHERE id = ?`).run(at, at, patch.cwd ?? null, patch.sourceRoot ?? null, patch.title ?? null, id);
+      WHERE id = ?`).run(at, at, patch.cwd ?? null, patch.cwd ?? null, patch.sourceRoot ?? null,
+      patch.title ?? null, id);
   }
 
   recent(limit = 20): Workspace[] {

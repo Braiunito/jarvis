@@ -33,6 +33,17 @@ export const Workspace = Type.Object({
    * el workspace existe, pero al otro lado no hay nada que reanudar hasta el primer trabajo.
    */
   sessionLaunched: Type.Optional(Type.Boolean()),
+  /**
+   * De dónde salió el `cwd`.
+   *
+   * `index` es lo que el propio transcript declaraba; `derived` lo dedujo el core del nombre del
+   * directorio de proyecto de Claude Code y lo confirmó contra la máquina, que es fiable pero no
+   * es lo mismo; `user` lo escribió una persona. La interfaz debería decirlo cuando es `derived`:
+   * si la deducción se equivocara, el agente leería los ficheros de otra carpeta.
+   */
+  cwdSource: Type.Optional(Type.Union([
+    Type.Literal('index'), Type.Literal('derived'), Type.Literal('user'), Type.Null(),
+  ])),
 });
 export type Workspace = Static<typeof Workspace>;
 

@@ -126,6 +126,21 @@ export class SessionService {
     }
   }
 
+  /**
+   * Dónde guardó el CLI esta conversación, según el índice.
+   *
+   * Devuelve el path del transcript además del `cwd`, porque cuando el `cwd` viene vacío —una
+   * sesión sin ningún turno no lo declara en ninguna línea— el nombre del directorio de proyecto
+   * es la única pista que queda para deducirlo (TEC-11). El path **no se persiste**: es un dato
+   * interno del índice y sale de aquí sólo para resolverlo en el momento (ADR-005).
+   */
+  async locate(ref: SessionRef): Promise<{ path: string; cwd: string | null; sourceRoot: string | null } | null> {
+    const list = await this.#deps.index.list({ host: ref.host, provider: ref.provider, limit: 500 });
+    const row = list.rows.find((candidate) => candidate.session_id === ref.sessionId);
+    if (!row) return null;
+    return { path: row.path, cwd: row.cwd || null, sourceRoot: row.source_root || null };
+  }
+
   async freshness(): Promise<HostFreshness[]> {
     const hosts = await this.#deps.index.hosts();
     return freshnessFrom(hosts.rows, this.#deps.bastionHost, this.#deps.clock.nowMs(), hosts.stale, hosts.error);

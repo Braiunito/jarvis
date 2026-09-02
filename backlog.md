@@ -540,12 +540,39 @@ real (`01a06448-…`, `CODEX-NUEVA-OK`) y una tmux estrenada desde cero.
 Esto obligó a cambiar un contrato congelado —`ADAPT-CLAUDE-01/no-resume` ahora lleva el
 `--session-id`—; el fixture lleva la nota de por qué, y se añadió el caso contrario.
 
-### TEC-11 · Una sesión sin `cwd` conocido no se puede reanudar, y el error no lo dice
-Claude Code guarda las conversaciones por directorio: `claude --resume <id>` desde otro sitio
-responde «No conversation found with session ID», que suena a sesión inexistente cuando lo que pasa
-es que se está mirando en la carpeta equivocada. Pasó con una sesión real de vultr cuyo `cwd` el
-índice no traía. Hace falta (a) derivar el directorio del path del transcript, que lo codifica, y
-(b) que el mensaje diga que el problema es el directorio.
+### [x] TEC-11 · Una sesión sin `cwd` conocido no se puede reanudar, y el error no lo dice
+
+Hecho 2026-09-02 · `packages/agent-adapters/src/project-dir.ts` (nuevo),
+`apps/core/src/sessions/cwd-resolver.ts` (nuevo), `runs/service.ts`, `sessions/service.ts`,
+`workspaces/{repository,use-cases}.ts`, migración 10, `adapters/claude.ts`
+
+Claude Code guarda las conversaciones por directorio, así que `claude --resume <id>` desde otro
+sitio responde «No conversation found with session ID»: suena a sesión inexistente cuando lo que
+pasa es que se está mirando en la carpeta equivocada. Diez sesiones de la flota estaban así.
+
+**Por qué el path no se puede invertir a ciegas.** El slug del proyecto es el `cwd` con cada
+carácter no alfanumérico convertido en guion, y ese aplanado pierde información:
+`/var/www/vhosts/fmgagro.com` y `/var/www/vhosts/fmgagro/com` producen exactamente el mismo
+nombre. Así que se generan las lecturas posibles —cada guion vuelve a ser una barra o un `?` de
+glob, las más literales primero— y **decide la máquina**, en una sola llamada, cuál existe. Las
+cinco sesiones sin `cwd` de la flota se resolvieron a la primera: `contaduria.braianmaciel.com` en
+vultr, `fmgagro.com` y `crm.nextambulances.com` en goro3, `/var/www/vhosts` y `/root` en goro2.
+
+**Lo que apareció por el camino y valía más que la tarea.** En la misma llamada se comprueba el
+directorio que declara el índice, no sólo los deducidos: un `cwd` que se movió o se borró hacía
+morir el trabajo con un `cd` fallido y un código de salida 2, sin nada que lo explicara. Y el
+adaptador no leía el campo `errors` del resultado, que es donde Claude pone el motivo cuando
+falla: el trabajo terminaba en rojo y con el resultado en blanco.
+
+El directorio deducido se guarda con su origen (`Workspace.cwdSource`: `index` | `derived` |
+`user`) porque no es lo mismo un dato que declaró el transcript que uno que dedujo el sistema, y
+la interfaz debería poder decirlo. Un directorio escrito por una persona no lo pisa ninguna
+deducción posterior, y esa condición vive en el SQL, no en quien llama.
+
+Pruebas: `packages/legacy-contract-tests/test/project-dir.test.ts` (RESUME-CWD-01, RESUME-HINT-01;
+el barrido se **ejecuta** en sh, bash y zsh, que es la lección de `buildSweepCommand`),
+`apps/core/test/cwd-resolver.test.ts` y dos casos de punta a punta en `durable-runs.test.ts`
+contra un directorio real.
 
 ### TEC-08 · El sondeo de cuota de Claude depende de una pantalla de terminal
 Leer `/usage` es abrir un TTY desechable, teclear dentro y raspar el texto: doce segundos y roto

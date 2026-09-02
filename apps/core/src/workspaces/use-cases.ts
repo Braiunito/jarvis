@@ -53,6 +53,8 @@ export class WorkspaceService {
       id: newWorkspaceId(),
       ref: { host: resolvedHost, provider, sessionId: randomUUID() },
       cwd: cwd ?? null,
+      // La carpeta la eligió quien creó la sesión: ninguna deducción posterior la pisa.
+      cwdSource: cwd ? 'user' : null,
       sourceRoot: null,
       title: null,
       createdBy: user.username,
@@ -74,6 +76,11 @@ export class WorkspaceService {
       payload: { provider, sessionId: workspace.ref.sessionId, pending: workspace.sessionPending },
     });
     return workspace;
+  }
+
+  /** Fija el directorio de trabajo, diciendo de dónde salió. Devuelve si llegó a escribirse. */
+  setCwd(workspaceId: string, cwd: string, source: 'index' | 'derived' | 'user'): boolean {
+    return this.#repository.setCwd(workspaceId, cwd, source, this.#clock.nowIso());
   }
 
   /** El agente dijo su identificador: se adopta si el workspace lo estaba esperando. */

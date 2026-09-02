@@ -350,4 +350,19 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE workspaces ADD COLUMN session_launched INTEGER NOT NULL DEFAULT 1;
     `,
   },
+  {
+    version: 10,
+    name: 'workspace_cwd_source',
+    sql: `
+      -- De dónde salió el directorio de trabajo del workspace.
+      --
+      -- Hasta ahora el \`cwd\` sólo podía venir del índice, así que no hacía falta distinguir. Con
+      -- la derivación de TEC-11 el core puede **deducirlo** del nombre del directorio de proyecto
+      -- de Claude Code y confirmarlo contra la máquina, y eso es un dato de otra clase: acertado
+      -- casi siempre, adivinado al fin y al cabo. Marcarlo permite que la interfaz lo diga en vez
+      -- de presentarlo como un hecho, y que un directorio escrito por una persona no lo pise
+      -- nunca una deducción posterior.
+      ALTER TABLE workspaces ADD COLUMN cwd_source TEXT;
+    `,
+  },
 ];

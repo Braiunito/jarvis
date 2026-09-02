@@ -159,6 +159,16 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   ocupaba, y su número de orden sigue siendo el suyo, así que un enlace a un evento concreto
   nunca apunta a otro. `/api/health` enseña cuándo fue la última limpieza y cuánto liberó.
 
+- **Una conversación ya no se pierde porque nadie sepa en qué carpeta vive**: Claude Code archiva
+  por directorio, así que reanudarla desde otro sitio responde «No conversation found with session
+  ID» —que suena a sesión borrada cuando lo único que pasa es que se está mirando donde no es—. El
+  core deduce ahora el directorio del nombre con que Claude guardó el proyecto y lo **confirma
+  contra la máquina** antes de usarlo; el workspace se queda con él marcado como deducción, para
+  que la consola pueda decir que eso lo dedujo el sistema en vez de presentarlo como un hecho. De
+  paso se comprueba también el directorio que declaraba el índice: uno que se movió o se borró
+  hacía morir el trabajo con un `cd` fallido. Y si aun así no se encuentra, el error explica que el
+  problema es el directorio y no la sesión.
+
 ### Corregido durante la migración
 
 Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer el código:

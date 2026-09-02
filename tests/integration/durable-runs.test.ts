@@ -5,7 +5,7 @@
  * spool en ficheros reales. Matar el core aquí significa cerrar sus servicios y levantar otros
  * nuevos contra la misma base y los mismos hosts, que es exactamente lo que hace `docker restart`.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -272,6 +272,61 @@ describe('M3 · cancelación', () => {
     const again = await harness.app.inject({ method: 'POST', url: `/api/runs/${run.id}/cancel` });
     expect(again.statusCode).toBe(200);
     expect(again.json<{ run: Run }>().run.status).toBe('cancelled');
+  });
+});
+
+describe('TEC-11 · una sesión cuyo directorio nadie sabía', () => {
+  /**
+   * Directorio real, no simulado: la sonda pregunta a la máquina con `test -d`, así que probarla
+   * contra un árbol inventado no probaría nada. El nombre es alfanumérico porque el patrón viaja
+   * al shell sin comillas, que es lo que le permite ser un glob.
+   */
+  const proyecto = join(tmpdir(), `jarvisdemo${process.pid}`, 'miproyecto');
+
+  it('deduce el directorio del nombre del proyecto, lo usa y lo deja escrito', async () => {
+    mkdirSync(proyecto, { recursive: true });
+    const slug = proyecto.replace(/[^A-Za-z0-9]/g, '-');
+    index.rows.push(indexRow({
+      session_key: 'bastion:claude:sid-sincwd',
+      host: 'bastion',
+      session_id: 'sid-sincwd',
+      // Una sesión sin ningún turno no declara su `cwd` en ninguna línea del transcript, y son
+      // justo las que el índice trae vacías: diez había en la flota.
+      cwd: '',
+      path: `/home/dev/.claude/projects/${slug}/sid-sincwd.jsonl`,
+    }));
+
+    const workspaceId = await openWorkspace(harness.app, 'sid-sincwd');
+    const { run } = (await createRun(harness.app, workspaceId, 'sigue donde lo dejaste')).json<{ run: Run }>();
+
+    // El trabajo sale hacia el directorio deducido, no hacia el directorio por defecto.
+    expect(run.cwd).toBe(proyecto);
+    const finished = await waitFor(() => runOf(harness.app, run.id), (value) => value.status === 'completed', {
+      what: 'el run con el directorio deducido', timeoutMs: 30_000,
+    });
+    expect(finished.status).toBe('completed');
+
+    // Y queda escrito, marcado como deducción: el siguiente trabajo ya no paga la consulta, y la
+    // interfaz puede decir que eso lo dedujo el sistema en vez de presentarlo como un hecho.
+    const workspace = (await harness.app.inject({ method: 'GET', url: `/api/workspaces/${workspaceId}` }))
+      .json<{ workspace: { cwd: string | null; cwdSource: string | null } }>().workspace;
+    expect(workspace.cwd).toBe(proyecto);
+    expect(workspace.cwdSource).toBe('derived');
+
+    rmSync(join(tmpdir(), `jarvisdemo${process.pid}`), { recursive: true, force: true });
+  });
+
+  it('un directorio que no existe no se inventa: el trabajo sale sin él', async () => {
+    index.rows.push(indexRow({
+      session_key: 'bastion:claude:sid-fantasma',
+      host: 'bastion',
+      session_id: 'sid-fantasma',
+      cwd: '',
+      path: '/home/dev/.claude/projects/-esto-no-existe-en-ninguna-parte/sid-fantasma.jsonl',
+    }));
+    const workspaceId = await openWorkspace(harness.app, 'sid-fantasma');
+    const { run } = (await createRun(harness.app, workspaceId, 'a ver qué pasa')).json<{ run: Run }>();
+    expect(run.cwd).toBeNull();
   });
 });
 

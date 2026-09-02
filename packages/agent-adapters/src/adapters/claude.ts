@@ -42,10 +42,18 @@ interface ClaudeRecord {
   message?: { content?: ClaudeBlock[] };
   is_error?: boolean;
   result?: string;
+  errors?: unknown[];
   num_turns?: number;
   total_cost_usd?: number;
   duration_ms?: number;
   usage?: unknown;
+}
+
+/** Los motivos de un fallo, tal y como los lista el CLI. */
+function errorText(errors: unknown[] | undefined): string | null {
+  if (!Array.isArray(errors) || !errors.length) return null;
+  const parts = errors.map((entry) => (typeof entry === 'string' ? entry : JSON.stringify(entry)));
+  return parts.join('; ') || null;
 }
 
 export const claudeAdapter: AgentAdapter = {
@@ -154,7 +162,14 @@ export const claudeAdapter: AgentAdapter = {
         return {
           type: 'result',
           ok: record.is_error !== true,
-          text: record.result ?? null,
+          /**
+           * Un fallo trae su motivo en `errors` y deja `result` sin poner.
+           *
+           * Sin leerlo, un trabajo que muere porque no encuentra la conversación terminaba en
+           * rojo y con el resultado en blanco: el único sitio donde estaba escrito qué había
+           * pasado era una línea suelta de stderr, fuera del hilo de eventos.
+           */
+          text: record.result ?? errorText(record.errors) ?? null,
           ...(record.session_id ? { sessionId: record.session_id } : {}),
           turns: record.num_turns ?? null,
           costUsd: record.total_cost_usd ?? null,

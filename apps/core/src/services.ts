@@ -15,6 +15,7 @@ import { WorkspaceRepository } from './workspaces/repository.js';
 import { WorkspaceService } from './workspaces/use-cases.js';
 import { HttpSessionIndex, type SessionIndex } from './sessions/index-client.js';
 import { SessionService } from './sessions/service.js';
+import { CwdResolver } from './sessions/cwd-resolver.js';
 import { FleetService } from './fleet/service.js';
 import { RunRepository } from './runs/repository.js';
 import { RunEventBus } from './runs/events-bus.js';
@@ -129,8 +130,18 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     maxBytes: config.attachmentMaxBytes, quotaBytes: config.attachmentQuotaBytes, ttlMs: config.attachmentTtlMs,
   });
 
+  /**
+   * Sesiones de Claude cuyo directorio el índice no trae: se deduce y se confirma contra la
+   * máquina la primera vez que se lanza un trabajo sobre ellas (TEC-11).
+   */
+  const cwdResolver = new CwdResolver({
+    sessions, sshConfig, now: () => clock.nowMs(),
+    onWarn: (message) => console.warn(`[jarvis] ${message}`),
+  });
+
   const runs = new RunService({
     repository: runRepository, runner, workspaces, capabilities, bus, audit, clock, sshConfig, attachments,
+    cwd: cwdResolver,
     limits: {
       maxConcurrentRuns: config.maxConcurrentRuns,
       defaultPermissionProfile: config.defaultPermissionProfile,
