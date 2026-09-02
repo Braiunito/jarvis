@@ -74,6 +74,7 @@ export class SessionService {
          * conocen las dos mitades: lo que el índice cuenta y lo que Jarvis recuerda.
          */
         resumable: !summary.empty || workspace?.sessionLaunched === false,
+
       };
     });
 
@@ -95,7 +96,7 @@ export class SessionService {
   async transcript(
     ref: SessionRef,
     options: { last?: number } = {},
-  ): Promise<{ messages: TranscriptMessage[]; truncated: boolean; messageCount: number | null; preview: string | null }> {
+  ): Promise<{ messages: TranscriptMessage[]; truncated: boolean; messageCount: number | null; preview: string | null; resumable: boolean }> {
     try {
       const payload = await this.#deps.index.transcript(ref, options);
       return {
@@ -117,6 +118,18 @@ export class SessionService {
         // El primer mensaje aprovechable de la sesión, tal y como lo guardó el índice. Llega gratis
         // con la fila que ya se busca para localizar el `session_key`.
         preview: payload.preview ?? null,
+        /**
+         * Si continuar esta conversación tiene sentido, con la misma regla que el explorador.
+         *
+         * Va aquí y no en una consulta aparte porque el dato viaja en la fila que el índice ya
+         * busca para resolver la clave: es un campo más en una respuesta que ya se calcula. Y va
+         * en el transcript y no en el detalle del workspace porque ésa es la petición que la
+         * pantalla hace siempre; ponerlo en la apertura obligaría a pagar el índice cada vez.
+         *
+         * Contarlo con los mensajes que llegan aquí no valdría: una página trae los últimos, y una
+         * sesión que sólo guarda un `/comando` tiene turnos que no dicen nada.
+         */
+        resumable: this.#resumable(ref, payload.empty),
       };
     } catch (error) {
       if (error instanceof JarvisError) throw error;
@@ -151,6 +164,18 @@ export class SessionService {
     const row = list.rows.find((candidate) => candidate.session_id === ref.sessionId);
     if (!row) return null;
     return { path: row.path, cwd: row.cwd || null, sourceRoot: row.source_root || null };
+  }
+
+  /**
+   * Vacía no es lo mismo que inservible.
+   *
+   * Una sesión estrenada desde Jarvis y todavía sin lanzar también está vacía —no existe aún en la
+   * máquina— y su primer trabajo es justo el que la crea. Sin esta excepción, ofrecer «empezar de
+   * nuevo» ahí rompería el flujo que sí funciona.
+   */
+  #resumable(ref: SessionRef, empty: boolean | null | undefined): boolean {
+    if (empty !== true) return true;
+    return this.#deps.workspaces.findByRef(ref)?.sessionLaunched === false;
   }
 
   async freshness(): Promise<HostFreshness[]> {

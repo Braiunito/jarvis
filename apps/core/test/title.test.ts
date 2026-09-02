@@ -357,6 +357,36 @@ describe('sesiones sin nada dentro', () => {
     expect(resumable.get('del-puente')).toBe(false);
     expect(resumable.get('recien-creada')).toBe(true);
   });
+
+  /**
+   * La misma respuesta en la pantalla del workspace, sin pagar una consulta más.
+   *
+   * Ahí no hay lista de sesiones que cruzar, y contar los mensajes que llegan no serviría: una
+   * página trae los últimos, y una sesión que sólo guarda un `/comando` tiene turnos que no dicen
+   * nada. El dato viaja en la fila que el índice ya busca para resolver la clave.
+   */
+  it('el transcript también dice si esa conversación se puede continuar', async () => {
+    const index = new FakeSessionIndex([
+      indexRow({ session_id: 'viva', user_messages: 3, user_text_messages: 3, assistant_messages: 4 }),
+      indexRow({ session_id: 'solo-comandos', path: '/f2.jsonl', user_messages: 2, user_text_messages: 0, assistant_messages: 0 }),
+    ]);
+    const local = buildServices({
+      db: openDatabase({ path: ':memory:' }),
+      clock: fixedClock('2026-09-02T12:00:00.000Z'),
+      index: index as never,
+      model: null,
+      config: { hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-title-spool' },
+    });
+    const ref = (sessionId: string) => ({ host: 'bastion', provider: 'claude' as const, sessionId });
+    const viva = await local.sessions.transcript(ref('viva'));
+    // Dos turnos guardados, pero ninguno dice nada: es de las que no se pueden continuar.
+    const comandos = await local.sessions.transcript(ref('solo-comandos'));
+    local.close();
+
+    expect(viva.resumable).toBe(true);
+    expect(comandos.resumable).toBe(false);
+    expect(comandos.messageCount).toBe(2);
+  });
 });
 
 /**

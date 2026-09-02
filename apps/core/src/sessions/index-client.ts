@@ -52,7 +52,7 @@ export interface SessionQuery {
 export interface SessionIndex {
   list(query: SessionQuery): Promise<{ rows: IndexRow[]; stale: boolean; error: string | null }>;
   hosts(): Promise<{ rows: IndexHostRow[]; stale: boolean; error: string | null }>;
-  transcript(ref: SessionRef, options?: { last?: number }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount?: number | null; preview?: string | null }>;
+  transcript(ref: SessionRef, options?: { last?: number }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount?: number | null; preview?: string | null; empty?: boolean | null }>;
   health(): Promise<{ ok: boolean; error: string | null; lastOkAt: string | null }>;
   /** Cuándo barrió el índice. Opcional: uno antiguo no lo expone y se degrada a «no lo sé». */
   status?(): Promise<{ lastScanAt: string | null }>;
@@ -64,6 +64,21 @@ export interface SessionIndex {
  */
 export const normalizeHost = (host: string, bastionHost: string): string =>
   !host || host === 'local' ? bastionHost : host;
+
+/**
+ * Nadie habló aquí.
+ *
+ * Con un índice que ya cuenta los turnos con texto real, esto incluye las sesiones cuyo único
+ * contenido son envoltorios de comando —las que acaban llamándose `Claude <hash>`—. Con uno
+ * antiguo, que no lo cuenta, degrada a la regla de siempre: cero mensajes de los dos lados.
+ */
+export function isEmptyRow(row: IndexRow): boolean {
+  return (row.assistant_messages ?? 0) === 0 && (
+    row.user_text_messages === undefined
+      ? (row.user_messages ?? 0) === 0
+      : row.user_text_messages === 0
+  );
+}
 
 export function rowToSummary(row: IndexRow, bastionHost: string): SessionSummary {
   return {
@@ -81,18 +96,7 @@ export function rowToSummary(row: IndexRow, bastionHost: string): SessionSummary
     preview: row.preview || null,
     workspaceId: null,
     workspaceTitle: null,
-    /*
-     * Nadie habló aquí.
-     *
-     * Con un índice que ya cuenta los turnos con texto real, esto incluye las sesiones cuyo único
-     * contenido son envoltorios de comando —las que acaban llamándose `Claude <hash>`—. Con uno
-     * antiguo, que no lo cuenta, degrada a la regla de siempre: cero mensajes de los dos lados.
-     */
-    empty: (row.assistant_messages ?? 0) === 0 && (
-      row.user_text_messages === undefined
-        ? (row.user_messages ?? 0) === 0
-        : row.user_text_messages === 0
-    ),
+    empty: isEmptyRow(row),
     /*
      * Aquí no se sabe todavía.
      *
@@ -178,7 +182,7 @@ export class HttpSessionIndex implements SessionIndex {
     return this.#withFallback('hosts', () => this.#get<IndexHostRow[]>('/api/hosts'));
   }
 
-  async transcript(ref: SessionRef, { last }: { last?: number } = {}): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null; preview: string | null }> {
+  async transcript(ref: SessionRef, { last }: { last?: number } = {}): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null; preview: string | null; empty: boolean }> {
     // El índice indexa por `session_key`; se localiza por el id, que es lo único que Jarvis guarda.
     const listed = await this.#get<IndexRow[]>('/api/sessions', { limit: '500', host: ref.host, provider: ref.provider });
     const row = listed.find((candidate) => candidate.session_id === ref.sessionId);
@@ -200,6 +204,11 @@ export class HttpSessionIndex implements SessionIndex {
       // El índice ya guarda el primer turno aprovechable de la sesión: pedirlo aparte sería una
       // consulta de más para un dato que viene en la fila que acabamos de leer.
       preview: row.preview ?? null,
+      // Y si nunca pasó nada dentro, con la misma regla que el explorador. Sale de la fila que ya
+      // se buscó para resolver la clave: contar los mensajes que llegan aquí no vale, porque una
+      // página trae los últimos y porque una sesión que sólo guarda un `/comando` tiene turnos que
+      // no dicen nada.
+      empty: isEmptyRow(row),
     };
   }
 

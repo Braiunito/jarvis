@@ -86,7 +86,7 @@ export class FakeSessionIndex {
     return { rows: this.hostRows, stale: false, error: null };
   }
 
-  async transcript(ref: { host: string; provider: string; sessionId: string }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null }> {
+  async transcript(ref: { host: string; provider: string; sessionId: string }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null; empty: boolean }> {
     this.#maybeFail();
     const row = this.rows.find((candidate) => candidate.session_id === ref.sessionId);
     return {
@@ -97,6 +97,13 @@ export class FakeSessionIndex {
       truncated: false,
       // Los que tiene la sesión según el índice, que no son los que caben en una página.
       messageCount: row ? (row.user_messages ?? 0) + (row.assistant_messages ?? 0) : null,
+      // La misma regla que sirve el índice de verdad: cuenta lo que la fila dice, no lo que quepa
+      // en esta página.
+      empty: !row || ((row.assistant_messages ?? 0) === 0 && (
+        row.user_text_messages === undefined
+          ? (row.user_messages ?? 0) === 0
+          : row.user_text_messages === 0
+      )),
     };
   }
 
