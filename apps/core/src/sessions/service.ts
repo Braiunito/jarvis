@@ -62,6 +62,18 @@ export class SessionService {
         ...summary,
         workspaceId: workspace?.id ?? null,
         workspaceTitle: workspace?.title ?? null,
+        /**
+         * Si continuar esta conversación tiene sentido, dicho por el servidor.
+         *
+         * Vacía y no estrenada desde Jarvis significa que no hay nada que reanudar y que su
+         * identificador tampoco sirve para empezar de cero (HZ-27). La excepción es la sesión que
+         * Jarvis creó y todavía no ha lanzado: está vacía porque aún no existe en la máquina, y su
+         * primer trabajo es exactamente lo que la crea.
+         *
+         * Va aquí y no en la traducción de la fila del índice porque es el único punto donde se
+         * conocen las dos mitades: lo que el índice cuenta y lo que Jarvis recuerda.
+         */
+        resumable: !summary.empty || workspace?.sessionLaunched === false,
       };
     });
 

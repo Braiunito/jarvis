@@ -41,6 +41,20 @@ export const SessionSummary = Type.Object({
    * termina el turno sin decir nada, y eso se lee como un fallo de la aplicación.
    */
   empty: Type.Boolean(),
+  /**
+   * Si tiene sentido continuarla.
+   *
+   * `false` es una **afirmación del core**, no una sospecha: esta conversación no se puede
+   * reanudar y tampoco se puede estrenar con su identificador. Es el caso de las sesiones que dejó
+   * el puente del stack anterior —un archivo con una sola línea y ni un turno—, comprobado contra
+   * las máquinas: `--resume` responde «no conversation found» y `--session-id` responde «already
+   * in use» (HZ-27). Lo único que queda ahí es empezar una conversación nueva.
+   *
+   * No es lo mismo que `empty`, y confundirlos rompe algo que funciona: una sesión estrenada desde
+   * Jarvis todavía sin turnos también está vacía, y **sí** es utilizable — su primer trabajo es
+   * justo el que la crea.
+   */
+  resumable: Type.Boolean(),
 });
 export type SessionSummary = Static<typeof SessionSummary>;
 

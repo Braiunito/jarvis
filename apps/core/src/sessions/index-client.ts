@@ -93,6 +93,14 @@ export function rowToSummary(row: IndexRow, bastionHost: string): SessionSummary
         ? (row.user_messages ?? 0) === 0
         : row.user_text_messages === 0
     ),
+    /*
+     * Aquí no se sabe todavía.
+     *
+     * Una sesión vacía **puede** ser perfectamente utilizable: si la estrenó Jarvis y aún no ha
+     * corrido su primer trabajo, está vacía porque todavía no existe al otro lado. Eso lo sabe el
+     * workspace, que se cruza más adelante, así que este valor se corrige allí y no aquí.
+     */
+    resumable: true,
   };
 }
 

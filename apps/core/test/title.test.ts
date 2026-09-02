@@ -323,6 +323,40 @@ describe('sesiones sin nada dentro', () => {
     expect(empty.get('fantasma')).toBe(true);
     expect(empty.get('solo-comandos')).toBe(false);
   });
+
+  /**
+   * HZ-27: vacía no es lo mismo que inservible, y confundirlas rompe algo que funciona.
+   *
+   * Una sesión del puente antiguo no se puede continuar ni estrenar con su identificador, y eso
+   * lo afirma el servidor. Pero una sesión recién creada desde Jarvis también está vacía —todavía
+   * no existe en la máquina— y su primer trabajo es justo el que la crea.
+   */
+  it('dice cuál no se puede continuar, y no confunde con ella a la que aún no se ha estrenado', async () => {
+    const index = new FakeSessionIndex([
+      indexRow({ session_id: 'viva', user_messages: 3, user_text_messages: 3, assistant_messages: 4 }),
+      indexRow({ session_id: 'del-puente', path: '/f2.jsonl', user_messages: 0, user_text_messages: 0, assistant_messages: 0 }),
+      indexRow({ session_id: 'recien-creada', path: '/f3.jsonl', provider: 'codex', user_messages: 0, user_text_messages: 0, assistant_messages: 0 }),
+    ]);
+    const local = buildServices({
+      db: openDatabase({ path: ':memory:' }),
+      clock: fixedClock('2026-09-02T12:00:00.000Z'),
+      index: index as never,
+      model: null,
+      config: { hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-title-spool' },
+    });
+    // Ésta la estrenó Jarvis y aún no ha corrido su primer trabajo. Va con Codex porque es quien
+    // genera su propio identificador: el workspace lo adopta cuando el agente lo dice.
+    const nueva = local.workspaces.startSession({ host: 'bastion', provider: 'codex' }, user);
+    local.workspaces.adoptSession(nueva.id, 'recien-creada');
+
+    const result = await local.sessions.search({});
+    const resumable = new Map(result.sessions.map((session) => [session.ref.sessionId, session.resumable]));
+    local.close();
+
+    expect(resumable.get('viva')).toBe(true);
+    expect(resumable.get('del-puente')).toBe(false);
+    expect(resumable.get('recien-creada')).toBe(true);
+  });
 });
 
 /**

@@ -178,7 +178,8 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   de los dos problemas es: que la conversación esté archivada en otra carpeta, o —cuando el
   directorio salió del propio archivo de la conversación— que ese archivo no guarde ningún turno,
   que es lo que le pasa a las sesiones que dejó el puente anterior y no se arregla con ninguna
-  carpeta.
+  carpeta. El explorador ya no invita a intentarlo: el servidor dice cuáles no se pueden continuar
+  y ahí se ofrece empezar una conversación nueva, con la máquina y la carpeta ya puestas.
 
 ### Corregido durante la migración
 

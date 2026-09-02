@@ -689,9 +689,16 @@ antes de lanzarlo. Sería posible —el índice ya marca estas sesiones como vac
 puede estar viejo, y rechazar una sesión que sí tiene turnos porque el índice aún no los ha visto
 es peor que un trabajo que falla con una explicación exacta.
 
-Por decidir, si alguna vez molesta: si el explorador debería ofrecer «empezar una conversación
-nueva aquí» sobre una sesión vacía, heredando su máquina y su carpeta. Hoy hay que ir a «nueva
-sesión» y rellenarlo a mano.
+En la interfaz se resolvió ofreciendo en vez de avisando (`3f4d7e7`): en una sesión sin un solo
+turno, el compositor se sustituye por «empezar una conversación aquí» con máquina y carpeta ya
+puestas. Un aviso que dice «esto va a fallar» y aun así deja pulsar Enviar es una trampa con un
+cartel.
+
+Y el core lo **afirma** en vez de dejar que se deduzca: `SessionSummary.resumable`. La regla que la
+interfaz tenía que inventar —no salió de Jarvis, no tiene turnos, no tiene trabajos, y sólo se
+sabe con el transcript ya cargado— es exactamente la clase de deducción que este hallazgo enseñó a
+desconfiar. Con la distinción que importa: una sesión estrenada desde Jarvis y aún sin lanzar
+también está vacía, y **sí** es utilizable, porque su primer trabajo es el que la crea.
 
 ### [x] HZ-26 · `bin/jarvis backup` no funciona contra el stack desplegado
 
