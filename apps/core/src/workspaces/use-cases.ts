@@ -1,4 +1,7 @@
-import type { Draft, OpenWorkspaceRequest, UserIdentity, Workspace } from '@jarvis/contracts';
+import { randomUUID } from 'node:crypto';
+import type {
+  Draft, OpenWorkspaceRequest, Provider, UserIdentity, Workspace,
+} from '@jarvis/contracts';
 import { JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newWorkspaceId } from '../platform/ids.js';
@@ -31,6 +34,58 @@ export class WorkspaceService {
    * Eso es lo que hace que elegir otra sesión sea una transición atómica y que dos clics rápidos
    * no dejen media interfaz en A y media en B.
    */
+  /**
+   * Estrenar una sesión: la conversación no existe todavía en la máquina.
+   *
+   * El identificador lo pone Jarvis. Claude lo acepta tal cual (`--session-id`), así que ahí la
+   * sesión nace con su nombre definitivo; Codex y OpenCode generan el suyo y lo dicen al arrancar,
+   * y hasta entonces el workspace queda marcado como pendiente para poder adoptarlo una vez.
+   */
+  startSession(
+    { host, provider, cwd, permissionProfile: _permissionProfile }: {
+      host: string; provider: Provider; cwd?: string | null; permissionProfile?: string;
+    },
+    user: UserIdentity,
+  ): Workspace {
+    const resolvedHost = !host || host === 'local' ? this.#bastionHost : host;
+    const at = this.#clock.nowIso();
+    const workspace: Workspace = {
+      id: newWorkspaceId(),
+      ref: { host: resolvedHost, provider, sessionId: randomUUID() },
+      cwd: cwd ?? null,
+      sourceRoot: null,
+      title: null,
+      createdBy: user.username,
+      createdAt: at,
+      updatedAt: at,
+      lastOpenedAt: at,
+      provenance: 'jarvis',
+      // Claude respeta el id que se le da; los otros dos lo dirán ellos.
+      sessionPending: provider !== 'claude',
+      // Todavía no existe al otro lado: existirá cuando arranque su primer trabajo.
+      sessionLaunched: false,
+    };
+    this.#repository.insert(workspace);
+    this.#audit.record({
+      actorUser: user.username,
+      eventType: 'workspace.session_started',
+      workspaceId: workspace.id,
+      host: resolvedHost,
+      payload: { provider, sessionId: workspace.ref.sessionId, pending: workspace.sessionPending },
+    });
+    return workspace;
+  }
+
+  /** El agente dijo su identificador: se adopta si el workspace lo estaba esperando. */
+  adoptSession(workspaceId: string, sessionId: string): void {
+    this.#repository.adoptSession(workspaceId, sessionId, this.#clock.nowIso());
+  }
+
+  /** La conversación ya existe al otro lado: el siguiente trabajo la continúa. */
+  markSessionLaunched(workspaceId: string): void {
+    this.#repository.markSessionLaunched(workspaceId);
+  }
+
   open(request: OpenWorkspaceRequest, user: UserIdentity): { workspace: Workspace; created: boolean } {
     const host = !request.ref.host || request.ref.host === 'local' ? this.#bastionHost : request.ref.host;
     const ref = { ...request.ref, host };

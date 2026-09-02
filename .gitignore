@@ -20,3 +20,11 @@ evidence/*.png
 .e2e/
 test-results/
 playwright-report/
+
+# Ruido del sistema y del editor. No es del proyecto, y ensucia el diff de quien use otro.
+.DS_Store
+Thumbs.db
+*.log
+
+# Secretos de despliegue: lo mismo que `secrets/`, pero donde de verdad viven.
+deploy/secrets/

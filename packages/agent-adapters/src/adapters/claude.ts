@@ -59,6 +59,14 @@ export const claudeAdapter: AgentAdapter = {
   buildRun({ sessionId, prompt, permissionProfile, sourceRoot, model, resume = true }: BuildRunOptions): Invocation {
     const argv = ['claude', '-p', prompt, '--output-format', 'stream-json', '--verbose'];
     if (resume && sessionId) argv.push('--resume', sessionId);
+    /**
+     * Una sesión que empieza de cero, con el identificador puesto por Jarvis.
+     *
+     * Claude Code deja fijarlo, y eso vale más que un id bonito: el workspace nace con su
+     * identidad definitiva en vez de con una provisional que hay que sustituir cuando el agente
+     * dice la suya. Los otros dos CLI no lo permiten, y ahí sí hay que adoptar la que reporten.
+     */
+    else if (!resume && sessionId) argv.push('--session-id', sessionId);
     argv.push('--permission-mode', PERMISSION_MODE[permissionProfile] ?? PERMISSION_MODE.safe);
     if (model) argv.push('--model', model);
 
@@ -89,12 +97,15 @@ export const claudeAdapter: AgentAdapter = {
             ...(record.tools ? { tools: record.tools } : {}),
           };
         }
-        // Claude Code 2.1 emite el progreso del razonamiento como `system/thinking_tokens`. No es
-        // contenido: es un contador que sube. Se conserva con una nota para que la interfaz pueda
-        // decir qué es en vez de enseñar «evento sin traducir».
-        if (record.subtype === 'thinking_tokens') {
-          return { type: 'raw', payload: record, note: 'el modelo está pensando' };
-        }
+        /**
+         * `system/thinking_tokens` es un contador que sube mientras el modelo razona, y llega cada
+         * pocos segundos. No se guarda.
+         *
+         * Guardarlo llenaba la línea de tiempo de tarjetas idénticas —«el modelo está pensando»,
+         * cinco seguidas— que empujaban fuera de la pantalla lo único que se venía a leer: lo que
+         * hizo y lo que respondió. Que sigue trabajando ya lo dice su estado.
+         */
+        if (record.subtype === 'thinking_tokens') return [];
         return rawEvent(record);
 
       case 'assistant': {

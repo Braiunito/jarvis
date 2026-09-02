@@ -326,4 +326,28 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_runs_attention ON runs (status, acknowledged_at);
     `,
   },
+  {
+    version: 9,
+    name: 'workspace_session_pending',
+    sql: `
+      -- Una sesión que se estrena desde Jarvis y cuyo identificador todavía no ha confirmado el
+      -- agente.
+      --
+      -- Claude deja fijar el suyo con --session-id, así que ahí nace ya definitivo. Codex y
+      -- OpenCode generan el propio y lo dicen en su primer evento: hasta entonces el workspace
+      -- lleva uno provisional, y esta marca es lo que permite sustituirlo **una vez** sin abrir la
+      -- puerta a que la identidad de un workspace cambie porque sí (ADR-005).
+      ALTER TABLE workspaces ADD COLUMN session_pending INTEGER NOT NULL DEFAULT 0;
+
+      -- El trabajo que **estrena** la conversación en vez de continuarla. Lo sabe el run y no el
+      -- workspace porque es una propiedad de esa ejecución: sólo el primero arranca sin reanudar,
+      -- y los siguientes ya tienen algo que continuar.
+      ALTER TABLE runs ADD COLUMN starts_session INTEGER NOT NULL DEFAULT 0;
+
+      -- Si la conversación ya existe en la máquina. Una sesión creada desde Jarvis no existe allí
+      -- hasta que arranca su primer trabajo, y eso permite crear el workspace vacío y escribir la
+      -- primera tarea con calma en el compositor, como se hace con cualquier otra sesión.
+      ALTER TABLE workspaces ADD COLUMN session_launched INTEGER NOT NULL DEFAULT 1;
+    `,
+  },
 ];

@@ -205,6 +205,15 @@ export class RunService {
         `too many runs in flight (limit ${limits.maxConcurrentRuns}); cancel one or wait`);
     }
 
+    /**
+     * ¿Este trabajo estrena la conversación o la continúa?
+     *
+     * Lo decide el core y no quien llama: una sesión creada desde Jarvis no existe en la máquina
+     * hasta su primer trabajo, así que el primero arranca el agente limpio y los siguientes
+     * reanudan. Que la interfaz tuviera que acordarse de mandar la bandera era pedirle que
+     * recordara un estado que el servidor ya conoce.
+     */
+    const startsSession = request.startsSession ?? workspace.sessionLaunched === false;
     const target = await this.planTarget(workspace, request);
     // El spool vive en el host que ejecuta, así que su raíz se resuelve con el home de ESE host.
     const executionCapabilities = await this.#deps.capabilities.detect(target.executionHost);
@@ -229,6 +238,7 @@ export class RunService {
       attempt: 1,
       parentRunId: null,
       remoteName: tmuxRunName(runId),
+      startsSession: startsSession,
       remoteSpoolDir: this.#deps.runner.layout(runId, spoolRoot).dir,
       createdAt: at,
       deadlineAt: new Date(clock.nowMs() + limits.runTimeoutMs).toISOString(),
@@ -242,6 +252,8 @@ export class RunService {
      */
     repository.db.transaction(() => {
       insertRun();
+      // A partir de aquí la conversación existe al otro lado: el siguiente trabajo la continúa.
+      if (startsSession) workspaces.markSessionLaunched?.(workspace.id);
       if (attachmentIds.length && this.#deps.attachments) {
         this.#deps.attachments.claim(attachmentIds, { user, runId, executionHost: target.executionHost });
       }
@@ -366,12 +378,19 @@ export class RunService {
     // transcript no está aquí, así que `--resume` fallaría y `sourceRoot` apuntaría a un path del
     // host de trabajo que aquí no existe.
     const sessionIsLocal = run.strategy !== 'A';
+    /**
+     * Estrenar no es reanudar: el primer trabajo de una sesión nueva arranca el agente limpio.
+     *
+     * El identificador se sigue pasando porque Claude deja fijarlo (`--session-id`) y así la
+     * conversación nace con el mismo id que ya tiene el workspace. Los CLI que no lo permiten lo
+     * ignoran y dicen el suyo en su primer evento, que es cuando el core lo adopta.
+     */
     const { argv, env } = adapter.buildRun({
       sessionId: sessionIsLocal ? run.sessionId : null,
       prompt: finalPrompt,
       permissionProfile: run.permissionProfile,
       model: run.model,
-      resume: sessionIsLocal,
+      resume: sessionIsLocal && !run.startsSession,
     });
     return remoteScript({
       argv,
@@ -478,6 +497,11 @@ export class RunService {
         events.push({ type: `agent.${event.type}` as RunEventType, at, payload: bounded });
         if ('sessionId' in event && event.sessionId) sessionId = event.sessionId;
         if (event.type === 'text' && event.text.trim()) lastText = event.text.slice(0, 4000);
+        // Una sesión estrenada en Codex o en OpenCode dice aquí con qué id se guardó: el workspace
+        // lo adopta, y sólo mientras siga esperándolo.
+        if ('sessionId' in event && event.sessionId && run.startsSession) {
+          this.#deps.workspaces.adoptSession?.(run.workspaceId, event.sessionId);
+        }
         // La cuota que el agente cuenta de paso: vale más que un sondeo, porque es de ahora mismo.
         if (event.type === 'raw') this.#noteQuota(run, event.payload);
         if (event.type === 'result') {

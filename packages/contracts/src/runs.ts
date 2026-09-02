@@ -151,6 +151,8 @@ export const Run = Type.Object({
    * eventos no cambian. Un contador que no se puede vaciar deja de mirarse.
    */
   acknowledgedAt: Type.Optional(Type.Union([Iso8601, Type.Null()])),
+  /** Este trabajo estrena la conversación: arranca el agente sin reanudar nada. */
+  startsSession: Type.Optional(Type.Boolean()),
   /**
    * Lo que pidió la persona, recortado.
    *
@@ -169,6 +171,8 @@ export const CreateRunRequest = Type.Object({
   preferredStrategy: Type.Optional(Type.Union([Type.Literal('auto'), Type.Literal('A'), Type.Literal('B')])),
   model: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   attachmentIds: Type.Optional(Type.Array(Type.String())),
+  /** Estrena la conversación en vez de continuarla: el agente arranca sin reanudar nada. */
+  startsSession: Type.Optional(Type.Boolean()),
   /** Para que un doble toque en el móvil no cree dos runs. */
   idempotencyKey: Type.Optional(Type.String({ maxLength: 128 })),
 });

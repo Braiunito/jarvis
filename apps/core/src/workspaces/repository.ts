@@ -19,6 +19,7 @@ export interface WorkspaceRow {
   provenance: string;
   source_installation_id: string | null;
   source_conversation_id: string | null;
+  session_pending: number | null;
 }
 
 export const toWorkspace = (row: WorkspaceRow): Workspace => ({
@@ -32,6 +33,7 @@ export const toWorkspace = (row: WorkspaceRow): Workspace => ({
   updatedAt: row.updated_at,
   lastOpenedAt: row.last_opened_at,
   provenance: row.provenance as Workspace['provenance'],
+  sessionPending: row.session_pending === 1,
 });
 
 export class WorkspaceRepository {
@@ -63,13 +65,40 @@ export class WorkspaceRepository {
   insert(workspace: Workspace, source?: { installationId: string; conversationId: string }): void {
     this.#db.prepare(`INSERT INTO workspaces
       (id, session_host, provider, session_id, cwd, source_root, title, created_by, created_at,
-       updated_at, last_opened_at, provenance, source_installation_id, source_conversation_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+       updated_at, last_opened_at, provenance, source_installation_id, source_conversation_id,
+       session_pending)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       workspace.id, workspace.ref.host, workspace.ref.provider, workspace.ref.sessionId,
       workspace.cwd, workspace.sourceRoot, workspace.title, workspace.createdBy,
       workspace.createdAt, workspace.updatedAt, workspace.lastOpenedAt, workspace.provenance,
       source?.installationId ?? null, source?.conversationId ?? null,
+      workspace.sessionPending ? 1 : 0,
     );
+  }
+
+  /** La conversación ya existe en la máquina: el siguiente trabajo continúa en vez de estrenar. */
+  markSessionLaunched(workspaceId: string): void {
+    this.#db.prepare('UPDATE workspaces SET session_launched = 1 WHERE id = ?').run(workspaceId);
+  }
+
+  /**
+   * El agente dijo con qué identificador se guardó la sesión: se adopta, y sólo una vez.
+   *
+   * La condición `session_pending = 1` es lo que impide que la identidad de un workspace cambie
+   * por cualquier otro motivo (ADR-005): esto no es renombrar una sesión, es enterarse de cuál
+   * es. Si otro workspace ya tenía esa sesión, se deja como está y se devuelve `false`: dos
+   * workspaces no pueden apuntar a la misma.
+   */
+  adoptSession(workspaceId: string, sessionId: string, at: string): boolean {
+    const workspace = this.findById(workspaceId);
+    if (!workspace?.sessionPending || workspace.ref.sessionId === sessionId) return false;
+    const taken = this.findByRef({ ...workspace.ref, sessionId });
+    if (taken) return false;
+    const result = this.#db.prepare(
+      "UPDATE workspaces SET session_id = ?, session_pending = 0, updated_at = ? "
+      + 'WHERE id = ? AND session_pending = 1',
+    ).run(sessionId, at, workspaceId);
+    return result.changes > 0;
   }
 
   /**

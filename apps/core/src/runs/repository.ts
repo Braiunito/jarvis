@@ -41,6 +41,7 @@ export interface RunRow {
   result_summary: string | null;
   acknowledged_at: string | null;
   acknowledged_by: string | null;
+  starts_session: number | null;
 }
 
 /**
@@ -88,6 +89,7 @@ export const toRun = (row: RunRow): Run => ({
   resultOk: row.result_ok === null ? null : row.result_ok === 1,
   resultSummary: row.result_summary,
   acknowledgedAt: row.acknowledged_at ?? null,
+  startsSession: row.starts_session === 1,
   promptPreview: promptPreview(row.prompt),
 });
 
@@ -111,6 +113,8 @@ export interface NewRunRecord {
   remoteSpoolDir: string;
   createdAt: string;
   deadlineAt: string | null;
+  /** Estrena la conversación en vez de continuarla. */
+  startsSession?: boolean;
 }
 
 export interface EventInput {
@@ -132,12 +136,14 @@ export class RunRepository {
     this.#db.prepare(`INSERT INTO runs
       (id, workspace_id, created_by, provider, session_id, prompt, work_host, execution_host,
        strategy, strategy_reason, cwd, permission_profile, model, status, attempt, parent_run_id,
-       remote_name, remote_spool_dir, remote_cursor_bytes, last_event_seq, created_at, deadline_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, 0, -1, ?, ?)`).run(
+       remote_name, remote_spool_dir, remote_cursor_bytes, last_event_seq, created_at, deadline_at,
+       starts_session)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, 0, -1, ?, ?, ?)`).run(
       record.id, record.workspaceId, record.createdBy, record.provider, record.sessionId,
       record.prompt, record.workHost, record.executionHost, record.strategy, record.strategyReason,
       record.cwd, record.permissionProfile, record.model, record.attempt, record.parentRunId,
       record.remoteName, record.remoteSpoolDir, record.createdAt, record.deadlineAt,
+      record.startsSession ? 1 : 0,
     );
   }
 

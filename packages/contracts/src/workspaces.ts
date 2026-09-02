@@ -18,6 +18,21 @@ export const Workspace = Type.Object({
   updatedAt: Iso8601,
   lastOpenedAt: Type.Union([Iso8601, Type.Null()]),
   provenance: Provenance,
+  /**
+   * La sesión se estrenó desde Jarvis y su identificador todavía no lo ha confirmado el agente.
+   *
+   * Sólo lo llevan las sesiones nuevas de Codex y OpenCode, que generan el suyo y lo dicen en su
+   * primer evento; mientras tanto el id que se ve va a cambiar, y la interfaz no debería
+   * ofrecerlo para copiar ni tratarlo como estable.
+   */
+  sessionPending: Type.Optional(Type.Boolean()),
+  /**
+   * La conversación ya existe en la máquina.
+   *
+   * `false` en una sesión recién estrenada desde Jarvis a la que todavía no se le ha mandado nada:
+   * el workspace existe, pero al otro lado no hay nada que reanudar hasta el primer trabajo.
+   */
+  sessionLaunched: Type.Optional(Type.Boolean()),
 });
 export type Workspace = Static<typeof Workspace>;
 
