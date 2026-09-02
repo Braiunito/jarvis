@@ -1,0 +1,7 @@
+{
+  "name": "@jarvis/legacy-contract-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@jarvis/agent-adapters": "*", "@jarvis/contracts": "*" }
+}

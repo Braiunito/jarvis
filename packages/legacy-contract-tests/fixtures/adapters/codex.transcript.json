@@ -1,0 +1,25 @@
+{
+  "note": "Registros observados de codex-cli 0.149 con --json.",
+  "records": [
+    { "type": "thread.started", "thread_id": "thread-1" },
+    { "type": "turn.started" },
+    { "type": "item.completed", "item": { "id": "i0", "type": "reasoning", "text": "voy a mirar el diff" } },
+    { "type": "item.completed", "item": { "id": "i1", "type": "command_execution", "command": "ls -la", "aggregated_output": "total 0", "exit_code": 0 } },
+    { "type": "item.completed", "item": { "id": "i2", "type": "command_execution", "command": "false", "aggregated_output": "", "exit_code": 1 } },
+    { "type": "item.completed", "item": { "id": "i3", "type": "file_change", "changes": [{ "path": "a.ts" }] } },
+    { "type": "item.completed", "item": { "id": "i4", "type": "agent_message", "text": "listo" } },
+    { "type": "turn.completed", "usage": { "input_tokens": 10 } },
+    { "type": "turn.failed", "error": { "message": "sandbox denied the write" } }
+  ],
+  "expected": [
+    { "type": "started", "sessionId": "thread-1" },
+    { "type": "raw" },
+    { "type": "reasoning", "text": "voy a mirar el diff" },
+    { "type": "tool", "tool": { "id": "i1", "name": "shell", "status": "completed", "output": "total 0" } },
+    { "type": "tool", "tool": { "id": "i2", "name": "shell", "status": "error" } },
+    { "type": "tool", "tool": { "id": "i3", "name": "edit", "status": "completed" } },
+    { "type": "text", "text": "listo" },
+    { "type": "result", "ok": true },
+    { "type": "error", "message": "sandbox denied the write" }
+  ]
+}

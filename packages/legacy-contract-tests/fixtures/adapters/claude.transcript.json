@@ -1,0 +1,25 @@
+{
+  "note": "Registros observados de Claude Code 2.1.x con --output-format stream-json --verbose.",
+  "records": [
+    { "type": "system", "subtype": "init", "session_id": "sid-claude", "model": "claude-opus-5", "cwd": "/srv/app", "permissionMode": "plan", "tools": ["Bash"] },
+    { "type": "assistant", "session_id": "sid-claude", "message": { "content": [{ "type": "text", "text": "Revisé el log. " }] } },
+    { "type": "assistant", "session_id": "sid-claude", "message": { "content": [{ "type": "thinking", "thinking": "el timeout viene del pool" }] } },
+    { "type": "assistant", "session_id": "sid-claude", "message": { "content": [{ "type": "tool_use", "id": "tu_1", "name": "Bash", "input": { "command": "tail -n 5 app.log" } }] } },
+    { "type": "user", "session_id": "sid-claude", "message": { "content": [{ "type": "tool_result", "tool_use_id": "tu_1", "content": "ERROR timeout" }] } },
+    { "type": "user", "session_id": "sid-claude", "message": { "content": [{ "type": "tool_result", "tool_use_id": "tu_2", "is_error": true, "content": "permission denied" }] } },
+    { "type": "rate_limit_event", "session_id": "sid-claude", "status": "warning" },
+    { "type": "algo_que_no_existia_ayer", "payload": { "x": 1 } },
+    { "type": "result", "subtype": "success", "is_error": false, "session_id": "sid-claude", "result": "El fallo es un timeout.", "num_turns": 2, "total_cost_usd": 0.01, "duration_ms": 900 }
+  ],
+  "expected": [
+    { "type": "started", "sessionId": "sid-claude", "model": "claude-opus-5", "permissionMode": "plan" },
+    { "type": "text", "text": "Revisé el log. " },
+    { "type": "reasoning", "text": "el timeout viene del pool" },
+    { "type": "tool", "tool": { "id": "tu_1", "name": "Bash", "status": "started" } },
+    { "type": "tool", "tool": { "id": "tu_1", "status": "completed", "output": "ERROR timeout" } },
+    { "type": "tool", "tool": { "id": "tu_2", "status": "error", "output": "permission denied" } },
+    { "type": "raw" },
+    { "type": "raw" },
+    { "type": "result", "ok": true, "text": "El fallo es un timeout." }
+  ]
+}

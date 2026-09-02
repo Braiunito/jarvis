@@ -1,0 +1,75 @@
+/** Configuración del core. Todo lo que el core puede tocar se declara aquí. */
+const env = process.env;
+const bool = (value: string | undefined, fallback: boolean): boolean =>
+  value === undefined ? fallback : /^(1|true|yes|on)$/i.test(value);
+const list = (value: string | undefined): string[] =>
+  value ? value.split(',').map((s) => s.trim()).filter(Boolean) : [];
+
+const bastionHost = env['JARVIS_BASTION_HOST'] || 'bastion';
+
+export const config = {
+  bind: env['JARVIS_CORE_BIND'] || '0.0.0.0',
+  port: Number(env['JARVIS_CORE_PORT'] || 8770),
+
+  /** Base operativa. Un fichero local del nodo: nunca en NFS ni compartido (ADR-002). */
+  database: env['JARVIS_CORE_DB'] || '/var/lib/jarvis-core/core.db',
+
+  /**
+   * Los hosts que este core puede alcanzar. Nunca vacío: sin JARVIS_HOSTS es el bastión y nada
+   * más, porque una allowlist es la diferencia entre una herramienta acotada y ejecución remota
+   * arbitraria.
+   */
+  hosts: list(env['JARVIS_HOSTS']).length ? list(env['JARVIS_HOSTS']) : [bastionHost],
+  bastionHost,
+  sshCommand: env['JARVIS_SSH_COMMAND'] || 'ssh',
+  sshOptions: list(env['JARVIS_SSH_OPTIONS']),
+  knownHostsFile: env['JARVIS_KNOWN_HOSTS_FILE'] || '/tmp/jarvis-known-hosts',
+  remotePath: env['JARVIS_REMOTE_PATH']
+    || '$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.bun/bin:$HOME/bin:/usr/local/bin',
+
+  /** Secreto con el que el gateway firma la identidad del usuario (ADR-001). */
+  internalSecret: env['JARVIS_INTERNAL_SECRET'] || '',
+  internalSecretFile: env['JARVIS_INTERNAL_SECRET_FILE'] || '/var/lib/jarvis/internal.key',
+
+  /** Índice de sesiones. Solo lectura y reconstruible: nunca fuente de verdad de runs. */
+  indexUrl: env['JARVIS_INDEX_URL'] || 'http://aisessions:8765',
+  indexToken: env['JARVIS_INDEX_TOKEN'] || '',
+  indexTimeoutMs: Number(env['JARVIS_INDEX_TIMEOUT_MS'] || 10_000),
+
+  /** Raíz absoluta de los spools de run en el host de ejecución. */
+  spoolRoot: env['JARVIS_SPOOL_ROOT'] || '$HOME/.local/state/jarvis/runs',
+  attachmentRoot: env['JARVIS_ATTACHMENT_ROOT'] || '/tmp/jarvis-attachments',
+
+  defaultPermissionProfile: (env['JARVIS_DEFAULT_PROFILE'] || 'safe') as 'safe' | 'auto' | 'yolo',
+  /** Negarse a correr en este perfil salvo que el operador lo permita explícitamente. */
+  allowYolo: bool(env['JARVIS_ALLOW_YOLO'], false),
+
+  maxConcurrentRuns: Number(env['JARVIS_MAX_CONCURRENT_RUNS'] || 4),
+  runTimeoutMs: Number(env['JARVIS_RUN_TIMEOUT_MS'] || 4 * 60 * 60 * 1000),
+  /** Cuánto se le da a un run interrumpido para parar por las buenas antes de matarlo. */
+  interruptGraceMs: Number(env['JARVIS_INTERRUPT_GRACE_MS'] || 5000),
+  /** Cada cuánto el core mira el spool de un run vivo. */
+  pollIntervalMs: Number(env['JARVIS_POLL_INTERVAL_MS'] || 700),
+  pollChunkBytes: Number(env['JARVIS_POLL_CHUNK_BYTES'] || 512 * 1024),
+
+  capabilityTtlMs: Number(env['JARVIS_CAPABILITY_TTL_MS'] || 10 * 60 * 1000),
+  usageTtlMs: Number(env['JARVIS_USAGE_TTL_MS'] || 5 * 60 * 1000),
+  usageProbeTimeoutMs: Number(env['JARVIS_USAGE_PROBE_TIMEOUT_MS'] || 20_000),
+
+  attachmentMaxBytes: Number(env['JARVIS_ATTACHMENT_MAX_BYTES'] || 20 * 1024 * 1024),
+  attachmentQuotaBytes: Number(env['JARVIS_ATTACHMENT_QUOTA_BYTES'] || 50 * 1024 * 1024),
+  attachmentTtlMs: Number(env['JARVIS_ATTACHMENT_TTL_MS'] || 6 * 3600 * 1000),
+
+  /** Presupuestos de payload por evento (ADR-007). Nada se recorta en silencio. */
+  maxToolOutputBytes: Number(env['JARVIS_MAX_TOOL_OUTPUT_BYTES'] || 32 * 1024),
+  maxEventTextBytes: Number(env['JARVIS_MAX_EVENT_TEXT_BYTES'] || 256 * 1024),
+
+  /** El modelo del Assistant vive en el core: la clave jamás llega al navegador. */
+  modelBaseUrl: env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com',
+  modelApiKey: env['JARVIS_MODEL_API_KEY'] || '',
+  modelName: env['JARVIS_MODEL_NAME'] || 'claude-sonnet-5',
+
+  verbose: bool(env['JARVIS_VERBOSE'], false),
+} as const;
+
+export type CoreConfig = typeof config;

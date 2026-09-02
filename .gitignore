@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+secrets/
+coverage/
+scratch/
+deploy/data/
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,86 @@
+{
+  "note": "Argv exacto por proveedor y perfil. Capturado de services/bridge/lib/adapters/*.js del stack legacy, verificado allí contra Claude Code 2.1.x, codex-cli 0.149 y opencode 1.17.",
+  "cases": [
+    {
+      "id": "ADAPT-CLAUDE-01/safe-resume",
+      "provider": "claude",
+      "options": { "sessionId": "sid-1", "prompt": "revisa el log", "permissionProfile": "safe" },
+      "argv": ["claude", "-p", "revisa el log", "--output-format", "stream-json", "--verbose", "--resume", "sid-1", "--permission-mode", "plan"],
+      "env": {}
+    },
+    {
+      "id": "ADAPT-CLAUDE-01/auto-model-sourceroot",
+      "provider": "claude",
+      "options": { "sessionId": "sid-1", "prompt": "arregla", "permissionProfile": "auto", "model": "claude-opus-5", "sourceRoot": "/srv/app/.config/claude" },
+      "argv": ["claude", "-p", "arregla", "--output-format", "stream-json", "--verbose", "--resume", "sid-1", "--permission-mode", "acceptEdits", "--model", "claude-opus-5"],
+      "env": { "CLAUDE_CONFIG_DIR": "/srv/app/.config/claude" }
+    },
+    {
+      "id": "ADAPT-CLAUDE-01/no-resume",
+      "provider": "claude",
+      "options": { "sessionId": "sid-1", "prompt": "nuevo", "permissionProfile": "yolo", "resume": false },
+      "argv": ["claude", "-p", "nuevo", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions"],
+      "env": {}
+    },
+    {
+      "id": "ADAPT-CODEX-01/safe-resume",
+      "provider": "codex",
+      "options": { "sessionId": "thread-1", "prompt": "revisa", "permissionProfile": "safe" },
+      "argv": ["codex", "exec", "resume", "thread-1", "revisa", "--json", "--skip-git-repo-check", "-c", "sandbox_mode=read-only"],
+      "env": {}
+    },
+    {
+      "id": "ADAPT-CODEX-01/auto",
+      "provider": "codex",
+      "options": { "prompt": "escribe", "permissionProfile": "auto" },
+      "argv": ["codex", "exec", "escribe", "--json", "--skip-git-repo-check", "-c", "sandbox_mode=workspace-write"],
+      "env": {}
+    },
+    {
+      "id": "ADAPT-CODEX-01/yolo-bypasses-sandbox-flag",
+      "provider": "codex",
+      "options": { "prompt": "todo", "permissionProfile": "yolo" },
+      "argv": ["codex", "exec", "todo", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"],
+      "env": {}
+    },
+    {
+      "id": "ADAPT-OPENCODE-01/safe",
+      "provider": "opencode",
+      "options": { "sessionId": "ses_1", "prompt": "mira", "permissionProfile": "safe" },
+      "argv": ["opencode", "run", "--format", "json", "--agent", "plan", "--session", "ses_1", "mira"],
+      "env": {}
+    },
+    {
+      "id": "ADAPT-OPENCODE-01/auto",
+      "provider": "opencode",
+      "options": { "prompt": "cambia", "permissionProfile": "auto", "model": "gpt-5" },
+      "argv": ["opencode", "run", "--format", "json", "--agent", "build", "-m", "gpt-5", "cambia"],
+      "env": {}
+    }
+  ],
+  "attach": [
+    {
+      "id": "ADAPT-CLAUDE-01/attach-safe",
+      "provider": "claude",
+      "options": { "sessionId": "sid-1", "permissionProfile": "safe" },
+      "argv": ["claude", "--resume", "sid-1", "--permission-mode", "plan"]
+    },
+    {
+      "id": "ADAPT-CODEX-01/attach-safe-keeps-sandbox",
+      "provider": "codex",
+      "options": { "sessionId": "thread-1", "permissionProfile": "safe" },
+      "argv": ["codex", "resume", "thread-1", "-c", "sandbox_mode=read-only"]
+    },
+    {
+      "id": "ADAPT-OPENCODE-01/attach-safe-keeps-agent",
+      "provider": "opencode",
+      "options": { "sessionId": "ses_1", "permissionProfile": "safe" },
+      "argv": ["opencode", "--session", "ses_1", "--agent", "plan"]
+    }
+  ],
+  "permissionModes": {
+    "claude": { "safe": "plan", "auto": "acceptEdits", "yolo": "bypassPermissions" },
+    "codex": { "safe": "read-only", "auto": "workspace-write", "yolo": "danger-full-access" },
+    "opencode": { "safe": "plan", "auto": "build", "yolo": "build" }
+  }
+}

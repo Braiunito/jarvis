@@ -1,0 +1,19 @@
+{
+  "note": "Registros observados de opencode 1.17 con --format json.",
+  "records": [
+    { "type": "step_start", "sessionID": "ses_1", "part": { "type": "step-start" } },
+    { "type": "text", "sessionID": "ses_1", "part": { "type": "text", "text": "hecho" } },
+    { "type": "reasoning", "sessionID": "ses_1", "part": { "type": "reasoning", "text": "pensando" } },
+    { "type": "tool", "sessionID": "ses_1", "part": { "id": "t1", "tool": "read", "state": { "input": { "path": "a.ts" }, "output": "contenido", "status": "completed" } } },
+    { "type": "step_finish", "sessionID": "ses_1", "part": { "type": "step-finish", "reason": "stop", "tokens": { "total": 10 }, "cost": 0 } },
+    { "type": "step_finish", "sessionID": "ses_1", "part": { "type": "step-finish", "reason": "length", "tokens": { "total": 99 }, "cost": 0.2 } }
+  ],
+  "expected": [
+    { "type": "started", "sessionId": "ses_1" },
+    { "type": "text", "text": "hecho" },
+    { "type": "reasoning", "text": "pensando" },
+    { "type": "tool", "tool": { "id": "t1", "name": "read", "status": "completed", "output": "contenido" } },
+    { "type": "result", "ok": true },
+    { "type": "result", "ok": false }
+  ]
+}
