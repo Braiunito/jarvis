@@ -54,9 +54,21 @@ const PROFILES: Array<SegmentOption<PermissionProfile>> = (['safe', 'auto', 'yol
 
 const EVENT = 'jarvis:new-session';
 
-/** Abrirlo desde cualquier parte, sin pasar el estado por media aplicación. */
-export const openNewSession = (): void => {
-  window.dispatchEvent(new Event(EVENT));
+export interface NewSessionPrefill {
+  host?: string;
+  provider?: Provider;
+  cwd?: string | null;
+}
+
+/**
+ * Abrirlo desde cualquier parte, sin pasar el estado por media aplicación.
+ *
+ * Admite valores de partida porque casi nunca se empieza en el vacío: se llega aquí desde una
+ * sesión que no se puede continuar, y la máquina y la carpeta son exactamente las mismas. Hacer
+ * que la persona las vuelva a teclear es pedirle que repita lo que la pantalla ya sabe.
+ */
+export const openNewSession = (prefill?: NewSessionPrefill): void => {
+  window.dispatchEvent(new CustomEvent<NewSessionPrefill | undefined>(EVENT, { detail: prefill }));
 };
 
 export function NewSessionDialog(): JSX.Element | null {
@@ -74,7 +86,13 @@ export function NewSessionDialog(): JSX.Element | null {
   const start = useStartSession();
 
   useEffect(() => {
-    const onOpen = (): void => setOpen(true);
+    const onOpen = (event: Event): void => {
+      const prefill = (event as CustomEvent<NewSessionPrefill | undefined>).detail;
+      if (prefill?.host) setHost(prefill.host);
+      if (prefill?.provider) setProvider(prefill.provider);
+      if (prefill?.cwd !== undefined) setCwd(prefill.cwd ?? '');
+      setOpen(true);
+    };
     window.addEventListener(EVENT, onOpen);
     return () => window.removeEventListener(EVENT, onOpen);
   }, []);
@@ -268,7 +286,7 @@ export function NewSessionDialog(): JSX.Element | null {
 /** El botón que la abre, para no repetir el icono y la palabra en cuatro sitios. */
 export function NewSessionButton({ className = 'btn primary' }: { className?: string }): JSX.Element {
   return (
-    <button type="button" className={className} onClick={openNewSession}>
+    <button type="button" className={className} onClick={() => openNewSession()}>
       <Glyph icon={ACTION_ICON.new} />
       Empezar una sesión
     </button>

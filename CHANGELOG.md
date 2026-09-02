@@ -64,6 +64,14 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **Una sesión sin nada que continuar deja de invitarte a fallar**: las que dejó el puente del
+  stack anterior tienen fichero y ni un turno, así que el agente ni las reanuda ni puede reutilizar
+  su identificador. Ahora, en vez del compositor —que garantizaba un fallo veinte segundos después—
+  se ofrece empezar una conversación nueva en la misma máquina y carpeta, y el explorador lo ofrece
+  antes incluso de abrirla.
+- **Una carpeta deducida se dice**: cuando el sistema averigua el directorio de una sesión en vez
+  de leerlo del transcript, la ruta se marca «deducida». Es fiable —se comprobó que existe en la
+  máquina— pero si se equivocara, el agente trabajaría sobre otra carpeta.
 - **La cuota se ve donde también se decide lanzar**: en la portada, dentro de la tarjeta que ya
   habla de agentes, y en Trabajo cuando está baja. Antes sólo aparecía dentro de un workspace, así
   que enterarse de que a una cuenta le quedaba un 8% pasaba después de mandar el trabajo.

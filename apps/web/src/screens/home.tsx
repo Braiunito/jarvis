@@ -353,7 +353,7 @@ export function HomeScreen(): JSX.Element {
         <Card title="Acciones rápidas" icon={ACTION_ICON.new}>
           <div className="grid cols-2" style={{ gap: 8 }}>
             {/* Empezar de cero va primero: es lo que no se podía hacer y lo que más se busca. */}
-            <button type="button" className="btn tall primary" onClick={openNewSession}>
+            <button type="button" className="btn tall primary" onClick={() => openNewSession()}>
               <Glyph icon={ACTION_ICON.new} />
               Empezar una sesión
             </button>

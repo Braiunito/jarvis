@@ -18,7 +18,7 @@ import { navigate } from '../router.js';
 import { Empty, ErrorNote, Link, Loading, RunStatusBadge, StaleNote, relativeTime } from '../ui/bits.jsx';
 import { Donut, Meter, SERIES_COLORS } from '../ui/charts.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, STATUS_ICON } from '../ui/icons.jsx';
-import { NewSessionButton } from '../ui/new-session.jsx';
+import { NewSessionButton, openNewSession } from '../ui/new-session.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { Card, DataRow, Stat } from '../ui/primitives.jsx';
 
@@ -409,7 +409,25 @@ export function ExplorerScreen(): JSX.Element {
               </div>
 
               <div className="row">
-                <button type="button" className="btn primary" disabled={open.isPending}
+                {/*
+                  * Una sesión sin un solo turno no se puede continuar: el agente ni la reanuda ni
+                  * reutiliza su identificador. Abrirla para escribir un prompt es un fallo
+                  * garantizado veinte segundos después, así que lo primero que se ofrece es lo
+                  * único que funciona, con la máquina y la carpeta ya puestas.
+                  */}
+                {isEmptySession(selected) ? (
+                  <button type="button" className="btn primary" onClick={() => openNewSession({
+                    host: selected.ref.host,
+                    provider: selected.ref.provider,
+                    cwd: selected.cwd,
+                  })}>
+                    <Glyph icon={ACTION_ICON.new} />
+                    Empezar una conversación aquí
+                  </button>
+                ) : null}
+                <button type="button"
+                  className={`btn ${isEmptySession(selected) ? '' : 'primary'}`}
+                  disabled={open.isPending}
                   onClick={() => void openSession(selected)}>
                   <Glyph icon={ACTION_ICON.open} />
                   {open.isPending ? 'Abriendo…' : selected.workspaceId ? 'Ir al workspace' : 'Abrir workspace'}
@@ -426,9 +444,10 @@ export function ExplorerScreen(): JSX.Element {
                 <p className="note warn">
                   <Glyph icon={ACTION_ICON.empty} size={16} />
                   <span>
-                    Nadie habló nunca en esta sesión. El agente creó el fichero al arrancar y ahí se
-                    quedó: reanudarla da un agente sin contexto, que suele terminar el turno sin
-                    decir nada.
+                    Nadie habló nunca en esta sesión: tiene el fichero y ni un turno. El agente no
+                    la reanuda —«no conversation found»— ni puede reutilizar su identificador, así
+                    que no hay nada que continuar. Empezar una conversación nueva en la misma
+                    carpeta sí funciona.
                   </span>
                 </p>
               ) : null}

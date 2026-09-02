@@ -642,10 +642,24 @@ qué se queda, que es la parte difícil.
 
 ## Hallazgos
 
+> **Nota de la parte de interfaz de HZ-27** (2026-09-02). Se eligió ofrecer lo único que funciona
+> en vez de avisar de lo que va a fallar: en una sesión sin un solo turno, el compositor se
+> sustituye por «empezar una conversación aquí», con la máquina y la carpeta ya puestas, y la vista
+> previa del explorador ofrece lo mismo antes de abrirla. Un aviso que dice «esto va a fallar» y
+> aun así deja pulsar Enviar es una trampa con un cartel.
+>
+> La regla distingue dos vacíos que se parecen: una sesión **estrenada desde Jarvis** también está
+> vacía, pero funciona —su primer trabajo la crea—, así que ahí el compositor se queda. Se afirma
+> sólo con el transcript ya cargado: mientras carga, no se sabe.
+>
+> También se pinta `cwdSource: 'derived'` como «deducida» junto a la ruta: es fiable —el core
+> comprobó que ese directorio existe en la máquina— pero es una deducción, y si se equivocara el
+> agente leería y editaría los ficheros de otra carpeta.
+
 Cosas que aparecieron trabajando en otra tarea. Se anotan aquí para que no se pierdan y para que
 quien las arregle sepa de dónde salieron.
 
-### HZ-27 · Las sesiones que dejó el puente antiguo no son sesiones, y no hay forma de recuperarlas
+### [x] HZ-27 · Las sesiones que dejó el puente antiguo no son sesiones, y no hay forma de recuperarlas
 
 Las **10 sesiones sin `cwd`** del índice —vultr 1, goro2 5, goro3 4— tienen un transcript de **una
 sola línea**:

@@ -29,6 +29,7 @@ import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVENANCE_ICON, PROVIDER_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
 import { EventTimeline } from '../ui/event-log.jsx';
+import { openNewSession } from '../ui/new-session.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { UsageBadge, messageBadgeText } from '../ui/usage.jsx';
 import { Card, DataRow, Segmented, Tabs, formatDuration, type SegmentOption } from '../ui/primitives.jsx';
@@ -226,6 +227,19 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
     + `&from=${encodeURIComponent(workspace.id)}`;
   const attention = runs.filter((run) => ['failed', 'timed_out', 'waiting'].includes(run.status));
   const messages = transcript.data?.messages ?? [];
+
+  /**
+   * Una sesión que no se puede continuar ni estrenar.
+   *
+   * Se distingue de «sin estrenar» —que sí funciona y sólo espera su primer trabajo— por quién la
+   * creó: si no salió de Jarvis y no tiene un solo turno, no hay nada que reanudar al otro lado.
+   * Sólo se afirma con el transcript ya cargado: mientras carga, no se sabe.
+   */
+  const deadSession = workspace.sessionLaunched !== false
+    && !transcript.isLoading
+    && !transcript.error
+    && (transcript.data?.messageCount ?? null) === 0
+    && runs.length === 0;
   // Los que tiene la sesión, no los que caben en la página que se ha traído.
   const messageBadge = messageBadgeText({
     shown: messages.length, total: transcript.data?.messageCount ?? null,
@@ -296,9 +310,22 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                 </span>
               ) : null}
               {workspace.cwd ? (
-                <span className="badge neutral mono" title={workspace.cwd}>
+                <span
+                  className={`badge ${workspace.cwdSource === 'derived' ? 'warn' : 'neutral'} mono`}
+                  title={workspace.cwdSource === 'derived'
+                    ? `${workspace.cwd} · deducido del nombre del proyecto y comprobado en la máquina: existe. Si te consta otra ruta, cámbiala.`
+                    : workspace.cwd}
+                >
                   <Glyph icon={STATUS_ICON.folder} />
                   {workspace.cwd}
+                  {/*
+                    * Una ruta deducida es fiable pero es una deducción: si se equivocara, el agente
+                    * leería y editaría los ficheros de otra carpeta. Se dice en voz baja —no es una
+                    * alarma— pero se dice.
+                    */}
+                  {workspace.cwdSource === 'derived' ? (
+                    <span className="tiny" style={{ fontWeight: 600 }}>· deducida</span>
+                  ) : null}
                 </span>
               ) : null}
               {messages.length ? (
@@ -553,8 +580,40 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
             ) : null}
           </Card>
 
+          {/*
+            * Una sesión sin nada que continuar.
+            *
+            * Las que dejó el puente del stack anterior tienen el fichero pero ni un turno: el
+            * agente no las reanuda («No conversation found») ni las estrena («Session ID already
+            * in use»). Ofrecer el compositor ahí es ofrecer un fallo garantizado veinte segundos
+            * después. Lo único que se puede hacer es empezar una conversación nueva, así que es lo
+            * que se ofrece, con la máquina y la carpeta ya puestas.
+            *
+            * No aplica a las estrenadas desde aquí: ésas están vacías porque todavía no se han
+            * usado, y su primer trabajo las crea.
+            */}
+          {deadSession ? (
+            <Card>
+              <Empty
+                icon={ACTION_ICON.empty}
+                title="Aquí no hay conversación que continuar"
+                hint={`Esta sesión existe en ${workspace.ref.host} pero no guarda ningún turno, así que ${workspace.ref.provider} no puede reanudarla ni reutilizar su identificador. Lo que sí se puede es empezar una conversación nueva en la misma carpeta.`}
+                action={
+                  <button type="button" className="btn primary" onClick={() => openNewSession({
+                    host: workspace.ref.host,
+                    provider: workspace.ref.provider,
+                    cwd: workspace.cwd,
+                  })}>
+                    <Glyph icon={ACTION_ICON.new} />
+                    Empezar una conversación aquí
+                  </button>
+                }
+              />
+            </Card>
+          ) : null}
+
           {/* El compositor no vive dentro de una pestaña: es lo que se viene a hacer aquí. */}
-          {tab === 'actividad' || tab === 'conversacion' ? (
+          {!deadSession && (tab === 'actividad' || tab === 'conversacion') ? (
             <Card className="composer">
               <div className="composer-target">
                 <TargetChip target={target.data?.target} />
