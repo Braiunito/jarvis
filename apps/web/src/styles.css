@@ -44,6 +44,12 @@
 
 * { box-sizing: border-box; }
 
+/*
+ * La cabecera es sticky, así que al llevar el foco o el scroll a un elemento hay que dejarle
+ * hueco por arriba: si no, queda tapado y el clic se lo lleva la barra.
+ */
+html { scroll-padding-top: 72px; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -61,6 +67,18 @@ a { color: var(--accent); }
   min-height: 100dvh;
 }
 
+/*
+ * El contenido crea su propio contexto de apilamiento.
+ *
+ * Sin esto, una capa interna con `z-index` alto —las de xterm, por ejemplo— compite en el
+ * contexto raíz contra la cabecera y la tapa. En un móvil eso significa que la barra de navegación
+ * está a la vista y no se puede pulsar.
+ */
+main {
+  position: relative;
+  z-index: 0;
+}
+
 /* ---- barra superior ---- */
 .topbar {
   display: flex;
@@ -71,7 +89,12 @@ a { color: var(--accent); }
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
-  z-index: 10;
+  /*
+   * La cabecera crea contexto de apilamiento, y en móvil la navegación vive dentro de ella: su
+   * `z-index` se resuelve aquí, no en la página. Con un valor bajo, el contenido —xterm, por
+   * ejemplo— se pinta por encima y los enlaces dejan de poder pulsarse.
+   */
+  z-index: 30;
   padding-top: max(8px, env(safe-area-inset-top));
 }
 
@@ -86,7 +109,17 @@ a { color: var(--accent); }
   gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
+  /*
+   * `flex: 1` con `min-width: 0` es lo que hace que el desbordamiento sea un scroll horizontal y
+   * no una pila de enlaces encimados. Sin el `min-width`, un hijo flexible no encoge por debajo
+   * de su contenido y los elementos acaban solapándose: en un móvil, pulsar «Salud» activaba
+   * «Terminal».
+   */
+  flex: 1 1 auto;
+  min-width: 0;
 }
+
+.nav a { flex: 0 0 auto; }
 .nav::-webkit-scrollbar { display: none; }
 
 .nav a {
@@ -102,10 +135,52 @@ a { color: var(--accent); }
 .nav a[aria-current="page"] { color: var(--text); background: var(--bg-sunken); }
 .nav a:hover { color: var(--text); }
 
-.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+@media (max-width: 560px) {
+  /* En una pantalla estrecha, el nombre de quien está dentro cabe menos que el botón de salir. */
+  .topbar-right .small { display: none; }
+}
+
+/*
+ * En un teléfono la navegación baja.
+ *
+ * Cinco destinos no caben arriba a 390 px, y dejarlos en una tira con scroll horizontal es peor
+ * que no tenerlos: los enlaces se pisan y se acaba pulsando el de al lado. Abajo caben, están
+ * donde llega el pulgar y no compiten con el contenido.
+ */
+@media (max-width: 560px) {
+  .nav {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 20;
+    overflow: visible;
+    background: var(--bg-raised);
+    border-top: 1px solid var(--border);
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    gap: 0;
+  }
+
+  .nav a {
+    flex: 1 1 0;
+    justify-content: center;
+    min-height: 52px;
+    padding: 0 4px;
+    font-size: 13px;
+  }
+
+  /* Hueco para que la barra no tape el final del contenido. */
+  main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
 
 /* ---- estructura ---- */
 .page { padding: 16px; max-width: 1200px; width: 100%; margin: 0 auto; }
+@media (max-width: 560px) { .page { padding: 12px; } }
 .page.wide { max-width: none; }
 
 .grid-2 { display: grid; gap: 16px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
@@ -158,6 +233,15 @@ a { color: var(--accent); }
 }
 
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/*
+ * Un control dentro de una fila no puede encogerse por debajo de su contenido: si lo hace, se
+ * mete debajo del vecino y el clic acaba en el elemento equivocado.
+ */
+.row > label { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
+.row .select, .row .input { flex: 0 1 auto; min-width: 7rem; max-width: 100%; }
+.control-sm { width: 9rem; }
+.control-md { width: 11rem; }
 .stack { display: grid; gap: 10px; }
 
 /* ---- estados ---- */

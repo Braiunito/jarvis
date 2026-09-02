@@ -127,7 +127,7 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
         <div className="row">
           <label className="row small">
             <span className="muted">Host</span>
-            <select className="select" style={{ width: 160 }} value={host} onChange={(event) => setHost(event.target.value)}>
+            <select className="select control-md" value={host} onChange={(event) => setHost(event.target.value)}>
               {(hosts.data?.hosts ?? []).map((candidate) => (
                 <option key={candidate.host} value={candidate.host} disabled={!candidate.tmux}>
                   {candidate.host}{candidate.tmux ? '' : ' (sin tmux)'}
@@ -137,7 +137,7 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
           </label>
           <label className="row small">
             <span className="muted">Agente</span>
-            <select className="select" style={{ width: 140 }} value={provider}
+            <select className="select control-sm" value={provider}
               onChange={(event) => setProvider(event.target.value as Provider)}>
               <option value="claude">claude</option>
               <option value="codex">codex</option>

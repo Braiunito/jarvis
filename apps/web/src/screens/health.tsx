@@ -11,7 +11,8 @@ import { ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
 
 export function HealthScreen(): JSX.Element {
   const health = useHealth();
-  const hosts = useHosts();
+  // Aquí sí interesa el estado real de cada máquina, aunque cueste una conexión por host.
+  const hosts = useHosts({ probe: true });
   const [copied, setCopied] = useState(false);
 
   function copyDiagnostics(): void {

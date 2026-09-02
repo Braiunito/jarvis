@@ -84,9 +84,10 @@ test('flujo 4 · delegar un objetivo al Assistant', async ({ page }) => {
   await page.getByLabel('Objetivo').fill('averigua por que el pool se queda sin conexiones');
   await page.getByRole('button', { name: 'Delegar objetivo' }).click();
 
-  // El plan es una lista de pasos con estado, no una conversación.
-  await expect(page.getByText('Reunir contexto')).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText('Resultado')).toBeVisible({ timeout: 90_000 });
+  // El plan es una lista de pasos con estado, no una conversación. El título aparece también en
+  // la síntesis final, así que se busca el del paso.
+  await expect(page.getByText('Reunir contexto', { exact: true }).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: 'Resultado' })).toBeVisible({ timeout: 90_000 });
 });
 
 test('flujo 5 · diagnóstico: qué salto está roto y cómo se copia', async ({ page }) => {

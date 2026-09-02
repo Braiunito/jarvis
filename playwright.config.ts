@@ -20,7 +20,23 @@ export default defineConfig({
   },
   projects: [
     { name: 'escritorio', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
-    { name: 'movil', use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } } },
+    /**
+     * Móvil de 390×844 con táctil.
+     *
+     * A propósito sin `isMobile`: esa emulación reinterpreta el meta viewport y acaba con un
+     * viewport de layout de 1476 px de alto mientras la ventana visible mide 844. Una barra fija
+     * abajo se coloca entonces fuera de la pantalla y nada de lo que hay ahí se puede pulsar, que
+     * es un artefacto del emulador y no algo que le pase a nadie con un teléfono.
+     */
+    {
+      name: 'movil',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+        deviceScaleFactor: 2,
+      },
+    },
   ],
   webServer: {
     command: 'node scripts/e2e-stack.mjs',

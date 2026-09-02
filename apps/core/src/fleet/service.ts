@@ -88,6 +88,25 @@ export class FleetService {
     return Promise.all(this.#deps.hosts.map((host) => this.describe(host, { force })));
   }
 
+  /**
+   * Lo que ya se sabe, sin tocar la red.
+   *
+   * Un host del que nunca se supo nada sale como «desconocido», no como «caído»: no es lo mismo, y
+   * decir lo segundo sin haber mirado sería mentir.
+   */
+  known(): HostCapabilities[] {
+    return this.#deps.hosts.map((host) => this.#lastKnown(host) ?? {
+      host,
+      reachable: false,
+      binaries: {},
+      providers: [],
+      tmux: false,
+      probedAt: this.#deps.clock.nowIso(),
+      stale: true,
+      error: null,
+    });
+  }
+
   get hosts(): readonly string[] { return this.#deps.hosts; }
   get bastionHost(): string { return this.#deps.bastionHost; }
 }

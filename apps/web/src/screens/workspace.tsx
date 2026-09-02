@@ -203,7 +203,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <label className="row small">
                 <span className="muted">Permiso</span>
-                <select className="select" style={{ width: 120 }} value={profile}
+                <select className="select control-sm" value={profile}
                   onChange={(event) => setProfile(event.target.value as PermissionProfile)}>
                   {PROFILES.map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>

@@ -40,7 +40,7 @@ export function ExplorerScreen(): JSX.Element {
             onChange={(event) => setQuery(event.target.value)}
             aria-label="Buscar sesiones"
           />
-          <select className="select" style={{ width: 160 }} value={provider}
+          <select className="select control-md" value={provider}
             onChange={(event) => setProvider(event.target.value)} aria-label="Filtrar por proveedor">
             <option value="">Todos</option>
             <option value="claude">Claude</option>

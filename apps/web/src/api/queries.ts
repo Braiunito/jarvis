@@ -58,10 +58,20 @@ export const useHealth = (): UseQueryResult<Health> => useQuery({
   retry: 1,
 });
 
-export const useHosts = (): UseQueryResult<{ hosts: HostCapabilities[]; bastionHost: string }> => useQuery({
-  queryKey: keys.hosts,
-  queryFn: () => get<{ hosts: HostCapabilities[]; bastionHost: string }>('/api/hosts'),
-  staleTime: 5 * 60_000,
+/**
+ * La flota, para pintar selectores: lo último que se sabe, sin esperar a un sondeo.
+ *
+ * `probe` la convierte en la consulta cara —una conexión SSH por host— que sólo tiene sentido en
+ * la pantalla de Salud.
+ */
+export const useHosts = (
+  { probe = false }: { probe?: boolean } = {},
+): UseQueryResult<{ hosts: HostCapabilities[]; bastionHost: string; probed: boolean }> => useQuery({
+  queryKey: [...keys.hosts, probe] as const,
+  queryFn: () => get<{ hosts: HostCapabilities[]; bastionHost: string; probed: boolean }>(
+    `/api/hosts${probe ? '?probe=1' : ''}`,
+  ),
+  staleTime: probe ? 30_000 : 5 * 60_000,
 });
 
 /**
