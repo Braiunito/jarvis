@@ -640,6 +640,33 @@ Pasar un contexto de un agente a otro —de Claude a Codex, o entre máquinas—
 mano. El material ya existe (transcript, evidencia de runs, adjuntos); falta decidir qué viaja y
 qué se queda, que es la parte difícil.
 
+## Auditorías del 2026-09-02
+
+Dos revisiones estáticas del árbol, guardadas en
+[`docs/audits/`](./docs/audits/): la
+[general](./docs/audits/2026-09-02-auditoria-jarvis.md) (9 fallos que rompen promesas del producto,
+33 acotados, más pulido) y la
+[diferencial de Codex](./docs/audits/2026-09-02-auditoria-diferencial-codex.md) (20 hallazgos
+distintos, sin repetir los de la primera).
+
+Se guardan enteras y no se resumen aquí a propósito: cada hallazgo trae su evidencia con fichero y
+línea, y ese detalle es lo que permite arreglarlo sin volver a investigarlo. Lo que sí vive aquí es
+**quién lleva qué**, porque somos tres trabajando en el mismo árbol.
+
+| Zona | Quién | Hallazgos |
+|---|---|---|
+| Core, adaptadores, Assistant | `litechat-ea` | A1, A2 (+A2b), A3, A6, A7, A8, A9, M1–M24, N01, N04–N09, N12, N14–N19 |
+| Despliegue, gateway, seguridad | `jarvis-69` | M31, M32, M33, N02, N10, N11, N13 |
+| Consola web | esta sesión | A4 (mitad de interfaz), A5, M25–M30, N03, N20 |
+
+**Lo primero es A1 y A2**, y no por gusto: sin ellos «parar» y «durable» son promesas falsas.
+Cancelar mata el subshell y deja al agente vivo gastando cuota y tocando ficheros con el permiso
+que se quería cortar; y un run cuya tmux muere en `running` se queda así cuatro horas.
+
+**N02 no es un bug, es una decisión de producto**: hoy cualquier cuenta autenticada puede verlo y
+tocarlo todo. Con una sola persona no se nota; en cuanto haya dos, hay que decidir si un workspace
+tiene dueño. Eso lo decide el usuario, no nosotros.
+
 ## Propuestas sin acordar
 
 Ideas que salieron trabajando y que **no se tocan hasta que el usuario diga**. Están escritas para
