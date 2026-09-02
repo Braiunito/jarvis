@@ -104,13 +104,37 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
             />
           </div>
 
-          {runs.isLoading ? <div style={{ padding: 14 }}><Loading rows={4} /></div> : null}
+          {runs.isLoading ? (
+            <div style={{ padding: 14 }}>
+              <Loading rows={4} shape="table" label="Cargando los trabajos…" />
+            </div>
+          ) : null}
 
           {!runs.isLoading && visible.length === 0 ? (
-            <Empty title="Nada por aquí"
-              hint={filter === 'todos'
-                ? 'Cuando mandes trabajo desde un workspace aparecerá aquí con su evidencia.'
-                : 'Prueba con otra pestaña: hay trabajos, pero no de este tipo.'} />
+            filter === 'todos' ? (
+              <Empty
+                icon={NAV_ICON.runs}
+                title="Todavía no se ha mandado nada"
+                hint="El trabajo se manda desde un workspace, y aquí queda todo junto: dónde corrió, con qué permiso y qué dijo."
+                action={
+                  <Link to="/sessions" className="btn primary">
+                    <Glyph icon={NAV_ICON.sessions} />
+                    Elegir una sesión y empezar
+                  </Link>
+                }
+              />
+            ) : (
+              <Empty
+                icon={ACTION_ICON.filter}
+                title="Nada en esta pestaña"
+                hint={`Hay ${all.length} trabajo${all.length === 1 ? '' : 's'} en total, pero ninguno en este estado.`}
+                action={
+                  <button type="button" className="btn" onClick={() => setFilter('todos')}>
+                    Ver todos
+                  </button>
+                }
+              />
+            )
           ) : (
             <div className="table-wrap">
               <table className="table">
@@ -200,7 +224,7 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                   </button>
                 )}
               </div>
-              <ErrorNote error={cancel.error ?? retry.error} />
+              <ErrorNote error={cancel.error ?? retry.error} onRetry={() => void detail.refetch()} />
 
               <div className="stack" style={{ gap: 7 }}>
                 <DataRow label="Ejecuta en"><span className="mono">{run.executionHost}</span></DataRow>
@@ -232,7 +256,7 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                   Eventos {stream.connected ? '· en directo' : stream.ended ? '· cerrado' : '· reconectando…'}
                 </p>
                 <EventTimeline events={stream.events} limit={40}
-                  empty="Sin eventos guardados para este trabajo." />
+                  empty="Este trabajo no llegó a dejar ningún evento. Si terminó mal, el detalle está en su código de error." />
               </div>
             </div>
           )}

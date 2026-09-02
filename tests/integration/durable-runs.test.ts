@@ -78,7 +78,7 @@ afterAll(async () => {
   for (const host of ['bastion', 'serverB']) {
     await sshExec({ host, command: 'tmux kill-server 2>/dev/null || true', config }).catch(() => undefined);
   }
-  rmSync(root, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
 });
 
 async function openWorkspace(app: FastifyInstance, sessionId = 'sid-1', host = 'bastion'): Promise<string> {

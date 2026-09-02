@@ -19,7 +19,10 @@ import {
   useWorkspace,
 } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
-import { ErrorNote, Link, Loading, RunStatusBadge, StaleNote, TargetChip, relativeTime } from '../ui/bits.jsx';
+import {
+  Empty, ErrorNote, Link, Loading, RunStatusBadge, StaleNote, TargetChip, relativeTime,
+} from '../ui/bits.jsx';
+import { useAnnounceOnChange } from '../ui/announce.jsx';
 import { AssistantPanel } from '../ui/assistant.jsx';
 import { PERMISSION, PROVENANCE, RUN_STATUS } from '../ui/labels.js';
 import {
@@ -102,6 +105,15 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
   }, [pinnedRunId, runs]);
   const stream = useRunStream(activeRun ? activeRun.id : null);
 
+  useAnnounceOnChange(
+    activeRun ? `${activeRun.id}:${activeRun.status}` : null,
+    (value) => {
+      if (!value || !activeRun) return null;
+      const label = RUN_STATUS[activeRun.status];
+      return `El trabajo ${activeRun.id.slice(0, 8)} está ${label.name.toLowerCase()}. ${label.help}`;
+    },
+  );
+
   usePageMeta({
     title: workspace?.title ?? 'Workspace',
     ...(workspace ? { subtitle: `${workspace.ref.provider} en ${workspace.ref.host}` } : {}),
@@ -151,10 +163,26 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
     setTab('actividad');
   }
 
-  if (detail.isLoading) return <div className="page"><Loading rows={6} /></div>;
-  if (detail.error) return <div className="page"><ErrorNote error={detail.error} /></div>;
+  if (detail.isLoading) {
+    return <div className="page"><Loading rows={4} shape="list" label="Cargando el workspace…" /></div>;
+  }
+  if (detail.error) {
+    return (
+      <div className="page">
+        <ErrorNote error={detail.error} onRetry={() => void detail.refetch()}
+          action={<Link to="/sessions" className="btn small">Volver a Sesiones</Link>} />
+      </div>
+    );
+  }
   if (!workspace) {
-    return <div className="page"><ErrorNote error={{ code: 'NOT_FOUND', message: 'workspace desconocido' }} /></div>;
+    return (
+      <div className="page">
+        <ErrorNote
+          error={{ code: 'NOT_FOUND', message: 'Este workspace ya no existe o nunca existió.' }}
+          action={<Link to="/sessions" className="btn small">Buscar la sesión</Link>}
+        />
+      </div>
+    );
   }
 
   const events = stream.events;
@@ -313,19 +341,24 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                       ) : null}
                     </span>
                   </div>
-                  <p className="visually-hidden" aria-live="polite">
-                    El trabajo {activeRun.id.slice(0, 8)} está {RUN_STATUS[activeRun.status].name.toLowerCase()}.
-                  </p>
-
                   <EventTimeline
                     events={events}
-                    empty="Sin eventos todavía: el agente aún no ha dicho nada de este trabajo."
+                    empty="El trabajo ya está lanzado; en cuanto el agente diga algo aparece aquí, y se queda guardado."
                   />
                 </>
               ) : (
-                <p className="muted small" style={{ margin: 0 }}>
-                  Aún no has mandado nada en este workspace. Escribe abajo qué quieres que haga.
-                </p>
+                <Empty
+                  icon={ACTION_ICON.send}
+                  title="Todavía no has mandado nada aquí"
+                  hint="Lo que escribas abajo se ejecuta en la máquina de la cabecera, con el permiso que elijas. Aquí verás lo que vaya haciendo, paso a paso."
+                  action={
+                    <button type="button" className="btn primary"
+                      onClick={() => textarea.current?.focus()}>
+                      <Glyph icon={ACTION_ICON.send} />
+                      Escribir la primera tarea
+                    </button>
+                  }
+                />
               )
             ) : null}
 
@@ -335,11 +368,16 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   Escrito por el agente en {workspace.ref.host}. Jarvis sólo lo lee.
                 </p>
                 <StaleNote stale={Boolean(transcript.error)} />
-                {transcript.isLoading ? <Loading rows={3} /> : null}
+                {transcript.isLoading ? <Loading rows={3} shape="text" label="Cargando la conversación…" /> : null}
                 {transcript.error ? (
-                  <p className="small muted">El índice no pudo devolver la conversación ahora mismo.</p>
+                  <ErrorNote error={transcript.error} onRetry={() => void transcript.refetch()} />
                 ) : null}
-                <div className="messages">
+                {/*
+                  * Una zona con scroll propio necesita ser alcanzable con el teclado: sin
+                  * `tabindex` no hay forma de bajar por ella sin ratón.
+                  */}
+                <div className="messages" tabIndex={0} role="region"
+                  aria-label="Conversación de la sesión">
                   {messages.map((message, index) => (
                     <div key={index} className={`message ${message.role}`}>
                       <div className="who">
@@ -353,8 +391,13 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                       <div className="body">{message.text}</div>
                     </div>
                   ))}
-                  {!transcript.isLoading && messages.length === 0 ? (
-                    <p className="muted small" style={{ margin: 0 }}>Esta sesión todavía no tiene mensajes.</p>
+                  {!transcript.isLoading && !transcript.error && messages.length === 0 ? (
+                    <Empty
+                      tight
+                      icon={ACTION_ICON.message}
+                      title="Esta sesión todavía no tiene mensajes"
+                      hint="Aparecerán aquí en cuanto el agente hable en la máquina, lo mandes tú desde abajo o alguien trabaje en esa sesión por su cuenta."
+                    />
                   ) : null}
                 </div>
               </>
@@ -381,9 +424,12 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                     <span className="tiny faint">{attachments.length}</span>
                   </div>
                   {attachments.length === 0 ? (
-                    <p className="tiny faint" style={{ margin: 0 }}>
-                      Ninguno. Los adjuntos se suben al mandar trabajo y caducan solos.
-                    </p>
+                    <Empty
+                      tight
+                      icon={ACTION_ICON.attach}
+                      title="Sin adjuntos"
+                      hint="Se suben al mandar trabajo, viven en la máquina con un nombre que pone Jarvis y caducan solos."
+                    />
                   ) : (
                     <div className="list">
                       {attachments.map((file) => (
@@ -523,7 +569,12 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                 </button>
               ))}
               {runs.length === 0 ? (
-                <p className="muted small" style={{ margin: 0 }}>Ninguno todavía.</p>
+                <Empty
+                  tight
+                  icon={NAV_ICON.runs}
+                  title="Ningún trabajo todavía"
+                  hint="Cada cosa que mandes desde abajo deja aquí su registro, con su permiso y su evidencia."
+                />
               ) : null}
             </div>
           </Card>

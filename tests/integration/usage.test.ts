@@ -39,7 +39,7 @@ beforeEach(async () => {
   await app.ready();
 });
 
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+afterAll(() => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 }));
 
 const openWorkspace = async (provider: 'claude' | 'codex', sessionId: string): Promise<string> => {
   const response = await app.inject({

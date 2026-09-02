@@ -71,10 +71,17 @@ No entran:
 | 2026-09-02 | `lucide-react` | 1.39.0 | 176 → 180 KiB gzip (≈40 iconos) | iconografía |
 | 2026-09-02 | `@radix-ui/react-dialog` | 1.1.23 | 191 → 194 KiB gzip (con el visor) | UX-08, detalle de un evento |
 | 2026-09-02 | `react-json-view-lite` | 2.5.0 | incluido en la línea anterior | UX-08, JSON plegable |
+| 2026-09-02 | `@axe-core/playwright` | 4.13.0 | 0 (sólo desarrollo) | UX-07, auditoría de accesibilidad |
 
 El coste de los iconos es de 4 KiB para cuarenta siluetas porque se importan por nombre y el
 paquete es ESM: sólo viaja lo que se usa. Importar `import * as icons` costaría el paquete entero,
 así que no se hace.
+
+`@axe-core/playwright` no viaja en el bundle: corre en las pruebas y mide la página real, no un
+render de laboratorio. Es MPL-2.0, que aquí no contagia nada porque no se distribuye. No sustituye
+a mirar la pantalla —una auditoría automática detecta contraste, nombres y roles, no si el orden de
+lectura tiene sentido— pero sí impide que una edición futura vuelva a bajar de AA sin que nadie se
+entere.
 
 **Por qué esas dos y no las de siempre.** Para el modal se descartó SweetAlert2: pesa unas diez
 veces más, es imperativo —se llama, no se declara— y trae su propia paleta, que habría que pelear

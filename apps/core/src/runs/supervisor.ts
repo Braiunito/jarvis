@@ -31,6 +31,22 @@ export interface SupervisorDeps {
 
 const ACTIVE: RunStatus[] = ['queued', 'preparing', 'running', 'waiting', 'cancelling'];
 
+/**
+ * Quita el color de una línea de terminal.
+ *
+ * Las CLIs escriben sus errores con secuencias ANSI, y `opencode` los manda hasta cuando nadie
+ * mira: sin esto, la tarjeta de un trabajo fallido enseña «[91m[1mError: Session not found»
+ * y quien lo lee tiene que adivinar dónde empieza el mensaje.
+ */
+/* eslint-disable no-control-regex */
+export function stripAnsi(text: string): string {
+  return text
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001b[@-Z\\-_]/g, '');
+}
+/* eslint-enable no-control-regex */
+
 export class RunSupervisor {
   readonly #deps: SupervisorDeps;
   readonly #missingSince = new Map<string, number>();
@@ -137,12 +153,18 @@ export class RunSupervisor {
     const row = this.#deps.repository.row(run.id);
     if (!row) return null;
     try {
+      // El spool se lee donde se creó: cada run guarda su directorio, y de ahí sale su raíz.
+      const suffix = `/${run.id}`;
+      const spoolRoot = row.remote_spool_dir?.endsWith(suffix)
+        ? row.remote_spool_dir.slice(0, -suffix.length)
+        : undefined;
       const base = this.#deps.runner.chunkBytes;
       const hardMax = this.#deps.maxLineBytes ?? 8 * 1024 * 1024;
       let maxBytes = base;
       for (;;) {
         const poll = await this.#deps.runner.poll({
           host: run.executionHost, runId: run.id, offset: row.remote_cursor_bytes, maxBytes,
+          ...(spoolRoot ? { spoolRoot } : {}),
         });
         const readBytes = Buffer.byteLength(poll.chunk, 'utf8');
         const complete = poll.chunk.includes('\n');
@@ -278,7 +300,7 @@ export class RunSupervisor {
     // Un fallo que ocurre antes del primer evento —un cwd que no existe, un binario que no está—
     // sólo deja rastro en stderr. Sin esto, el operador recibe «salió con código 2» y a buscarse
     // la vida.
-    const stderrTail = poll.stderr.trim().split('\n').filter(Boolean).at(-1) ?? null;
+    const stderrTail = stripAnsi(poll.stderr).trim().split('\n').filter(Boolean).at(-1) ?? null;
     const extraEvents = failed && stderrTail
       ? [{ type: 'agent.error' as const, at: clock.nowIso(), payload: { message: stderrTail, code: 'AGENT_FAILED' } }]
       : [];

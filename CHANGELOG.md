@@ -55,6 +55,24 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cerrar una terminal desde la interfaz**: junto a «Reconectar», y en cada fila de la lista de
   sesiones. Destruir sigue siendo explícito —salir de la pantalla no mata nada— así que lo pide
   con un diálogo que nombra la sesión y la máquina antes de tocarlas.
+- **Dónde contestó la IA se ve sin buscarlo** (UX-09): en un trabajo largo, lo que dijo el agente
+  son dos líneas entre treinta de fontanería. Ahora la respuesta se pinta con tipografía de
+  lectura, banda violeta y aire alrededor, y la línea de tiempo ofrece «Sólo respuestas» para
+  aislarlas de un clic. La conversación y la síntesis de un plan comparten el mismo tratamiento.
+- **Los tres estados que más se repiten, con oficio** (UX-06): una pantalla vacía dice qué hacer y
+  lleva ahí —la portada sin workspaces manda a buscar una sesión, un explorador sin resultados
+  distingue «no hay nada» de «tus filtros no dejan pasar nada»—; los esqueletos de carga tienen la
+  forma de lo que viene, así que la página no salta al llegar; y un error ofrece siempre la
+  siguiente acción: reintentar, ver qué salto falla, o copiar el diagnóstico —sin prompts ni salida
+  del agente— para pedir ayuda sin transcribir nada a mano.
+- **Se puede operar sin ratón y sin ver bien** (UX-07): «Saltar al contenido» como primer paso del
+  tabulador, foco visible en todo, objetivos de 44 px cuando se navega con el dedo, y contraste AA
+  comprobado con axe en las seis pantallas y en los dos temas. Los cambios de estado —un trabajo
+  que termina, un plan que pide permiso, una terminal que se cae— se anuncian a los lectores de
+  pantalla; la respuesta del agente no, porque se leería token a token.
+- **La terminal deja de esconderse bajo el teclado**: con el teclado virtual abierto, la terminal
+  encoge y la fila de teclas (Esc, Tab, flechas, Ctrl+C) sigue a mano, que es justo cuando hace
+  falta.
 - **El Assistant, completo en la interfaz** (UX-03): cuando el plan pregunta, hay dónde contestar;
   cada paso enlaza con el trabajo que lanzó; la síntesis enlaza con los trabajos que la sostienen;
   y si un plan pide permiso mientras estás en otra pantalla, la cabecera lo dice.
@@ -82,6 +100,10 @@ Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer
 - lo que contestaba una persona a una pregunta del Assistant no llegaba al modelo: el plan
   continuaba, pero sin haber leído la respuesta. Ahora viaja en el contexto del paso siguiente y
   queda en el historial del plan;
+- en el teléfono, los botones que sólo enseñan icono se quedaban sin nombre para un lector de
+  pantalla: «Salir» era «botón». El texto se escondía de la vista y del árbol accesible a la vez;
+- los distintivos de estado perdían contraste según lo que tuvieran detrás —dentro de una fila
+  seleccionada, el verde de «terminado» caía a 4.1:1—, porque el fondo teñido era transparente;
 - abrir una terminal no refrescaba la lista de sesiones: la pantalla decía «ninguna sesión abierta»
   con la sesión ya creada al otro lado;
 - el selector de máquina marcaba «(sin tmux)» y deshabilitaba hosts que sólo estaban **sin
@@ -100,6 +122,20 @@ Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer
   hueco silencioso durante cinco minutos. Ahora eso es un error con su motivo, y el sondeo a medias
   de un Claude recién instalado —el que enseña la bienvenida antes de `/usage`— se reintenta una
   vez saltándose el TTL, como hacía el stack anterior.
+
+### Probado contra máquinas de verdad (2026-09-02)
+
+Primera campaña fuera del laboratorio: el stack entero —índice, core, gateway y consola— contra
+**zeus**, **goro2** y **vultr**, con las CLIs instaladas allí y las cuentas reales. Lo que
+funcionó: detección de capacidades por máquina, trabajo durable con Claude y con Codex, estrategia
+nativa en el tercer servidor, cancelación confirmada en cuatro segundos, terminal tmux viva,
+cuenta y cuota reales en la cabecera, y un host inalcanzable que deja el resto de la consola
+usable en vez de tumbarla.
+
+Lo que sólo se ve saliendo del laboratorio, y ya está corregido: el spool por defecto hacía
+imposible lanzar cualquier trabajo; un resultado de Codex se perdía por un cambio de su CLI; los
+eventos nuevos de Claude Code se leían como un fallo; los errores llegaban con el color de
+terminal dentro; y la frescura del índice contaba el bastión dos veces.
 
 ### Decidido
 

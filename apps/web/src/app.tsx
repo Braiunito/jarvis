@@ -17,6 +17,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { get, post, UnauthenticatedError } from './api/client.js';
 import { useHealth, useMetrics, useRuns } from './api/queries.js';
 import { useRoute } from './router.js';
+import { Announcer } from './ui/announce.jsx';
 import { Link } from './ui/bits.jsx';
 import { CommandPalette, openCommandPalette } from './ui/command-palette.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, PLAN_STATUS_ICON, STATUS_ICON } from './ui/icons.jsx';
@@ -190,6 +191,16 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
 
   return (
     <div className="shell">
+      {/* Lo primero del orden de tabulación: cinco destinos antes del contenido son once saltos. */}
+      <a className="skip-link" href="#contenido"
+        onClick={(event) => {
+          event.preventDefault();
+          const main = document.getElementById('contenido');
+          main?.focus();
+          main?.scrollIntoView();
+        }}>
+        Saltar al contenido
+      </a>
       <Rail working={working} attention={attention} insecure={Boolean(me.insecureLogin)} />
 
       <div className="workarea">
@@ -250,11 +261,12 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
           </div>
         </header>
 
-        <main>{content}</main>
+        <main id="contenido" tabIndex={-1}>{content}</main>
         <StatusBar />
       </div>
 
       <CommandPalette />
+      <Announcer />
     </div>
   );
 }

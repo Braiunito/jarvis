@@ -7,6 +7,14 @@ export const HostCapabilities = Type.Object({
   binaries: Type.Record(Type.String(), Type.Union([Type.String(), Type.Null()])),
   providers: Type.Array(Provider),
   tmux: Type.Boolean(),
+  /**
+   * El `$HOME` del usuario en ese host, tal como lo resuelve su shell.
+   *
+   * Existe porque el spool de los runs vive bajo el home del usuario remoto y ese path tiene que
+   * ser absoluto **de verdad**: `$HOME/...` entrecomillado no lo expande nadie, y sin resolverlo
+   * aquí un despliegue con la configuración por defecto no puede lanzar ni un solo trabajo.
+   */
+  home: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   probedAt: Iso8601,
   /** Último resultado bueno conservado cuando la sonda falla. */
   stale: Type.Optional(Type.Boolean()),

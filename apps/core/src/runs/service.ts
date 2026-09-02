@@ -45,6 +45,8 @@ export interface RunServiceDeps {
     maxToolOutputBytes: number;
     maxEventTextBytes: number;
     remotePath: string;
+    /** Raíz del spool tal como se configuró; puede venir con `$HOME` sin expandir. */
+    spoolRoot: string;
   };
 }
 
@@ -132,6 +134,33 @@ export class RunService {
    * La clave de idempotencia protege el caso real del móvil — doble toque, reintento tras
    * reconectar — devolviendo el mismo run en vez de creando otro.
    */
+  /**
+   * El spool del host, con el `$HOME` resuelto.
+   *
+   * La configuración lo escribe como `$HOME/.local/state/jarvis/runs` porque cada usuario remoto
+   * tiene el suyo, pero ese path viaja dentro de comandos entrecomillados y nadie lo expande: hay
+   * que resolverlo aquí con el home que devolvió la sonda de capacidades. Sin resolverlo, un
+   * despliegue con la configuración por defecto no puede lanzar ni un solo trabajo.
+   */
+  #spoolRootFor(host: string, home: string | null | undefined): string {
+    const configured = this.#deps.limits.spoolRoot;
+    if (!/^(\$HOME|~)(\/|$)/.test(configured)) return configured;
+    if (!home) {
+      throw new JarvisError('HOST_UNREACHABLE',
+        `no se pudo averiguar el home de ${host}, y el spool está configurado como ${configured}`,
+        { scope: { host } });
+    }
+    return configured.replace(/^(\$HOME|~)/, home.replace(/\/+$/, ''));
+  }
+
+  /** El root con el que se creó un run. Se lee del propio run, no de la configuración de hoy. */
+  #spoolRootOf(run: Run): string | undefined {
+    const dir = this.#deps.repository.row(run.id)?.remote_spool_dir;
+    if (!dir) return undefined;
+    const suffix = `/${run.id}`;
+    return dir.endsWith(suffix) ? dir.slice(0, -suffix.length) : undefined;
+  }
+
   async create(request: CreateRunRequest, user: UserIdentity, requestId: string): Promise<{ run: Run; target: TargetPlan; replayed: boolean }> {
     const { repository, workspaces, clock, limits } = this.#deps;
     const workspace = workspaces.require(request.workspaceId);
@@ -175,6 +204,9 @@ export class RunService {
     }
 
     const target = await this.planTarget(workspace, request);
+    // El spool vive en el host que ejecuta, así que su raíz se resuelve con el home de ESE host.
+    const executionCapabilities = await this.#deps.capabilities.detect(target.executionHost);
+    const spoolRoot = this.#spoolRootFor(target.executionHost, executionCapabilities.home);
     const runId = newRunId();
     const at = clock.nowIso();
 
@@ -195,7 +227,7 @@ export class RunService {
       attempt: 1,
       parentRunId: null,
       remoteName: tmuxRunName(runId),
-      remoteSpoolDir: this.#deps.runner.layout(runId).dir,
+      remoteSpoolDir: this.#deps.runner.layout(runId, spoolRoot).dir,
       createdAt: at,
       deadlineAt: new Date(clock.nowMs() + limits.runTimeoutMs).toISOString(),
     });
@@ -357,6 +389,7 @@ export class RunService {
 
     this.transition(runId, 'preparing');
 
+    const spoolRoot = this.#spoolRootOf(run);
     const attachmentContext = this.#deps.attachments?.promptFor(runId) ?? null;
     const agentCommand = this.buildAgentCommand(run, row.prompt, attachmentContext);
     const meta: RunnerMeta = {
@@ -380,6 +413,7 @@ export class RunService {
     try {
       const { outcome } = await runner.prepare({
         host: run.executionHost, runId, meta, agentCommand, cwd: run.cwd,
+        ...(spoolRoot ? { spoolRoot } : {}),
       });
       // `already-running` no es un error: es exactamente lo que la idempotencia debe producir si
       // el core murió entre mandar el comando y confirmarlo.
@@ -420,6 +454,10 @@ export class RunService {
     let sessionId: string | null | undefined;
     let resultOk: boolean | null | undefined;
     let resultSummary: string | null | undefined;
+    // Lo último que dijo el agente en este trozo. Sirve de resumen cuando su evento final no
+    // repite el texto: Codex 0.152 cierra el turno con métricas y sin respuesta, y sin esto el
+    // trabajo termina «bien» y con el resultado en blanco.
+    let lastText: string | null = null;
 
     for (const line of usable.split('\n')) {
       if (!line.trim()) continue;
@@ -437,9 +475,12 @@ export class RunService {
         const bounded = this.#bound(event);
         events.push({ type: `agent.${event.type}` as RunEventType, at, payload: bounded });
         if ('sessionId' in event && event.sessionId) sessionId = event.sessionId;
+        if (event.type === 'text' && event.text.trim()) lastText = event.text.slice(0, 4000);
         if (event.type === 'result') {
           resultOk = event.ok;
-          resultSummary = typeof event.text === 'string' ? event.text.slice(0, 4000) : null;
+          resultSummary = typeof event.text === 'string' && event.text.trim()
+            ? event.text.slice(0, 4000)
+            : lastText;
         }
       }
     }
@@ -514,7 +555,9 @@ export class RunService {
     });
 
     try {
-      await this.#deps.runner.cancel({ host: run.executionHost, runId });
+      await this.#deps.runner.cancel({
+        host: run.executionHost, runId, ...(this.#spoolRootOf(run) ? { spoolRoot: this.#spoolRootOf(run) as string } : {}),
+      });
     } catch (error) {
       // No se pudo hablar con el host: el run se queda en `cancelling` y Health lo enseña. No se
       // finge una cancelación que no se ha podido confirmar.
@@ -531,7 +574,10 @@ export class RunService {
   async escalateCancel(runId: string): Promise<void> {
     const run = this.require(runId);
     if (isTerminalStatus(run.status)) return;
-    await this.#deps.runner.cancel({ host: run.executionHost, runId, escalate: true });
+    await this.#deps.runner.cancel({
+      host: run.executionHost, runId, escalate: true,
+      ...(this.#spoolRootOf(run) ? { spoolRoot: this.#spoolRootOf(run) as string } : {}),
+    });
   }
 
   /** Reintentar es un run nuevo enlazado al anterior: nunca se rebobina el original. */

@@ -11,7 +11,8 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import type { Provider } from '@jarvis/contracts';
 import { useDestroyTerminal, useHosts, useOpenTerminal, useTerminals } from '../api/queries.js';
-import { ErrorNote, relativeTime } from '../ui/bits.jsx';
+import { Empty, ErrorNote, relativeTime } from '../ui/bits.jsx';
+import { announce, useAnnounceOnChange } from '../ui/announce.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, RUN_STATUS_ICON, STATUS_ICON } from '../ui/icons.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { Card, ConfirmDialog } from '../ui/primitives.jsx';
@@ -48,6 +49,45 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   const openTerminal = useOpenTerminal();
   /** Qué sesión se está a punto de destruir. Nunca se destruye sin nombrarla. */
   const [killing, setKilling] = useState<{ host: string; name: string } | null>(null);
+
+  /*
+   * El teclado virtual.
+   *
+   * `dvh` mide la ventana, no lo que queda visible con el teclado abierto: la terminal y la fila
+   * de teclas acababan debajo del teclado, que es exactamente cuando se usan. `visualViewport` es
+   * lo único que sabe cuánto queda, y se publica como variable CSS para que el alto lo resuelva
+   * la hoja de estilos y no este componente.
+   */
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return undefined;
+    const shell = document.querySelector('.shell');
+    const apply = (): void => {
+      document.documentElement.style.setProperty('--viewport', `${Math.round(viewport.height)}px`);
+      // Un recorte grande sólo lo produce un teclado: una barra de navegador quita mucho menos.
+      shell?.classList.toggle('keyboard-open', window.innerHeight - viewport.height > 160);
+    };
+    apply();
+    viewport.addEventListener('resize', apply);
+    viewport.addEventListener('scroll', apply);
+    return () => {
+      viewport.removeEventListener('resize', apply);
+      viewport.removeEventListener('scroll', apply);
+      document.documentElement.style.removeProperty('--viewport');
+      shell?.classList.remove('keyboard-open');
+    };
+  }, []);
+
+  // Conectarse y perder la conexión son transiciones que hay que oír, no adivinar mirando.
+  useAnnounceOnChange(
+    attached ? `${attached.name}:${connected}` : 'ninguna',
+    (value) => {
+      if (value === 'ninguna') return null;
+      return connected
+        ? `Terminal conectada a ${attached?.name ?? ''} en ${attached?.host ?? ''}.`
+        : 'Terminal desconectada. La sesión sigue viva en la máquina.';
+    },
+  );
 
   usePageMeta({
     title: 'Terminal',
@@ -154,6 +194,7 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
     setError(null);
     try {
       await destroy.mutateAsync(target);
+      announce(`Terminal ${target.name} cerrada en ${target.host}.`);
       if (attached && attached.name === target.name && attached.host === target.host) {
         socket.current?.close();
         setAttached(null);
@@ -172,7 +213,7 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
 
   return (
     <div className="page">
-      <Card>
+      <Card className="terminal-setup">
         <div className="row">
           <span className="row tight faint" style={{ flex: '0 0 auto' }}>
             <Glyph icon={STATUS_ICON.host} size={16} />
@@ -221,7 +262,7 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
             </button>
           ) : null}
         </div>
-        <ErrorNote error={error} />
+        <ErrorNote error={error} onRetry={() => void open()} />
         {sessionId ? (
           <p className="small muted" style={{ margin: '10px 0 0' }}>
             Sesión <span className="mono">{sessionId}</span>
@@ -276,7 +317,18 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
               </div>
             ))}
             {(sessions.data?.sessions.length ?? 0) === 0 ? (
-              <p className="muted small" style={{ margin: 0 }}>Ninguna sesión abierta aquí todavía.</p>
+              <Empty
+                tight
+                icon={NAV_ICON.terminal}
+                title="Ninguna sesión abierta en esta máquina"
+                hint="Conectar crea una tmux con el agente dentro. Vive en la máquina, así que salir de esta pantalla no la cierra y volver reengancha la misma."
+                action={
+                  <button type="button" className="btn primary" onClick={() => void open()} disabled={!host}>
+                    <Glyph icon={ACTION_ICON.connect} />
+                    Conectar con {host || 'la máquina'}
+                  </button>
+                }
+              />
             ) : null}
           </div>
         </Card>

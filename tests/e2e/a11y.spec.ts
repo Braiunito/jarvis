@@ -1,0 +1,210 @@
+/**
+ * Accesibilidad y móvil, comprobados en la aplicación de verdad.
+ *
+ * No es una auditoría completa —eso no lo da ninguna herramienta— pero sí cubre lo que se rompe
+ * solo al editar pantallas: contraste por debajo de AA, un botón sin nombre, un icono suelto sin
+ * texto, una región mal etiquetada. Corre contra el mismo stack que los flujos, así que mide la
+ * página real y no un render de prueba.
+ *
+ * Lo que axe no puede ver va en los tests de abajo: que el foco se vea, que el orden de
+ * tabulación empiece por el atajo al contenido, y que en un dedo los objetivos midan 44 px.
+ */
+import AxeBuilder from '@axe-core/playwright';
+import { expect, test, type Page } from '@playwright/test';
+
+const PASSWORD = 'e2e-password-de-pruebas';
+
+const nav = (page: Page, name: string | RegExp) =>
+  page.locator('.rail').getByRole('link', { name });
+
+async function login(page: Page): Promise<void> {
+  await page.goto('/');
+  await page.getByLabel('Usuario').fill('braian');
+  await page.getByLabel('Contraseña').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(nav(page, 'Sesiones')).toBeVisible();
+}
+
+/**
+ * Un fallo se cuenta con el sitio donde está.
+ *
+ * «color-contrast» a secas no se arregla: hay que saber qué elemento y con qué colores, y eso lo
+ * trae axe en el nodo. Sin esto, cada fallo cuesta una sesión de depuración.
+ */
+export function describeViolations(
+  violations: Array<{ id: string; nodes: Array<{ target: unknown[]; failureSummary?: string }> }>,
+): string[] {
+  return violations.flatMap((violation) => violation.nodes.map((node) => [
+    violation.id,
+    node.target.join(' '),
+    (node.failureSummary ?? '').split('\n').slice(1).join(' ').slice(0, 220),
+  ].filter(Boolean).join(' · ')));
+}
+
+/** Las reglas que se exigen: WCAG 2.1 A y AA, que es el nivel al que se comprometió el producto. */
+const analyze = (page: Page) =>
+  new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    // El lienzo de xterm es un widget de terceros con su propio árbol accesible; auditarlo aquí
+    // sólo produce ruido que no podemos arreglar desde este lado.
+    .exclude('.terminal-host')
+    .analyze();
+
+test('la pantalla de entrada no tiene fallos de accesibilidad', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByLabel('Usuario')).toBeVisible();
+  const results = await analyze(page);
+  expect(describeViolations(results.violations)).toEqual([]);
+});
+
+for (const screen of [
+  { name: 'Inicio', go: (page: Page) => nav(page, 'Inicio').click() },
+  { name: 'Sesiones', go: (page: Page) => nav(page, 'Sesiones').click() },
+  { name: 'Trabajo', go: (page: Page) => nav(page, /^Trabajo/).click() },
+  { name: 'Terminal', go: (page: Page) => nav(page, 'Terminal').click() },
+  { name: 'Salud', go: (page: Page) => nav(page, /^Salud/).click() },
+]) {
+  test(`${screen.name} no tiene fallos de accesibilidad`, async ({ page }) => {
+    await login(page);
+    await screen.go(page);
+    await page.waitForTimeout(1200);
+    const results = await analyze(page);
+    expect(describeViolations(results.violations)).toEqual([]);
+  });
+}
+
+test('el workspace no tiene fallos de accesibilidad, con las cuatro pestañas', async ({ page }) => {
+  await login(page);
+  await nav(page, 'Sesiones').click();
+  await page.getByRole('row', { name: /timeout del pool/i }).click();
+  await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
+  await expect(page).toHaveURL(/\/w\//);
+
+  for (const tab of ['Actividad', 'Conversación', 'Archivos y contexto', 'Configuración']) {
+    await page.getByRole('tab', { name: new RegExp(tab) }).click();
+    await page.waitForTimeout(500);
+    const results = await analyze(page);
+    expect(describeViolations(results.violations).map((line) => `${tab} · ${line}`)).toEqual([]);
+  }
+});
+
+test('el primer tabulador lleva al contenido, y el foco se ve', async ({ page }) => {
+  await login(page);
+
+  // El atajo es el primer elemento del orden: con cinco destinos delante, llegar al contenido
+  // costaba una docena de saltos en cada pantalla.
+  await page.keyboard.press('Tab');
+  const skip = page.getByRole('link', { name: 'Saltar al contenido' });
+  await expect(skip).toBeFocused();
+
+  const outline = await skip.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { width: style.outlineWidth, style: style.outlineStyle, transform: style.transform };
+  });
+  expect(outline.style).not.toBe('none');
+  expect(parseFloat(outline.width)).toBeGreaterThanOrEqual(2);
+  // Y al enfocarse deja de estar escondido fuera de la pantalla.
+  expect(outline.transform === 'none' || outline.transform === 'matrix(1, 0, 0, 1, 0, 0)').toBe(true);
+
+  await skip.press('Enter');
+  await expect(page.locator('main#contenido')).toBeFocused();
+});
+
+/**
+ * El foco se recorre con el tabulador, no llamando a `focus()`.
+ *
+ * `:focus-visible` depende de **cómo** llegaste al elemento: enfocarlo desde JavaScript no cuenta
+ * como interacción de teclado y el navegador no pinta el anillo. Un test que use `element.focus()`
+ * mide otra cosa y falla siempre; este recorre la portada como lo haría una persona sin ratón.
+ */
+test('recorrer la portada con el tabulador enseña siempre dónde estás', async ({ page }) => {
+  await login(page);
+  await nav(page, 'Inicio').click();
+  await page.waitForTimeout(600);
+  await page.locator('main#contenido').click();
+
+  const sinAnillo: string[] = [];
+  const recorrido: string[] = [];
+
+  for (let step = 0; step < 28; step += 1) {
+    await page.keyboard.press('Tab');
+    const focused = await page.evaluate(() => {
+      const element = document.activeElement as HTMLElement | null;
+      if (!element || element === document.body) return null;
+      const style = getComputedStyle(element);
+      return {
+        label: (element.getAttribute('aria-label') || element.textContent || element.tagName)
+          .trim().slice(0, 40),
+        ring: style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2,
+        shadow: style.boxShadow !== 'none',
+      };
+    });
+    if (!focused) break;
+    recorrido.push(focused.label);
+    if (!focused.ring && !focused.shadow) sinAnillo.push(focused.label);
+  }
+
+  expect(recorrido.length).toBeGreaterThan(8);
+  expect(sinAnillo).toEqual([]);
+});
+
+test('en un dedo, los objetivos táctiles miden 44 px', async ({ page, isMobile }, testInfo) => {
+  test.skip(testInfo.project.name !== 'movil', 'sólo aplica al proyecto con pantalla de teléfono');
+  void isMobile;
+  await login(page);
+
+  for (const screen of ['Inicio', 'Sesiones', 'Terminal'] as const) {
+    await nav(page, screen).click();
+    await page.waitForTimeout(800);
+
+    const small = await page.evaluate(() => {
+      const targets = [...document.querySelectorAll<HTMLElement>(
+        '.rail a, .btn, .tabs button, .topbar-search, .select, .input',
+      )].filter((element) => element.offsetParent !== null);
+      return targets
+        .map((element) => ({
+          label: element.textContent?.trim().slice(0, 30) || element.className,
+          height: Math.round(element.getBoundingClientRect().height),
+        }))
+        // Medio píxel de holgura: los bordes redondeados y el subpíxel dan 43.98.
+        .filter((target) => target.height < 43.5);
+    });
+    expect(small, `objetivos pequeños en ${screen}`).toEqual([]);
+  }
+});
+
+test('con el teclado virtual abierto, la terminal y sus teclas siguen a la vista', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'movil', 'el teclado virtual sólo existe en el teléfono');
+  await login(page);
+  await nav(page, 'Terminal').click();
+  await page.getByRole('button', { name: 'Conectar', exact: true }).click();
+  await expect(page.getByText('conectada', { exact: true })).toBeVisible({ timeout: 30_000 });
+
+  /*
+   * Playwright no abre un teclado de verdad, así que se simula lo único que la aplicación mira:
+   * `visualViewport` encoge y avisa. Es lo que hace un teléfono, y comprobar la reacción vale más
+   * que no comprobar nada por no tener el teclado.
+   */
+  await page.evaluate(() => {
+    const viewport = window.visualViewport as unknown as {
+      height: number;
+      dispatchEvent: (event: Event) => boolean;
+    };
+    Object.defineProperty(viewport, 'height', { value: 420, configurable: true });
+    viewport.dispatchEvent(new Event('resize'));
+  });
+  await page.waitForTimeout(300);
+
+  // Las teclas que un teléfono no tiene siguen alcanzables dentro de lo visible.
+  const esc = page.getByRole('button', { name: 'Esc', exact: true });
+  const box = await esc.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(420);
+
+  // Y la terminal encoge en vez de empujarlas fuera: deja sitio para las teclas dentro de lo
+  // visible, en vez de quedarse con el alto de la ventana entera.
+  const height = await page.locator('.terminal-host').evaluate(
+    (element) => element.getBoundingClientRect().height);
+  expect(height).toBeLessThanOrEqual(420 - 100);
+  expect(height).toBeGreaterThan(100);
+});

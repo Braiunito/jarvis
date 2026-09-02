@@ -152,7 +152,7 @@ export function ExplorerScreen(): JSX.Element {
       </Card>
 
       <StaleNote stale={sessions.data?.stale} freshness={sessions.data?.freshness} />
-      <ErrorNote error={sessions.error} />
+      <ErrorNote error={sessions.error} onRetry={() => void sessions.refetch()} />
 
       {/* Cuánto hay y qué se movió: el contexto antes de ponerse a buscar. */}
       <div className="grid cols-4">
@@ -206,11 +206,43 @@ export function ExplorerScreen(): JSX.Element {
             {filtersActive ? <span className="pill">filtrado</span> : null}
           </header>
 
-          {sessions.isLoading ? <div style={{ padding: 14 }}><Loading rows={5} /></div> : null}
+          {sessions.isLoading ? (
+            <div style={{ padding: 14 }}>
+              <Loading rows={5} shape="table" label="Buscando sesiones…" />
+            </div>
+          ) : null}
 
           {!sessions.isLoading && visible.length === 0 ? (
-            <Empty title="Ninguna sesión coincide"
-              hint="Prueba con otras palabras, otro agente o quita los filtros." />
+            filtersActive ? (
+              <Empty
+                icon={ACTION_ICON.filters}
+                title="Ninguna sesión coincide"
+                hint="El índice tiene sesiones, pero ninguna pasa estos filtros. Prueba con otras palabras o quítalos."
+                action={
+                  <button type="button" className="btn" onClick={() => {
+                    setQuery('');
+                    setProvider('');
+                    setHost('');
+                    setAvailability('todas');
+                  }}>
+                    <Glyph icon={ACTION_ICON.reject} />
+                    Quitar los filtros
+                  </button>
+                }
+              />
+            ) : (
+              <Empty
+                icon={NAV_ICON.sessions}
+                title="El índice no ve ninguna sesión"
+                hint="Aquí aparecen las sesiones de Claude, Codex y OpenCode que haya en las máquinas de la flota. Si esperabas alguna, lo primero es mirar si el índice y los saltos responden."
+                action={
+                  <Link to="/health" className="btn">
+                    <Glyph icon={NAV_ICON.health} />
+                    Ver el estado del índice
+                  </Link>
+                }
+              />
+            )
           ) : (
             <div className="table-wrap">
               <table className="table">
@@ -347,7 +379,9 @@ export function ExplorerScreen(): JSX.Element {
                     <Link to={`/w/${selected.workspaceId}`} className="tiny">Ver todos →</Link>
                   </div>
                   {selectedRuns.length === 0 ? (
-                    <p className="tiny faint" style={{ margin: 0 }}>Aún no se ha mandado nada aquí.</p>
+                    <p className="tiny faint" style={{ margin: 0 }}>
+                      Aún no se ha mandado nada en este workspace: ábrelo y escribe la primera tarea.
+                    </p>
                   ) : (
                     <div className="list">
                       {selectedRuns.map((run) => (

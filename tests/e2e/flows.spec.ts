@@ -136,9 +136,9 @@ test('la paleta lleva a un contexto sin pasar por tres pantallas', async ({ page
 
 test('la terminal se abre, adjunta y no se cierra al salir', async ({ page }) => {
   await nav(page, 'Terminal').click();
-  await page.getByRole('button', { name: 'Conectar' }).click();
+  await page.getByRole('button', { name: 'Conectar', exact: true }).click();
 
-  await expect(page.getByText('conectada')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('conectada', { exact: true })).toBeVisible({ timeout: 30_000 });
 
   // Adjuntar de verdad se prueba escribiendo: si vuelve el eco, hay un TTY al otro lado. Mirar el
   // banner sólo funciona la primera vez —al reengancharse, tmux redibuja la pantalla actual, no
@@ -150,13 +150,14 @@ test('la terminal se abre, adjunta y no se cierra al salir', async ({ page }) =>
   // Salir de la pantalla no mata la sesión: al volver sigue en la lista.
   await nav(page, 'Inicio').click();
   await nav(page, 'Terminal').click();
-  await expect(page.getByText(/jarvis-claude/).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.list-item').filter({ hasText: /jarvis-claude/ }).first())
+    .toBeVisible({ timeout: 20_000 });
 });
 
 test('cerrar la terminal sí la mata, y lo dice antes de hacerlo', async ({ page }) => {
   await nav(page, 'Terminal').click();
-  await page.getByRole('button', { name: /Conectar|Reconectar/ }).click();
-  await expect(page.getByText('conectada')).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: /^(Conectar|Reconectar)$/ }).click();
+  await expect(page.getByText('conectada', { exact: true })).toBeVisible({ timeout: 30_000 });
 
   // Destruir es explícito: nombra la sesión y la máquina antes de tocarlas.
   await page.getByRole('button', { name: 'Cerrar la terminal', exact: true }).click();
@@ -166,6 +167,7 @@ test('cerrar la terminal sí la mata, y lo dice antes de hacerlo', async ({ page
   await dialog.getByRole('button', { name: 'Cerrar la terminal' }).click();
 
   // Y al volver ya no está.
-  await expect(page.getByText('conectada')).toHaveCount(0, { timeout: 20_000 });
-  await expect(page.getByText(/jarvis-claude/)).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText('conectada', { exact: true })).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.locator('.list-item').filter({ hasText: /jarvis-claude/ }))
+    .toHaveCount(0, { timeout: 20_000 });
 });

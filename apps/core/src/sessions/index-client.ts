@@ -188,17 +188,41 @@ export class HttpSessionIndex implements SessionIndex {
 }
 
 /** Frescura por host, derivada de lo que el índice sabe de cada uno. */
+/**
+ * Frescura por host, con el bastión contado una sola vez.
+ *
+ * El índice llama `local` a la máquina donde corre, que para Jarvis **es** el bastión. Si además
+ * tiene sesiones indexadas bajo el nombre propio del bastión, sin fusionar salen dos filas con el
+ * mismo nombre y distinta antigüedad, y la interfaz enseña «zeus ok hace 2 días · zeus ok hace 13
+ * horas» sin que nadie pueda saber cuál es la buena.
+ */
 export function freshnessFrom(rows: IndexHostRow[], bastionHost: string, now: number, stale: boolean, error: string | null): HostFreshness[] {
-  return rows.map((row) => {
+  const byHost = new Map<string, HostFreshness>();
+  for (const row of rows) {
     const lastSync = row.last_activity ?? row.updated_at ?? null;
     const ageSeconds = lastSync ? Math.max(0, Math.round((now - Date.parse(lastSync)) / 1000)) : null;
-    return {
-      host: normalizeHost(row.host, bastionHost),
+    const host = normalizeHost(row.host, bastionHost);
+    const entry: HostFreshness = {
+      host,
       lastSyncAt: lastSync,
       ageSeconds,
       sessionCount: row.sessions ?? 0,
       status: error ? 'failed' : stale ? 'stale' : 'ok',
       error,
     };
-  });
+    const previous = byHost.get(host);
+    if (!previous) {
+      byHost.set(host, entry);
+      continue;
+    }
+    // Al fusionar se suman las sesiones y se conserva la actividad más reciente: eso es lo que
+    // significa «cuándo se supo por última vez algo de esta máquina».
+    const newer = (entry.ageSeconds ?? Number.POSITIVE_INFINITY) < (previous.ageSeconds ?? Number.POSITIVE_INFINITY)
+      ? entry : previous;
+    byHost.set(host, {
+      ...newer,
+      sessionCount: previous.sessionCount + entry.sessionCount,
+    });
+  }
+  return [...byHost.values()];
 }

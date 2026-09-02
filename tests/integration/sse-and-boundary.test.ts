@@ -66,7 +66,7 @@ afterAll(async () => {
   services.close();
   const config = defaultSshConfig({ sshCommand: fakeSshPath(), hosts: ['bastion'], knownHostsFile: '' });
   await sshExec({ host: 'bastion', command: 'tmux kill-server 2>/dev/null || true', config }).catch(() => undefined);
-  rmSync(root, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
 });
 
 async function openWorkspace(sessionId = 'sid-1'): Promise<string> {

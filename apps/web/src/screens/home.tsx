@@ -171,9 +171,14 @@ export function HomeScreen(): JSX.Element {
       <div className="grid cols-3">
         <Card title="En marcha" icon={NAV_ICON.runs} count={active.length}
           actions={<Link to="/runs" className="small">Ver todo →</Link>}>
-          {runs.isLoading ? <Loading rows={2} /> : null}
+          {runs.isLoading ? <Loading rows={2} shape="list" label="Cargando el trabajo en curso…" /> : null}
           {!runs.isLoading && active.length === 0 ? (
-            <p className="small muted" style={{ margin: 0 }}>Nada ejecutándose ahora mismo.</p>
+            <Empty
+              tight
+              icon={NAV_ICON.runs}
+              title="Nada ejecutándose ahora mismo"
+              hint="Cuando mandes algo desde un workspace, lo verás aquí mientras dure."
+            />
           ) : null}
           <div className="list">
             {active.slice(0, 4).map((run) => (
@@ -192,7 +197,12 @@ export function HomeScreen(): JSX.Element {
           count={attention.length} countTone={attention.length ? 'attention' : undefined}
           actions={<Link to="/runs" className="small">Ver todo →</Link>}>
           {attention.length === 0 ? (
-            <p className="small muted" style={{ margin: 0 }}>Nada parado esperándote.</p>
+            <Empty
+              tight
+              icon={ACTION_ICON.approve}
+              title="Nada parado esperándote"
+              hint="Aquí caen los trabajos que fallaron, se quedaron sin tiempo o esperan una decisión tuya."
+            />
           ) : null}
           <div className="list">
             {attention.slice(0, 4).map((run) => (
@@ -216,7 +226,7 @@ export function HomeScreen(): JSX.Element {
               {health.data ? HEALTH_SUMMARY[health.data.status] : '—'}
             </span>
           }>
-          {health.isLoading ? <Loading rows={3} /> : null}
+          {health.isLoading ? <Loading rows={3} shape="list" label="Comprobando la salud…" /> : null}
           <div className="list">
             {groups.map((group) => (
               <div key={group.key} className="list-item plain">
@@ -331,9 +341,19 @@ export function HomeScreen(): JSX.Element {
       <Card title="Workspaces recientes" icon={ACTION_ICON.open}
         count={metrics.data?.workspaces.total}
         actions={<Link to="/sessions" className="small">Explorar sesiones →</Link>}>
-        {workspaces.isLoading ? <Loading /> : null}
+        {workspaces.isLoading ? <Loading rows={3} shape="list" label="Cargando los workspaces…" /> : null}
         {!workspaces.isLoading && recent.length === 0 ? (
-          <Empty title="Ninguno todavía" hint="Abrir una sesión crea su workspace." />
+          <Empty
+            icon={ACTION_ICON.open}
+            title="Todavía no has abierto ningún workspace"
+            hint="Un workspace es una sesión de agente con sitio en Jarvis: su borrador, su historial y sus trabajos. Se crea al abrir una sesión del índice."
+            action={
+              <Link to="/sessions" className="btn primary">
+                <Glyph icon={NAV_ICON.sessions} />
+                Buscar una sesión
+              </Link>
+            }
+          />
         ) : null}
         <div className="grid cols-3">
           {recent.slice(0, 6).map((workspace) => (

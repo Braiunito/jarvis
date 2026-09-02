@@ -61,9 +61,12 @@ export class CapabilityCache {
 
     // `command -v` por binario, cada uno en su línea, para que una herramienta ausente no aborte
     // la sonda. El prefijo PATH importa: sin él, un Codex en ~/.local/bin es invisible por ssh.
-    const script = remotePathExport(this.#config.remotePath) + PROBE_BINARIES
-      .map((binary) => `printf '%s\\t%s\\n' ${shellJoin([binary])} "$(command -v ${shellJoin([binary])} || echo -)"`)
-      .join('; ');
+    const script = remotePathExport(this.#config.remotePath) + [
+      ...PROBE_BINARIES.map((binary) =>
+        `printf '%s\\t%s\\n' ${shellJoin([binary])} "$(command -v ${shellJoin([binary])} || echo -)"`),
+      // El home del usuario remoto, para poder resolver un spool configurado como `$HOME/...`.
+      `printf '%s\\t%s\\n' ${shellJoin(['@home'])} "$HOME"`,
+    ].join('; ');
 
     const result = await sshExec(
       { host, command: script, config: this.#config },
@@ -75,9 +78,13 @@ export class CapabilityCache {
     }
 
     const binaries: Record<string, string | null> = {};
+    let home: string | null = null;
     for (const line of result.stdout.split('\n')) {
       const [name, path] = line.split('\t');
-      if (name && name.trim()) binaries[name.trim()] = path && path.trim() !== '-' ? path.trim() : null;
+      if (!name || !name.trim()) continue;
+      const value = path && path.trim() !== '-' ? path.trim() : null;
+      if (name.trim() === '@home') home = value;
+      else binaries[name.trim()] = value;
     }
     const capabilities: HostCapabilities = {
       host,
@@ -85,6 +92,7 @@ export class CapabilityCache {
       binaries,
       providers: (['claude', 'codex', 'opencode'] as Provider[]).filter((p) => binaries[p]),
       tmux: Boolean(binaries['tmux']),
+      home,
       probedAt: new Date(this.#now()).toISOString(),
     };
     this.#entries.set(host, { at: this.#now(), capabilities });

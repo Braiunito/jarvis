@@ -31,9 +31,18 @@
   --text: #e7eef7;
   --text-strong: #f4f8fc;
   --text-muted: #8896a8;
-  --text-faint: #64748b;
+  /*
+   * El gris de las notas al pie también es texto.
+   *
+   * Estaba en 3.8:1 sobre la tarjeta, por debajo de AA, y ahí viven las horas, los `seq` y los
+   * «hace 4 h»: datos que se leen de verdad, no decoración. Medido sobre la superficie más clara.
+   */
+  --text-faint: #7689a4;
 
-  --accent: #3b82f6;
+  --accent: #4292ff;
+  /* Relleno del botón primario: el acento brillante con texto blanco encima se queda en 3.5:1. */
+  --accent-fill: #2563eb;
+  --on-accent: #ffffff;
   --accent-soft: #1d3a5f;
   --ok: #34d399;
   --warn: #fbbf24;
@@ -69,16 +78,25 @@
 
     --text: #17212e;
     --text-strong: #0b1220;
-    --text-muted: #5b6a7d;
-    --text-faint: #7b8798;
+    --text-muted: #5a697c;
+    --text-faint: #606977;
 
-    --accent: #1d6fe0;
+    --accent: #1a60c3;
+    --accent-fill: #1a60c3;
+    --on-accent: #ffffff;
     --accent-soft: #dbeafe;
-    --ok: #059669;
-    --warn: #b45309;
-    --danger: #dc2626;
-    --running: #7c3aed;
-    --info: #0284c7;
+    /*
+     * Medidos sobre su propio distintivo, no sobre la tarjeta.
+     *
+     * Un distintivo pinta el texto del color del estado sobre un fondo teñido con ese mismo color:
+     * el contraste real es contra la mezcla, que es bastante peor que contra el blanco. Es el
+     * error clásico de este patrón y por eso los verdes y rojos «bonitos» no pasan AA.
+     */
+    --ok: #047250;
+    --warn: #a14a08;
+    --danger: #bf2121;
+    --running: #7838e5;
+    --info: #0273ad;
 
     --shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 8px 24px rgb(15 23 42 / 0.06);
     --shadow-pop: 0 24px 60px rgb(15 23 42 / 0.18);
@@ -97,6 +115,39 @@ body {
 }
 
 button, input, textarea, select { font: inherit; color: inherit; }
+
+/*
+ * El foco se ve siempre, y se ve igual.
+ *
+ * Antes cada componente traía su regla y algunos se quedaban sin ninguna —las filas de la lista,
+ * los chips de sugerencia, las tarjetas de evento—. Una sola regla base y encima las excepciones:
+ * quien navega con teclado no debería tener que adivinar dónde está.
+ */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/*
+ * Saltar al contenido.
+ *
+ * Con cinco destinos en el carril, llegar al botón de enviar con el tabulador cuesta una docena
+ * de saltos en cada pantalla. Este enlace es el primero del orden y sólo aparece al enfocarlo.
+ */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: 600;
+  transform: translateY(-200%);
+}
+.skip-link:focus-visible { transform: none; text-decoration: none; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
@@ -428,8 +479,13 @@ a:hover { text-decoration: underline; }
 }
 .btn:hover:not(:disabled) { border-color: var(--border-accent); background: var(--bg-card); text-decoration: none; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-.btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #fff); }
+.btn.primary {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-fill) 86%, #fff); }
 .btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: transparent; }
 .btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
@@ -517,10 +573,17 @@ a:hover { text-decoration: underline; }
   background: var(--bg-sunken);
 }
 .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
-.badge.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 38%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
-.badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 38%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
-.badge.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.badge.running { color: var(--running); border-color: color-mix(in srgb, var(--running) 38%, transparent); background: color-mix(in srgb, var(--running) 10%, transparent); }
+/*
+ * El fondo de un distintivo se mezcla con la tarjeta, no con lo que haya debajo.
+ *
+ * Con `transparent` el color efectivo dependía de la superficie: dentro de una fila seleccionada
+ * —que ya va teñida de azul— el mismo verde caía a 4.1:1 y dejaba de cumplir AA. Componer siempre
+ * contra `--bg-card` hace que el contraste sea el mismo en los seis sitios donde aparece.
+ */
+.badge.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 38%, transparent); background: color-mix(in srgb, var(--ok) 10%, var(--bg-card)); }
+.badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 38%, transparent); background: color-mix(in srgb, var(--warn) 10%, var(--bg-card)); }
+.badge.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, transparent); background: color-mix(in srgb, var(--danger) 10%, var(--bg-card)); }
+.badge.running { color: var(--running); border-color: color-mix(in srgb, var(--running) 38%, transparent); background: color-mix(in srgb, var(--running) 10%, var(--bg-card)); }
 .badge.neutral { color: var(--text-muted); background: var(--bg-elevated); border-color: var(--border); }
 .badge svg { margin-right: -1px; }
 
@@ -551,7 +614,11 @@ a:hover { text-decoration: underline; }
   transition: border-color 120ms ease, background 120ms ease;
 }
 .list-item:hover { border-color: var(--border-strong); background: var(--bg-elevated); text-decoration: none; }
-.list-item[aria-current="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--bg-sunken)); }
+.list-item[aria-current="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-sunken));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 .list-item .title { font-weight: 600; color: var(--text-strong); }
 
 /* La parte de la fila que abre, cuando la fila tiene además otra acción propia. */
@@ -609,9 +676,17 @@ a:hover { text-decoration: underline; }
 .table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .table tbody tr { cursor: pointer; }
 .table tbody tr:hover { background: var(--bg-elevated); }
-.table tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.table tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 5%, var(--bg-card)); }
 .table tbody tr[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-.table .cell-main { display: grid; gap: 2px; min-width: 0; }
+/*
+ * Dos líneas apiladas en una celda o en una fila.
+ *
+ * Estaba definida sólo dentro de `.table`, así que fuera de una tabla las dos líneas se pegaban en
+ * una sola y el texto se salía de la tarjeta —se vio en la evidencia de la síntesis del Assistant—.
+ * Es un patrón de fila, no de tabla.
+ */
+.cell-main { display: grid; gap: 2px; min-width: 0; }
+.cell-main > * { min-width: 0; }
 .table-wrap { overflow-x: auto; }
 
 @media (max-width: 900px) {
@@ -720,6 +795,74 @@ a:hover { text-decoration: underline; }
 }
 
 /* --------------------------------------------------- tarjetas de evento */
+
+/*
+ * Dónde contestó la IA.
+ *
+ * En una línea de tiempo, la respuesta del agente compite con veinte líneas de fontanería que
+ * pesan lo mismo. Aquí pesa más: tipografía de lectura en vez de tipografía de log, una banda
+ * violeta —el color que ya significa «el agente» en todo el producto—, más aire alrededor y un
+ * punto relleno en el carril para poder encontrarla desplazando sin leer.
+ *
+ * Es deliberadamente el único sitio con este tratamiento: si todo destaca, no destaca nada.
+ */
+.timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tl-row.answer { margin: 6px 0; }
+.tl-row.answer .tl-dot {
+  background: color-mix(in srgb, var(--running) 22%, var(--bg-card));
+  border-color: var(--running);
+  color: var(--running);
+  transform: scale(1.12);
+}
+
+.event-card.answer {
+  padding: 14px 15px;
+  margin: 8px 0;
+  border-left-width: 3px;
+  border-left-color: var(--running);
+  border-color: color-mix(in srgb, var(--running) 28%, var(--border));
+  background: color-mix(in srgb, var(--running) 7%, var(--bg-card));
+  box-shadow: var(--shadow);
+}
+/*
+ * El hover cambia el borde, no el fondo.
+ *
+ * Oscurecer más el tinte hundía el gris de las notas al pie por debajo de AA justo mientras el
+ * ratón está encima. El realce se consigue igual con el borde y el anillo, y el contraste del
+ * texto no depende de dónde esté el puntero.
+ */
+.event-card.answer:hover {
+  border-color: var(--running);
+  box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--running) 35%, transparent);
+}
+.event-card.answer .event-body {
+  font-size: 14px;
+  line-height: 1.68;
+  color: var(--text-strong);
+}
+.event-card.answer .event-headline { font-size: 14px; }
+.event-card.answer.ok { border-left-color: var(--ok); }
+.event-card.answer.ok .badge { font-weight: 700; }
+.event-card.answer.danger { border-left-color: var(--danger); }
+
+/* La síntesis del Assistant es la respuesta de un plan entero: mismo tratamiento. */
+.answer-card {
+  border-left: 3px solid var(--running);
+  border-color: color-mix(in srgb, var(--running) 28%, var(--border));
+  background: color-mix(in srgb, var(--running) 7%, var(--bg-card));
+}
+.answer-card h3 { color: var(--running); }
+.answer-card p { font-size: 13.5px; line-height: 1.65; color: var(--text-strong); }
 
 /*
  * Un evento del agente es una tarjeta, no una línea de log.
@@ -864,8 +1007,19 @@ a:hover { text-decoration: underline; }
 .message { display: grid; gap: 5px; padding: 11px 12px; border-radius: var(--radius); background: var(--bg-sunken); border: 1px solid var(--border); }
 .message .who { font-size: 11.5px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .message .body { white-space: pre-wrap; word-break: break-word; }
+/*
+ * En la conversación pasa lo mismo: lo que contestó el agente es lo que se busca al abrirla.
+ * Quien pregunta ya sabe lo que preguntó.
+ */
 .message.user { border-left: 3px solid var(--accent); }
-.message.assistant { border-left: 3px solid var(--running); }
+.message.assistant {
+  border-left: 3px solid var(--running);
+  border-color: color-mix(in srgb, var(--running) 26%, var(--border));
+  background: color-mix(in srgb, var(--running) 7%, var(--bg-card));
+  padding: 13px 14px;
+}
+.message.assistant .body { font-size: 14px; line-height: 1.68; color: var(--text-strong); }
+.message.assistant .who { color: var(--running); font-weight: 600; }
 
 /* ------------------------------------------------------------------ composer */
 
@@ -995,18 +1149,92 @@ a:hover { text-decoration: underline; }
 .login-brand p { margin: 1px 0 0; font-size: 12.5px; color: var(--text-muted); }
 
 .empty { display: grid; gap: 7px; justify-items: center; text-align: center; padding: 26px 16px; color: var(--text-muted); }
+.empty .empty-action { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+/* En un panel lateral el vacío no puede ocupar media pantalla: mismo texto, menos aire. */
+.empty.tight { padding: 14px 4px; gap: 5px; text-align: left; justify-items: start; }
+.empty.tight .empty-glyph { display: none; }
+.empty.tight .empty-action { justify-content: flex-start; margin-top: 8px; }
 .empty-glyph { color: var(--text-faint); }
 .empty strong { color: var(--text); font-weight: 600; }
 
+/*
+ * Esqueletos con la forma del contenido que viene.
+ *
+ * Una barra gris repetida no informa de nada y, cuando llega el contenido, la página salta. Estos
+ * imitan la pieza real —una fila de tabla, una tarjeta de métrica, un evento de la línea de
+ * tiempo— así que el salto es mínimo y ya se sabe qué se está esperando.
+ */
 .skeleton { height: 14px; border-radius: 5px; background: var(--bg-elevated); animation: shimmer 1.3s ease-in-out infinite; }
+.skeleton.line { height: 11px; }
+.skeleton.mark { width: 30px; height: 30px; border-radius: var(--radius-sm); flex: 0 0 auto; }
+.skeleton.dot { width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto; }
+
+.sk-rows { display: grid; gap: 9px; }
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.sk-row .grow { display: grid; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.sk-row .tail { display: grid; gap: 6px; width: 84px; flex: 0 0 auto; justify-items: end; }
+
+.sk-stats { display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sk-stat { display: grid; gap: 9px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); }
+.sk-stat .value { height: 27px; width: 58%; }
+
+.sk-timeline { display: grid; gap: 10px; }
+.sk-event { display: grid; grid-template-columns: 74px auto minmax(0, 1fr); gap: 12px; align-items: start; }
+.sk-event .body { display: grid; gap: 7px; padding: 11px 12px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-sunken); }
+
+@media (max-width: 720px) {
+  .sk-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sk-event { grid-template-columns: auto minmax(0, 1fr); }
+  .sk-event > .time { display: none; }
+}
 @keyframes shimmer { 0%, 100% { opacity: 0.7; } 50% { opacity: 0.3; } }
 
 /* ------------------------------------------------------------------ terminal */
 
-.terminal-host { background: #000; border-radius: var(--radius); padding: 8px; min-height: 52dvh; }
+/*
+ * La terminal y el teclado virtual.
+ *
+ * Con el teclado abierto, `dvh` sigue midiendo la ventana entera: la mitad de la terminal y toda
+ * la fila de teclas se quedan debajo del teclado, que es justo cuando hacen falta. `--viewport`
+ * lo pone la pantalla desde `visualViewport` —lo único que sabe cuánto queda visible— y aquí se
+ * usa como tope. Sin JavaScript se comporta como antes.
+ */
+.terminal-host {
+  background: #000;
+  border-radius: var(--radius);
+  padding: 8px;
+  min-height: min(52dvh, max(180px, calc(var(--viewport, 100dvh) - 260px)));
+  max-height: max(180px, calc(var(--viewport, 100dvh) - 200px));
+  overflow: hidden;
+}
 .mobile-keys { display: none; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-@media (max-width: 900px) { .mobile-keys { display: flex; } }
+@media (max-width: 900px), (pointer: coarse) { .mobile-keys { display: flex; } }
 .mobile-keys .btn { min-width: 46px; min-height: var(--touch); justify-content: center; }
+
+/*
+ * Con el teclado abierto sólo importan dos cosas: la terminal y las teclas que el teléfono no
+ * tiene. Todo lo demás —secciones, cabecera, selectores de máquina, barra de estado— se retira
+ * mientras dure, porque si no las teclas acaban a 200 px por debajo de lo visible. Al cerrar el
+ * teclado vuelve todo solo.
+ */
+.keyboard-open .rail,
+.keyboard-open .topbar,
+.keyboard-open .statusbar,
+.keyboard-open .terminal-setup { display: none; }
+.keyboard-open .workarea { padding-bottom: 8px; }
+.keyboard-open .page { padding: 8px; gap: 8px; }
+.keyboard-open .terminal-host {
+  min-height: 100px;
+  max-height: max(100px, calc(var(--viewport, 100dvh) - 120px));
+}
 
 /* ------------------------------------------------------- paleta de comandos */
 
@@ -1079,6 +1307,26 @@ a:hover { text-decoration: underline; }
   color: var(--text-faint);
 }
 
+/*
+ * Objetivos táctiles.
+ *
+ * No se aplica por ancho de pantalla sino por tipo de puntero: una tableta ancha con dedo tiene el
+ * mismo problema que un teléfono, y un escritorio estrecho no lo tiene. 44 px es el mínimo con el
+ * que se acierta sin mirar.
+ */
+@media (pointer: coarse) {
+  .btn, .btn.small, .btn.icon { min-height: var(--touch); }
+  .btn.icon { width: var(--touch); }
+  .input, .select, .textarea { min-height: var(--touch); }
+  .tabs button { min-height: var(--touch); }
+  .segmented button { min-height: 40px; }
+  .suggestion { min-height: 38px; }
+  .list-item, .list-open { min-height: var(--touch); }
+  .table tbody td { padding-top: 12px; padding-bottom: 12px; }
+  .topbar-search { min-height: var(--touch); }
+  .rail-collapse { min-height: var(--touch); }
+}
+
 /* --------------------------------------------------------------------- móvil */
 
 @media (max-width: 1024px) {
@@ -1129,14 +1377,31 @@ a:hover { text-decoration: underline; }
     background: var(--bg);
     backdrop-filter: none;
   }
-  .topbar-search { order: 3; flex: 1 1 100%; margin: 0; max-width: none; min-height: 38px; }
+  .topbar-search { order: 3; flex: 1 1 100%; margin: 0; max-width: none; min-height: var(--touch); }
   .page-heading h1 { font-size: 17px; }
   .page-heading p { display: none; }
   .statusbar { display: none; }
 }
 
 @media (max-width: 560px) {
-  .topbar-user, .chip-text { display: none; }
+  .topbar-user { display: none; }
+
+  /*
+   * El texto de los chips se esconde de la vista, no del lector de pantalla.
+   *
+   * Con `display: none` esos botones se quedaban sin nombre accesible —«Salir» pasaba a ser un
+   * botón sin más— y en un teléfono son justo los que sólo enseñan un icono. El nombre ya está
+   * escrito aquí al lado: basta con no borrarlo del árbol.
+   */
+  .chip-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .chip { padding: 0 8px; }
 }
 

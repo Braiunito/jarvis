@@ -16,6 +16,8 @@ import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { JsonView } from 'react-json-view-lite';
 import type { PermissionProfile, RunEvent } from '@jarvis/contracts';
+import { Empty } from './bits.jsx';
+import { Segmented } from './primitives.jsx';
 import { EVENT_KIND, PERMISSION, RUN_STATUS } from './labels.js';
 import { ACTION_ICON, Glyph, RUN_STATUS_ICON, STATUS_ICON, type LucideIcon } from './icons.jsx';
 
@@ -42,6 +44,16 @@ const VISUALS: Record<string, EventVisual> = {
 
 const visualOf = (type: string): EventVisual =>
   VISUALS[type] ?? { icon: STATUS_ICON.activity, tone: '' };
+
+/**
+ * Lo que dijo el agente, frente a lo que hizo la máquina.
+ *
+ * Un trabajo largo son treinta líneas de fontanería —estados, herramientas, arranques— y dos o
+ * tres de respuesta. Encontrar esas dos es lo que se viene a hacer, así que se marcan aparte y se
+ * pueden aislar. El error entra en el grupo porque es la otra forma que tiene de contestar.
+ */
+const ANSWER_TYPES = new Set(['agent.text', 'agent.result', 'agent.error']);
+const isAnswer = (event: RunEvent): boolean => ANSWER_TYPES.has(event.type);
 
 export interface Fact {
   label: string;
@@ -165,7 +177,11 @@ function describe(event: RunEvent): Rendered {
 
   // Lo que no conocemos: chips con lo que trae, y el crudo a un clic. Un tipo de evento nuevo no
   // puede romper la pantalla ni obligar a leer JSON.
-  return { kind: 'facts', facts: factsOf(payload), note: 'evento sin traducir todavía' };
+  //
+  // Si el adaptador supo decir qué era —aunque no supiera traducirlo—, esa nota vale más que
+  // «sin traducir»: la CLI saca versiones nuevas cada semana y sus eventos nuevos aparecen aquí.
+  const note = typeof payload['note'] === 'string' ? payload['note'] : 'evento sin traducir todavía';
+  return { kind: 'facts', facts: factsOf(payload), note };
 }
 
 /**
@@ -230,7 +246,7 @@ function EventDetail({ event, onClose }: { event: RunEvent; onClose: () => void 
             </div>
           </header>
 
-          <div className="modal-body">
+          <div className="modal-body" tabIndex={0} role="region" aria-label="JSON del evento">
             <JsonView data={data} style={JSON_STYLES} shouldExpandNode={(level) => level < 2} />
           </div>
 
@@ -247,10 +263,11 @@ function EventDetail({ event, onClose }: { event: RunEvent; onClose: () => void 
 function EventCard({ event, onOpen }: { event: RunEvent; onOpen: () => void }): JSX.Element {
   const visual = visualOf(event.type);
   const rendered = describe(event);
+  const answer = isAnswer(event);
 
   return (
-    <button type="button" className={`event-card ${visual.tone}`} onClick={onOpen}
-      title="Ver el evento tal y como llegó">
+    <button type="button" className={`event-card ${visual.tone} ${answer ? 'answer' : ''}`}
+      onClick={onOpen} title="Ver el evento tal y como llegó">
       <span className="event-head">
         <span className={`badge ${visual.tone}`}>
           <Glyph icon={visual.icon} />
@@ -297,24 +314,62 @@ function EventCard({ event, onOpen }: { event: RunEvent; onOpen: () => void }): 
  */
 export function EventTimeline({ events, empty, limit }: {
   events: RunEvent[];
+  /** Qué explicar cuando no hay nada: por qué está vacío y qué lo llenará. */
   empty?: string;
   limit?: number;
 }): JSX.Element {
   const [open, setOpen] = useState<number | null>(null);
-  const shown = limit ? events.slice(-limit) : events;
+  const [onlyAnswers, setOnlyAnswers] = useState(false);
+
+  const answers = events.filter(isAnswer);
+  const source = onlyAnswers ? answers : events;
+  const shown = limit ? source.slice(-limit) : source;
   const opened = shown.find((event) => event.seq === open);
 
-  if (shown.length === 0) {
-    return <p className="muted small" style={{ margin: 0 }}>{empty ?? 'Sin eventos todavía.'}</p>;
+  if (events.length === 0) {
+    return (
+      <Empty
+        tight
+        icon={STATUS_ICON.activity}
+        title="Sin eventos todavía"
+        hint={empty ?? 'Cada cosa que diga el agente aparece aquí en cuanto llega, y se guarda para poder volver a leerla.'}
+      />
+    );
   }
 
   return (
     <>
+      {/*
+        * Aislar las respuestas.
+        *
+        * En un trabajo largo, lo que dijo el agente son dos líneas entre treinta de fontanería.
+        * El filtro no borra nada —vuelve con un clic— pero convierte «buscar dónde contestó» en
+        * «mirar». Se ofrece sólo cuando hay bastante ruido como para que sirva de algo.
+        */}
+      {answers.length > 0 && events.length > 4 ? (
+        <div className="timeline-head">
+          <span className="small muted">
+            {answers.length === 1 ? '1 respuesta' : `${answers.length} respuestas`}
+            {' entre '}
+            {events.length} eventos
+          </span>
+          <Segmented
+            label="Qué eventos se enseñan"
+            value={onlyAnswers ? 'respuestas' : 'todo'}
+            onChange={(value) => setOnlyAnswers(value === 'respuestas')}
+            options={[
+              { value: 'todo', label: 'Todo', icon: STATUS_ICON.activity },
+              { value: 'respuestas', label: 'Sólo respuestas', icon: ACTION_ICON.message },
+            ]}
+          />
+        </div>
+      ) : null}
+
       <div className="timeline">
         {shown.map((event, index) => {
           const visual = visualOf(event.type);
           return (
-            <div key={event.seq} className="tl-row">
+            <div key={event.seq} className={`tl-row ${isAnswer(event) ? 'answer' : ''}`}>
               <div className="tl-time">{new Date(event.at).toLocaleTimeString()}</div>
               <div className="tl-rail">
                 <span className={`tl-dot ${visual.tone}`}>

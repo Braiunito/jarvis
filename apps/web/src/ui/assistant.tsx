@@ -11,7 +11,8 @@ import type { Approval, Plan, PlanStep } from '@jarvis/contracts';
 import {
   useAnswerPlan, useCancelPlan, useCreatePlan, usePlan, usePlans, useResolveApproval,
 } from '../api/queries.js';
-import { ErrorNote, Link, relativeTime } from './bits.jsx';
+import { Empty, ErrorNote, Link, relativeTime } from './bits.jsx';
+import { useAnnounceOnChange } from './announce.jsx';
 
 import { PERMISSION, PLAN_STATUS, PLAN_STEP_KIND, RUN_STATUS } from './labels.js';
 import {
@@ -215,6 +216,14 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
   const detail = usePlan(currentId);
   const pendingCount = (plans.data?.approvals ?? []).length;
 
+  // Un plan avanza solo: si no se dice, hay que estar mirando la pantalla para enterarse.
+  const planStatus = detail.data?.plan.status ?? null;
+  useAnnounceOnChange(planStatus, (status) => {
+    if (!status) return null;
+    const label = PLAN_STATUS[status];
+    return label ? `El plan está ${label.name.toLowerCase()}. ${label.help}` : null;
+  });
+
   async function submit(): Promise<void> {
     if (!objective.trim()) return;
     const created = await create.mutateAsync(objective);
@@ -305,13 +314,21 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
           <div className="list">
             {detail.data.steps.map((step) => <StepRow key={step.id} step={step} />)}
             {detail.data.steps.length === 0 ? (
-              <p className="small muted" style={{ margin: 0 }}>Todavía no hay pasos.</p>
+              <Empty
+                tight
+                icon={ACTION_ICON.delegate}
+                title="Todavía no hay pasos"
+                hint="El modelo propone uno cada vez y el core lo guarda antes de ejecutarlo. El primero aparece en unos segundos."
+              />
             ) : null}
           </div>
           {detail.data.plan.summary ? (
-            <div className="card" style={{ background: 'var(--bg-sunken)' }}>
-              <h3 style={{ margin: '0 0 6px', fontSize: 13 }}>Resultado</h3>
-              <p className="small" style={{ margin: 0 }}>{detail.data.plan.summary}</p>
+            <div className="card answer-card">
+              <h3 className="row tight" style={{ margin: '0 0 6px', fontSize: 13 }}>
+                <Glyph icon={ACTION_ICON.delegate} size={14} />
+                Resultado
+              </h3>
+              <p style={{ margin: 0 }}>{detail.data.plan.summary}</p>
               {evidence.length ? (
                 <>
                   <p className="tiny faint" style={{ margin: '10px 0 6px' }}>

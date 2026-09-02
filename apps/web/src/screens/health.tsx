@@ -8,7 +8,7 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { useHealth, useHosts } from '../api/queries.js';
-import { ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
+import { Empty, ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
 import { Meter } from '../ui/charts.jsx';
 import { checkName, HEALTH } from '../ui/labels.js';
 import { ACTION_ICON, Glyph, HEALTH_ICON, NAV_ICON, STATUS_ICON } from '../ui/icons.jsx';
@@ -94,8 +94,8 @@ export function HealthScreen(): JSX.Element {
         <p className="small muted" style={{ margin: '0 0 10px' }}>
           Sin prompts, sin salida de agente y sin credenciales: es seguro pegarlo donde haga falta.
         </p>
-        {health.isLoading ? <Loading rows={4} /> : null}
-        <ErrorNote error={health.error} />
+        {health.isLoading ? <Loading rows={4} shape="list" label="Sondeando el core…" /> : null}
+        <ErrorNote error={health.error} onRetry={() => void health.refetch()} />
         <div className="list">
           {checks.map(([name, check]) => (
             <div key={name} className="list-item" style={{ cursor: 'default' }}>
@@ -125,7 +125,8 @@ export function HealthScreen(): JSX.Element {
         <p className="small muted" style={{ margin: '0 0 10px' }}>
           Sondeada de verdad: una conexión por máquina para saber qué agentes tiene instalados.
         </p>
-        {hosts.isLoading ? <Loading rows={3} /> : null}
+        {hosts.isLoading ? <Loading rows={3} shape="list" label="Sondeando las máquinas…" /> : null}
+        <ErrorNote error={hosts.error} onRetry={() => void hosts.refetch()} />
         <div className="list">
           {fleet.map((host) => (
             <div key={host.host} className="list-item" style={{ cursor: 'default' }}>
@@ -157,9 +158,12 @@ export function HealthScreen(): JSX.Element {
             </div>
           ))}
           {!hosts.isLoading && fleet.length === 0 ? (
-            <p className="muted small" style={{ margin: 0 }}>
-              No hay ninguna máquina en la lista blanca todavía.
-            </p>
+            <Empty
+              tight
+              icon={ACTION_ICON.hosts}
+              title="La lista blanca está vacía"
+              hint="Jarvis sólo habla con máquinas declaradas de antemano. Se añaden en la configuración del core (JARVIS_HOSTS) y hasta entonces no hay a dónde mandar trabajo."
+            />
           ) : null}
         </div>
       </Card>

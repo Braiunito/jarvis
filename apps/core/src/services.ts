@@ -117,6 +117,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
       maxToolOutputBytes: config.maxToolOutputBytes,
       maxEventTextBytes: config.maxEventTextBytes,
       remotePath: config.remotePath,
+      spoolRoot: config.spoolRoot,
     },
   });
 

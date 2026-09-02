@@ -31,8 +31,16 @@ export class RemoteRunner {
 
   get chunkBytes(): number { return this.#chunkBytes; }
 
-  layout(runId: string): SpoolLayout {
-    return spoolLayout(this.#spoolRoot, runId);
+  /**
+   * El layout del spool.
+   *
+   * El root se puede pasar por llamada porque **depende del host**: un spool configurado bajo el
+   * home del usuario no vale igual para `zeus` que para `root@vultr`. Cada run guarda el suyo, así
+   * que leerlo o cancelarlo más tarde usa el que se decidió al crearlo, no el de la configuración
+   * de hoy.
+   */
+  layout(runId: string, root: string = this.#spoolRoot): SpoolLayout {
+    return spoolLayout(root, runId);
   }
 
   async #exec(host: string, command: string, timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number | null }> {
@@ -46,10 +54,10 @@ export class RemoteRunner {
     }
   }
 
-  async prepare({ host, runId, meta, agentCommand, cwd }: {
-    host: string; runId: string; meta: RunnerMeta; agentCommand: string; cwd: string | null;
+  async prepare({ host, runId, meta, agentCommand, cwd, spoolRoot }: {
+    host: string; runId: string; meta: RunnerMeta; agentCommand: string; cwd: string | null; spoolRoot?: string;
   }): Promise<{ outcome: PrepareOutcome; layout: SpoolLayout }> {
-    const layout = this.layout(runId);
+    const layout = this.layout(runId, spoolRoot);
     const command = buildPrepareCommand({ layout, meta, agentCommand, cwd });
     const result = await this.#exec(host, command, 60_000);
     if (result.code !== 0) {
@@ -64,8 +72,10 @@ export class RemoteRunner {
     return { outcome: parsePrepareOutput(result.stdout), layout };
   }
 
-  async poll({ host, runId, offset, maxBytes }: { host: string; runId: string; offset: number; maxBytes?: number }): Promise<PollResult> {
-    const layout = this.layout(runId);
+  async poll({ host, runId, offset, maxBytes, spoolRoot }: {
+    host: string; runId: string; offset: number; maxBytes?: number; spoolRoot?: string;
+  }): Promise<PollResult> {
+    const layout = this.layout(runId, spoolRoot);
     const result = await this.#exec(
       host,
       buildPollCommand({ layout, offset, maxBytes: maxBytes ?? this.#chunkBytes }),
@@ -77,8 +87,10 @@ export class RemoteRunner {
     return parsePollOutput(result.stdout);
   }
 
-  async cancel({ host, runId, escalate = false }: { host: string; runId: string; escalate?: boolean }): Promise<void> {
-    const layout = this.layout(runId);
+  async cancel({ host, runId, escalate = false, spoolRoot }: {
+    host: string; runId: string; escalate?: boolean; spoolRoot?: string;
+  }): Promise<void> {
+    const layout = this.layout(runId, spoolRoot);
     const result = await this.#exec(host, buildCancelCommand(layout, { escalate }), 30_000);
     if (result.code !== 0) {
       throw new JarvisError('HOST_UNREACHABLE', `could not signal the run on ${host}: ${sshFailureReason(result)}`, { scope: { host } });

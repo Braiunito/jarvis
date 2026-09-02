@@ -140,20 +140,66 @@ Un workspace se llama hoy como el título que trae el índice, o como su id, que
 - si no hay modelo configurado, se cae a las primeras palabras del prompt: sin modelo no se queda
   sin nombre.
 
-### UX-06 · Estados vacíos, de carga y de error con oficio
+### [x] UX-06 · Estados vacíos, de carga y de error con oficio
 
-- cada pantalla vacía explica qué hacer, no sólo que está vacía;
-- los esqueletos de carga tienen la forma del contenido que viene;
-- un error ofrece siempre la siguiente acción (reintentar, abrir salud, copiar diagnóstico);
-- `aria-live` anuncia transiciones de estado, no cada token que llega.
+Cerrada el 2026-09-02. Los tres estados que más se repiten tienen ahora una regla cada uno, escrita
+en `apps/web/src/ui/bits.tsx`: un vacío dice qué hacer, un esqueleto tiene la forma de lo que
+viene, y un error ofrece la siguiente acción. Un callejón sin salida no es un estado.
 
-### UX-07 · Repaso de accesibilidad y móvil
+- **Vacíos con salida.** `Empty` admite acción, y la lleva donde existe: la portada sin workspaces
+  manda a buscar una sesión, el explorador sin resultados distingue «no hay nada» de «tus filtros
+  no dejan pasar nada» —y en el primer caso enlaza a Salud, porque un índice vacío suele ser un
+  salto roto—, el workspace sin trabajos ofrece escribir la primera tarea. La variante `tight` es
+  para los paneles laterales, donde un vacío centrado de 200 px es peor que el problema.
+- **Esqueletos con forma.** `Loading` tiene cinco formas (`list`, `table`, `stats`, `timeline`,
+  `text`) que imitan la pieza real, así que al llegar el contenido la página no salta. Se anuncia
+  una vez, no una por fila.
+- **Errores con siguiente paso.** `ErrorNote` da siempre al menos un camino: reintentar cuando el
+  servidor dice que se puede, «ver qué salto falla» cuando el código es de conexión
+  (`HOST_UNREACHABLE`, `TMUX_MISSING`, `INDEX_UNAVAILABLE`…), y copiar el diagnóstico —código,
+  mensaje, petición, hora y pantalla— para pedir ayuda sin transcribir a mano. Lo copiado no lleva
+  prompts ni salida del agente.
+- **`aria-live` para transiciones, no para tokens.** Una sola región en toda la aplicación
+  (`ui/announce.tsx`): el trabajo cambió de estado, el plan pide permiso, la terminal se
+  desconectó. La respuesta del agente **no** es una región viva: se leería token a token y no se
+  entendería nada. `useAnnounceOnChange` calla en el primer render, porque llegar a una pantalla
+  con algo ya terminado no es una novedad.
 
-- foco visible y orden de tabulación en las cinco pantallas;
-- objetivos táctiles de 44 px de verdad, comprobados en 390×844;
-- contraste AA en ambos temas;
-- la terminal móvil con teclas Esc/Tab/flechas/Ctrl+C ya está: falta probarla con teclado virtual
-  abierto, que es cuando el layout se rompe.
+Ficheros: `ui/bits.tsx`, `ui/announce.tsx` (nuevo) y las seis pantallas.
+Prueba: `npx playwright test a11y` (el aviso de la terminal se comprueba de rebote: el texto
+«conectada» aparece dos veces, en el distintivo y en la región de anuncios).
+
+### [x] UX-07 · Repaso de accesibilidad y móvil
+
+Cerrada el 2026-09-02, y con test que lo sostiene: `tests/e2e/a11y.spec.ts` pasa axe (WCAG 2.1 A y
+AA) por las seis pantallas y por las cuatro pestañas del workspace, en escritorio y en teléfono.
+
+- **Foco visible y orden de tabulación.** Una regla base `:focus-visible` en vez de que cada
+  componente traiga la suya —había piezas sin ninguna—, y un «Saltar al contenido» como primer
+  elemento del orden, porque con cinco destinos delante llegar al compositor costaba una docena de
+  saltos. El test recorre la portada **con el tabulador**: `element.focus()` no dispara
+  `:focus-visible` y un test que lo use mide otra cosa.
+- **44 px de verdad.** Por tipo de puntero (`pointer: coarse`), no por ancho: una tableta con dedo
+  tiene el mismo problema y un escritorio estrecho no lo tiene. Medido en 390×844.
+- **Contraste AA en ambos temas.** Salieron seis fallos reales. El de fondo: los distintivos
+  pintaban el texto del color del estado sobre un fondo teñido con ese mismo color **y con
+  `transparent`**, así que el contraste real dependía de lo que hubiera detrás; dentro de una fila
+  seleccionada el verde caía a 4.1:1. Ahora se componen contra `--bg-card` y son deterministas.
+  También se corrigieron `--text-faint` (era 3.8:1, y ahí viven las horas y los `seq`), el blanco
+  sobre el botón primario en oscuro (3.5:1 → relleno propio `--accent-fill`) y los tonos del tema
+  claro, medidos sobre su propio tinte y no sobre el blanco.
+- **Nombres accesibles en el teléfono.** `.chip-text` se escondía con `display: none`, y eso deja
+  sin nombre a los botones que en pantalla estrecha sólo enseñan icono: «Salir» era un botón sin
+  más. Ahora se esconde de la vista pero no del árbol.
+- **Regiones con scroll alcanzables.** La conversación y el JSON del evento son zonas con scroll
+  propio: sin `tabindex` no había forma de recorrerlas sin ratón.
+- **Teclado virtual.** `dvh` mide la ventana, no lo que queda visible: la terminal y la fila de
+  teclas acababan debajo del teclado, que es justo cuando se usan. La pantalla publica
+  `--viewport` desde `visualViewport` y el alto lo resuelve el CSS; con el teclado abierto la barra
+  de secciones se retira para dejarle el sitio a las teclas útiles. El test simula el encogimiento
+  y comprueba que Esc sigue dentro de lo visible.
+
+Alta: `@axe-core/playwright` 4.13.0 (MPL-2.0), sólo de desarrollo: no viaja en el bundle.
 
 ### [x] UX-08 · Los eventos del agente se leen, no se descifran
 
@@ -172,6 +218,26 @@ Un evento nuevo no rompe la pantalla ni obliga a leer llaves.
 
 Altas: `@radix-ui/react-dialog` (ya estaba) y `react-json-view-lite` 2.5.0 (MIT, ~7 KiB), en el
 ADR-008. Coste total del bloque: 191 → 195 KiB gzip.
+
+### [x] UX-09 · Dónde contestó la IA se ve sin buscarlo
+
+Cerrada el 2026-09-02, a petición directa: en un flujo largo, encontrar la respuesta del agente
+costaba leer la línea de tiempo entera. Un trabajo típico son treinta eventos de fontanería
+—estados, herramientas, arranques— y dos de respuesta, y todos pesaban lo mismo.
+
+- **La respuesta pesa más que el resto.** `agent.text`, `agent.result` y `agent.error` se pintan
+  con tipografía de lectura (14 px, interlineado 1.68) en vez de tipografía de log, banda violeta
+  —el color que ya significa «el agente» en todo el producto—, sombra, más aire y un punto relleno
+  y más grande en el carril, para localizarla desplazando sin leer.
+- **Se pueden aislar.** La línea de tiempo ofrece «Todo · Sólo respuestas» cuando hay bastante
+  ruido para que sirva (más de cuatro eventos y al menos una respuesta), y dice cuántas hay entre
+  cuántos eventos. No borra nada: vuelve con un clic.
+- **La conversación y la síntesis, igual.** Lo que dijo el agente en el transcript y el
+  «Resultado» de un plan comparten el mismo tratamiento, porque son la misma cosa.
+
+Es a propósito el **único** sitio del producto con este realce: si todo destaca, no destaca nada.
+
+Ficheros: `ui/event-log.tsx`, `ui/assistant.tsx`, `styles.css`.
 
 ---
 
@@ -205,6 +271,26 @@ que lo lea.
 también se decide lanzar trabajo— no la enseñan. El dato ya está y es barato (`usage.lastKnown`
 no toca la red); falta decidir dónde cabe sin convertir cada pantalla en un panel de contadores.
 
+### TEC-09 · La cuota viene gratis en cada run de Claude, y se está tirando
+Cada ejecución emite un `rate_limit_event` con `unifiedWindows`: `five_hour` y `seven_day` con su
+utilización y su reinicio. En la campaña real coincidía **exactamente** con lo que el sondeo caro
+saca abriendo un TTY doce segundos. Aprovecharlo significa que la cuota se refresca sola cada vez
+que trabaja un agente y que el sondeo queda como respaldo para cuando no hay actividad reciente.
+Toca contratos (un tipo de evento nuevo) y el `UsageService`, así que va como ticket propio.
+
+### TEC-10 · No se puede empezar una sesión nueva desde Jarvis
+Todo run hace `resume` de una sesión existente. Para estrenar una conversación en una máquina hay
+que crearla fuera y esperar a que el índice la vea. El stack anterior tenía `resume: false` en su
+herramienta; aquí no hay equivalente, y se notó al probar OpenCode en vultr, donde no había ninguna
+sesión indexada que reanudar.
+
+### TEC-11 · Una sesión sin `cwd` conocido no se puede reanudar, y el error no lo dice
+Claude Code guarda las conversaciones por directorio: `claude --resume <id>` desde otro sitio
+responde «No conversation found with session ID», que suena a sesión inexistente cuando lo que pasa
+es que se está mirando en la carpeta equivocada. Pasó con una sesión real de vultr cuyo `cwd` el
+índice no traía. Hace falta (a) derivar el directorio del path del transcript, que lo codifica, y
+(b) que el mensaje diga que el problema es el directorio.
+
 ### TEC-08 · El sondeo de cuota de Claude depende de una pantalla de terminal
 Leer `/usage` es abrir un TTY desechable, teclear dentro y raspar el texto: doce segundos y roto
 en cuanto Claude Code cambie ese diseño. Es lo que hay mientras no exista una salida legible por
@@ -217,6 +303,60 @@ es como debería ser en los tres.
 
 Cosas que aparecieron trabajando en otra tarea. Se anotan aquí para que no se pierdan y para que
 quien las arregle sepa de dónde salieron.
+
+### [x] HZ-09 · El spool por defecto hacía imposible lanzar cualquier trabajo
+
+Hecho 2026-09-02 · `packages/agent-adapters/src/hosts.ts`, `apps/core/src/runs/{service,supervisor,remote-runner}.ts`
+
+`JARVIS_SPOOL_ROOT` viene por defecto como `$HOME/.local/state/jarvis/runs`, y `spoolLayout` exige
+una ruta absoluta: `$HOME` entrecomillado no lo expande nadie. Un despliegue que no fijara esa
+variable respondía **500 «internal error»** a cada `POST /api/runs`. No se había visto nunca porque
+dev-local y los tests fijan una ruta absoluta propia; el valor por defecto del producto no se
+ejercitaba en ningún sitio.
+
+Ahora la sonda de capacidades trae también el `$HOME` de cada máquina —sale gratis, va en la misma
+llamada— y el spool se resuelve con el home del **host que ejecuta**: `/home/zeus/...` en zeus y
+`/root/...` en vultr. Cada run guarda su directorio, así que leerlo o cancelarlo después usa el que
+se decidió al crearlo y no la configuración de hoy. Comprobado contra zeus: el spool aparece en
+`/home/zeus/.local/state/jarvis/runs/<run>/`.
+
+### [x] HZ-10 · Un trabajo de Codex terminaba «bien» y con el resultado en blanco
+
+Hecho 2026-09-02 · `apps/core/src/runs/service.ts`
+
+Con codex-cli 0.152 —los contratos se congelaron con 0.149— el evento final del turno trae métricas
+y ya no repite el texto de la respuesta. El agente contestaba, el evento `agent.text` estaba ahí, y
+aun así el run se guardaba con `resultSummary` vacío: la tarjeta no enseñaba nada, el título
+automático se quedaba sin material y la síntesis del Assistant no podía citar el resultado. Ahora,
+si el evento final no trae texto, se usa lo último que dijo el agente. Vale para los tres
+proveedores: cualquier CLI que deje de repetirse queda cubierta.
+
+### [x] HZ-11 · Los eventos nuevos de Claude Code salían como «sin traducir»
+
+Hecho 2026-09-02 · `packages/agent-adapters/src/adapters/claude.ts`, `apps/web/src/ui/event-log.tsx`
+
+Claude Code 2.1.258 emite dos tipos que el adaptador no conocía: `system/thinking_tokens` (el
+contador de razonamiento, que llenaba la línea de tiempo de tarjetas vacías) y `rate_limit_event`.
+Ninguno rompía nada —degradaban a crudo, como está diseñado—, pero se leían como un fallo del
+producto. Ahora el adaptador les pone nombre y la interfaz enseña esa nota en vez de «evento sin
+traducir todavía», que es lo que hay que hacer con una CLI que saca versión cada semana.
+
+### [x] HZ-12 · Los errores de las CLIs llegaban con el color de terminal dentro
+
+Hecho 2026-09-02 · `apps/core/src/runs/supervisor.ts` · test en `apps/core/test/run-state.test.ts`
+
+`opencode` escribe sus errores con secuencias ANSI aunque nadie mire, y la cola de `stderr` viaja
+tal cual a la tarjeta del trabajo: se leía «[91m[1mError: [0mSession not found». Ahora se limpia
+antes de guardarla.
+
+### [x] HZ-13 · La frescura del índice contaba el bastión dos veces
+
+Hecho 2026-09-02 · `apps/core/src/sessions/index-client.ts`
+
+El índice llama `local` a la máquina donde corre, que **es** el bastión, y además puede tener
+sesiones bajo su nombre propio. Sin fusionar, la interfaz enseñaba «zeus ok hace 2 días · zeus ok
+hace 13 horas» sin manera de saber cuál valía. Ahora se fusionan por host: se suman las sesiones y
+se conserva la actividad más reciente.
 
 ### [x] HZ-06 · Reabrir una sesión borraba el nombre que había escrito una persona
 

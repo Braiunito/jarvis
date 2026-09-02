@@ -10,6 +10,8 @@ import { FakeSessionIndex } from '@jarvis/testkit';
 import { openDatabase } from '../src/platform/db.js';
 import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
+import { spoolLayout } from '@jarvis/agent-adapters';
+import { stripAnsi } from '../src/runs/supervisor.js';
 
 const user = { userId: 'u1', username: 'braian' };
 
@@ -209,5 +211,30 @@ describe('workspaces', () => {
     expect(workspace.ref.host).toBe('bastion');
     const rows = services.db.prepare('SELECT session_host FROM workspaces').all() as Array<{ session_host: string }>;
     expect(rows.every((row) => row.session_host !== 'local')).toBe(true);
+  });
+});
+
+/**
+ * Lo que se aprendió corriendo contra las CLIs de verdad, no contra las falsas.
+ *
+ * Los dos casos vienen de la primera campaña contra zeus, goro2 y vultr: un valor por defecto que
+ * no podía funcionar y un error que llegaba ilegible.
+ */
+describe('lo que enseñó la prueba contra máquinas reales', () => {
+  it('el spool tiene que ser una ruta absoluta de verdad, resuelta por host', () => {
+    // `$HOME/...` entrecomillado no lo expande nadie: hay que resolverlo con el home de la
+    // máquina que ejecuta, y ese home no es el mismo en zeus que en vultr.
+    expect(spoolLayout('/home/zeus/.local/state/jarvis/runs', 'r1').dir)
+      .toBe('/home/zeus/.local/state/jarvis/runs/r1');
+    expect(spoolLayout('/root/.local/state/jarvis/runs', 'r1').dir)
+      .toBe('/root/.local/state/jarvis/runs/r1');
+    expect(() => spoolLayout('$HOME/.local/state/jarvis/runs', 'r1')).toThrow(/absolute/);
+  });
+
+  it('la línea de error que se enseña va sin color de terminal', () => {
+    // opencode escribe sus errores con ANSI aunque nadie mire; así llegaban a la tarjeta.
+    expect(stripAnsi('[91m[1mError: [0mSession not found'))
+      .toBe('Error: Session not found');
+    expect(stripAnsi('sin color')).toBe('sin color');
   });
 });

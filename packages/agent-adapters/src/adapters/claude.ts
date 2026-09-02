@@ -89,6 +89,12 @@ export const claudeAdapter: AgentAdapter = {
             ...(record.tools ? { tools: record.tools } : {}),
           };
         }
+        // Claude Code 2.1 emite el progreso del razonamiento como `system/thinking_tokens`. No es
+        // contenido: es un contador que sube. Se conserva con una nota para que la interfaz pueda
+        // decir qué es en vez de enseñar «evento sin traducir».
+        if (record.subtype === 'thinking_tokens') {
+          return { type: 'raw', payload: record, note: 'el modelo está pensando' };
+        }
         return rawEvent(record);
 
       case 'assistant': {
@@ -146,7 +152,9 @@ export const claudeAdapter: AgentAdapter = {
         };
 
       case 'rate_limit_event':
-        return { type: 'raw', payload: record, note: 'rate limit status' };
+        // Trae la cuota de la cuenta en vivo (`unifiedWindows`), que es lo mismo que el sondeo caro
+        // averigua abriendo un TTY. Hoy sólo se conserva; aprovecharla es TEC-09.
+        return { type: 'raw', payload: record, note: 'estado de la cuota de la cuenta' };
 
       default:
         return rawEvent(record);
