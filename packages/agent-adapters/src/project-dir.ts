@@ -111,21 +111,43 @@ export interface ResumeHintInput {
   sessionId: string | null | undefined;
   cwd: string | null | undefined;
   workHost: string | null | undefined;
+  /** De dónde salió el `cwd`. `derived` significa que lo sacamos del archivo de la conversación. */
+  cwdSource?: 'index' | 'derived' | 'user' | null | undefined;
 }
 
 /**
- * Traduce «no encuentro esa conversación» a lo que de verdad ocurrió.
+ * Traduce «no encuentro esa conversación» a lo que de verdad ocurrió, que son dos cosas distintas.
  *
  * El mensaje del CLI es correcto desde su punto de vista —en ese directorio no está— y engañoso
  * desde el de quien lo lee, que ve la sesión listada en Jarvis y deduce que algo se ha perdido.
+ * Pero hay un caso en el que la carpeta **no** es el problema, y decir que lo es sería cambiar un
+ * mensaje engañoso por otro:
+ *
+ * Cuando el directorio lo dedujimos del propio archivo de la conversación (`derived`), estamos
+ * ejecutando exactamente donde ese archivo vive. Que aun así no la encuentre significa que el
+ * archivo no tiene ningún turno. Es lo que le pasa a las sesiones que dejó el puente del stack
+ * anterior: una sola línea `bridge-session` y nada más. Ésas están en un limbo comprobado contra
+ * las máquinas — `--resume` responde «no conversation found» y `--session-id` responde «already in
+ * use» —, así que lo único que queda es empezar una conversación nueva.
  */
-export function explainResumeFailure({ provider, text, sessionId, cwd, workHost }: ResumeHintInput): string | null {
+export function explainResumeFailure(
+  { provider, text, sessionId, cwd, workHost, cwdSource }: ResumeHintInput,
+): string | null {
   const message = String(text ?? '');
   if (!/no conversation found with session id/i.test(message)) return null;
+  const machine = workHost ? ` de ${workHost}` : '';
+
+  if (cwdSource === 'derived' && cwd) {
+    return `El directorio ya es el correcto: ${cwd}${machine} es donde ${provider} archiva esta `
+      + 'conversación, y aun así dice no encontrarla. Eso significa que el archivo no guarda ningún '
+      + 'turno — las sesiones que dejó el puente anterior son sólo una marca —, y su identificador '
+      + 'tampoco se puede reutilizar para empezar de cero porque el archivo ya existe. '
+      + 'Empieza una sesión nueva en esa misma carpeta.';
+  }
+
   const where = cwd
     ? `se ejecutó en ${cwd}`
     : 'se ejecutó sin decirle en qué directorio buscar, así que miró en el directorio por defecto';
-  const machine = workHost ? ` de ${workHost}` : '';
   return `${provider} guarda cada conversación bajo el directorio en el que se abrió, y ésta ${where}${machine}: `
     + `la sesión ${sessionId ?? ''} existe, pero está archivada en otra carpeta. `
     + 'Indica el directorio correcto en el workspace y el trabajo podrá continuarla.';

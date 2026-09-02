@@ -574,6 +574,12 @@ el barrido se **ejecuta** en sh, bash y zsh, que es la lección de `buildSweepCo
 `apps/core/test/cwd-resolver.test.ts` y dos casos de punta a punta en `durable-runs.test.ts`
 contra un directorio real.
 
+**Lo que la prueba contra la flota enseñó, y que obligó a reescribir el mensaje.** Con la
+derivación puesta, el workspace de vultr aprendió su directorio —`cwd_source: derived`— y el
+trabajo salió hacia él… y Claude volvió a decir que no encontraba la conversación. La causa no era
+la carpeta: ver HZ-27. El mensaje distingue ahora los dos casos, porque decir «indica el directorio
+correcto» cuando el directorio ya es el correcto es cambiar un engaño por otro.
+
 ### TEC-08 · El sondeo de cuota de Claude depende de una pantalla de terminal
 Leer `/usage` es abrir un TTY desechable, teclear dentro y raspar el texto: doce segundos y roto
 en cuanto Claude Code cambie ese diseño. Es lo que hay mientras no exista una salida legible por
@@ -638,6 +644,54 @@ qué se queda, que es la parte difícil.
 
 Cosas que aparecieron trabajando en otra tarea. Se anotan aquí para que no se pierdan y para que
 quien las arregle sepa de dónde salieron.
+
+### HZ-27 · Las sesiones que dejó el puente antiguo no son sesiones, y no hay forma de recuperarlas
+
+Las **10 sesiones sin `cwd`** del índice —vultr 1, goro2 5, goro3 4— tienen un transcript de **una
+sola línea**:
+
+```json
+{"type":"bridge-session","sessionId":"…","bridgeSessionId":"cse_…","lastSequenceNum":0}
+```
+
+Ni un turno. Son marcas que escribió el puente del stack anterior al registrar una sesión que nunca
+llegó a tener contenido. Por eso el índice no traía su `cwd`: el `cwd` se lee de las líneas de
+mensaje, y no hay ninguna.
+
+Están en un limbo, comprobado contra la máquina y no deducido:
+
+```
+claude --resume <id>      → No conversation found with session ID: <id>
+claude --session-id <id>  → Session ID <id> is already in use.
+```
+
+No se pueden continuar —no hay nada que continuar— ni estrenar con su identificador, porque para
+Claude el archivo ya existe. Lo único que se puede hacer desde Jarvis es empezar una conversación
+nueva; borrar el archivo es una decisión sobre la máquina, no sobre nuestra base.
+
+Qué se hizo con esto: el mensaje de TEC-11 lo dice cuando el caso es éste, en vez de mandar a
+corregir un directorio que ya era correcto. Qué **no** se hizo, y por qué: rechazar el trabajo
+antes de lanzarlo. Sería posible —el índice ya marca estas sesiones como vacías— pero ese dato
+puede estar viejo, y rechazar una sesión que sí tiene turnos porque el índice aún no los ha visto
+es peor que un trabajo que falla con una explicación exacta.
+
+Por decidir, si alguna vez molesta: si el explorador debería ofrecer «empezar una conversación
+nueva aquí» sobre una sesión vacía, heredando su máquina y su carpeta. Hoy hay que ir a «nueva
+sesión» y rellenarlo a mano.
+
+### [x] HZ-26 · `bin/jarvis backup` no funciona contra el stack desplegado
+
+Encontrado 2026-09-02 al respaldar antes de un despliegue · lo arregla `jarvis-69`
+
+`deploy/Dockerfile.core` no copia `scripts/` a la imagen, así que
+`compose exec core node /app/scripts/backup.mjs` falla con `MODULE_NOT_FOUND` desde que existe. Y
+el consejo que da al fallar —ejecutarlo desde el repositorio— es imposible de seguir donde hace
+falta: las rutas viven dentro de un volumen de Docker y el bastión no tiene Node, que es
+justamente la gracia de `bin/jarvis`. El único comando que la documentación ofrece para respaldar
+producción era el único que no se podía ejecutar en producción.
+
+La copia previa a este despliegue se hizo a mano con `VACUUM INTO` desde el propio contenedor, que
+es lo que el script hace, y quedó verificada en `/home/zeus/jarvis/backups/`.
 
 ### [x] HZ-25 · El Assistant estaba apagado porque el core hablaba con el proveedor equivocado
 

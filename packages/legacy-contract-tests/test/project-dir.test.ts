@@ -131,6 +131,20 @@ describe('RESUME-HINT-01 · el error dice que el problema es el directorio', () 
     expect(hint).toContain('sin decirle en qué directorio buscar');
   });
 
+  it('cuando el directorio lo dedujimos del propio archivo, la carpeta no es el problema', () => {
+    // Comprobado contra las máquinas: estas sesiones no se pueden reanudar («no conversation
+    // found») ni estrenar con su id («already in use»). Decir «indica el directorio correcto»
+    // aquí sería cambiar un mensaje engañoso por otro.
+    const hint = explainResumeFailure({
+      ...base, cwd: '/var/www/contaduria.braianmaciel.com', cwdSource: 'derived',
+      text: 'No conversation found with session ID: d4e6f23c',
+    });
+    expect(hint).toContain('El directorio ya es el correcto');
+    expect(hint).toContain('no guarda ningún turno');
+    expect(hint).toContain('Empieza una sesión nueva');
+    expect(hint).not.toContain('archivada en otra carpeta');
+  });
+
   it('cualquier otro fallo se queda como estaba: no se disfraza de esto', () => {
     expect(explainResumeFailure({ ...base, cwd: '/root', text: 'credit balance too low' })).toBeNull();
     expect(explainResumeFailure({ ...base, cwd: '/root', text: null })).toBeNull();

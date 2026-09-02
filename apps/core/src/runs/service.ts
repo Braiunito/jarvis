@@ -189,6 +189,15 @@ export class RunService {
     }
   }
 
+  /** De dónde salió el directorio del workspace. Sin lanzar: sólo sirve para explicar un fallo. */
+  #cwdSourceOf(workspaceId: string): 'index' | 'derived' | 'user' | null {
+    try {
+      return this.#deps.workspaces.require(workspaceId).cwdSource ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** El root con el que se creó un run. Se lee del propio run, no de la configuración de hoy. */
   #spoolRootOf(run: Run): string | undefined {
     return spoolRootOf(this.#deps.repository.row(run.id)?.remote_spool_dir, run.id);
@@ -566,6 +575,10 @@ export class RunService {
               sessionId: run.sessionId,
               cwd: run.cwd,
               workHost: run.workHost,
+              // De dónde salió el directorio cambia lo que significa el fallo: si lo dedujimos del
+              // propio archivo de la conversación, la carpeta no es el problema. Se lee del
+              // workspace, que es local y sólo se consulta cuando algo ya ha fallado.
+              cwdSource: this.#cwdSourceOf(run.workspaceId),
             });
             if (hint) {
               events.push({ type: 'agent.error', at, payload: { message: hint, code: 'SESSION_NOT_IN_CWD' } });

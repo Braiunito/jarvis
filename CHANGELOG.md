@@ -166,8 +166,11 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   contra la máquina** antes de usarlo; el workspace se queda con él marcado como deducción, para
   que la consola pueda decir que eso lo dedujo el sistema en vez de presentarlo como un hecho. De
   paso se comprueba también el directorio que declaraba el índice: uno que se movió o se borró
-  hacía morir el trabajo con un `cd` fallido. Y si aun así no se encuentra, el error explica que el
-  problema es el directorio y no la sesión.
+  hacía morir el trabajo con un `cd` fallido. Y si aun así no se encuentra, el error explica cuál
+  de los dos problemas es: que la conversación esté archivada en otra carpeta, o —cuando el
+  directorio salió del propio archivo de la conversación— que ese archivo no guarde ningún turno,
+  que es lo que le pasa a las sesiones que dejó el puente anterior y no se arregla con ninguna
+  carpeta.
 
 ### Corregido durante la migración
 
