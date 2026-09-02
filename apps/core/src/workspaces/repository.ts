@@ -20,6 +20,7 @@ export interface WorkspaceRow {
   source_installation_id: string | null;
   source_conversation_id: string | null;
   session_pending: number | null;
+  session_launched: number | null;
 }
 
 export const toWorkspace = (row: WorkspaceRow): Workspace => ({
@@ -34,6 +35,7 @@ export const toWorkspace = (row: WorkspaceRow): Workspace => ({
   lastOpenedAt: row.last_opened_at,
   provenance: row.provenance as Workspace['provenance'],
   sessionPending: row.session_pending === 1,
+  sessionLaunched: row.session_launched !== 0,
 });
 
 export class WorkspaceRepository {
@@ -66,13 +68,14 @@ export class WorkspaceRepository {
     this.#db.prepare(`INSERT INTO workspaces
       (id, session_host, provider, session_id, cwd, source_root, title, created_by, created_at,
        updated_at, last_opened_at, provenance, source_installation_id, source_conversation_id,
-       session_pending)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+       session_pending, session_launched)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       workspace.id, workspace.ref.host, workspace.ref.provider, workspace.ref.sessionId,
       workspace.cwd, workspace.sourceRoot, workspace.title, workspace.createdBy,
       workspace.createdAt, workspace.updatedAt, workspace.lastOpenedAt, workspace.provenance,
       source?.installationId ?? null, source?.conversationId ?? null,
       workspace.sessionPending ? 1 : 0,
+      workspace.sessionLaunched === false ? 0 : 1,
     );
   }
 
