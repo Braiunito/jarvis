@@ -238,3 +238,52 @@ describe('lo que enseñó la prueba contra máquinas reales', () => {
     expect(stripAnsi('sin color')).toBe('sin color');
   });
 });
+
+/** Un trabajo que falló, insertado a mano: aquí importa el contador, no cómo se ejecuta. */
+function seedFailedRun(workspaceId: string): string {
+  const id = `r${Math.random().toString(36).slice(2, 12)}`;
+  services.runRepository.insert({
+    id, workspaceId, createdBy: user.username, provider: 'claude', sessionId: 'sid',
+    prompt: 'algo', workHost: 'bastion', executionHost: 'bastion', strategy: 'A',
+    strategyReason: null, cwd: null, permissionProfile: 'safe', model: null, attempt: 1,
+    parentRunId: null, remoteName: `jarvis-${id}`, remoteSpoolDir: `/tmp/${id}`,
+    createdAt: '2026-09-02T11:00:00.000Z', deadlineAt: null,
+  });
+  services.db.prepare("UPDATE runs SET status = 'failed', error_message = 'se rompió' WHERE id = ?").run(id);
+  return id;
+}
+
+/**
+ * Lo que hace que el panel deje de mentir.
+ *
+ * Dos contadores que no se podían vaciar: «requieren atención» sumaba fallos de hace días, y el
+ * check de limpieza decía «sin datos» porque nadie barría nunca.
+ */
+describe('los avisos del panel se pueden vaciar', () => {
+  it('un trabajo dado por visto deja de reclamar, sin cambiar de estado', () => {
+    const workspace = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-ack' } }, user,
+    ).workspace;
+    const id = seedFailedRun(workspace.id);
+
+    expect(services.metrics.snapshot().runs.needsAttention).toBe(1);
+
+    const changed = services.runRepository.acknowledge(user.username, '2026-09-02T12:00:00.000Z');
+    expect(changed).toBe(1);
+
+    // Deja de contar, pero el trabajo sigue fallido y entero: no se ha borrado nada.
+    expect(services.metrics.snapshot().runs.needsAttention).toBe(0);
+    const run = services.runs.require(id);
+    expect(run.status).toBe('failed');
+    expect(run.acknowledgedAt).toBe('2026-09-02T12:00:00.000Z');
+  });
+
+  it('dar por visto dos veces no cuenta dos veces', () => {
+    const workspace = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-ack2' } }, user,
+    ).workspace;
+    seedFailedRun(workspace.id);
+    expect(services.runRepository.acknowledge(user.username, '2026-09-02T12:00:00.000Z')).toBe(1);
+    expect(services.runRepository.acknowledge(user.username, '2026-09-02T12:05:00.000Z')).toBe(0);
+  });
+});

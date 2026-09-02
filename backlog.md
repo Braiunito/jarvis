@@ -250,6 +250,43 @@ Es a propósito el **único** sitio del producto con este realce: si todo destac
 
 Ficheros: `ui/event-log.tsx`, `ui/assistant.tsx`, `styles.css`.
 
+### [x] UX-10 · El título automático, al entrar y no sólo al terminar
+
+Cerrada el 2026-09-02. El nombre del workspace venía del índice, y lo que el índice sabe es lo que
+la CLI puso: Claude nombra sus sesiones `Claude a758cca7` y Codex arrastra el preámbulo entero
+—`<environment_context><cwd>/home/zeus</cwd>…`— como título. Ninguno sirve para reconocer un
+trabajo en una lista, que es para lo único que existe un título.
+
+- **Se dispara al entrar en el workspace**, no sólo al terminar un run: es cuando hay más contexto
+  y cuando alguien lo está mirando. Va en segundo plano y la respuesta trae `titlePending`, así que
+  la pantalla no espera a un modelo para pintarse y el nombre llega solo unos segundos después.
+- **Sólo se renombra lo que no sirve** (`looksAutomatic`): hashes, UUID, el identificador de la
+  sesión, lo que empieza por etiqueta o por JSON, rutas, textos sin letras, nombres de relleno
+  («new session», «sin título») y cualquier cosa de más de 120 caracteres, que es un mensaje
+  pegado donde no toca. Un título que ya sirve se queda, lo pusiera quien lo pusiera.
+- **Las cuatro reglas del stack anterior siguen en pie**: el título de una persona gana siempre;
+  hay ventana de frescura para que entrar dos veces no cueste dos llamadas ni cambie el nombre a
+  mitad de mirarlo; la escritura comprueba la propiedad en el `WHERE`, porque entre leer y escribir
+  cabe un renombrado; y sin modelo hay nombre igual, sacado del mensaje de la persona.
+- **Grok y Qwen, con sus límites**: presupuesto de llamadas por minuto en todo el proceso
+  (`JARVIS_TITLE_PER_MINUTE`, 8 por defecto); pasado el tope se nombra con el heurístico local en
+  vez de esperar un 429. Y `reasoning_effort: "none"` para la familia Qwen, que si no gasta el
+  presupuesto pensando y devuelve `finish_reason: "length"` sin título — el mismo fallo que ya
+  estaba documentado en el LiteChat viejo.
+
+**Los trabajos también se nombran por lo que se pidió.** `Run` gana `promptPreview` —el mensaje de
+la persona, sin preámbulos, en una línea y recortado— y con él se titulan las listas de
+«Trabajos de este workspace» y de Trabajo. Un identificador como `rt40nhvqeujq` no le dice nada a
+nadie, y una lista de doce obliga a abrirlos uno a uno.
+
+**Y el hilo de Actividad empieza por lo que pediste**, en azul frente al violeta del agente, para
+no tener que recordar qué se había pedido al leer lo que contestó.
+
+Ficheros: `workspaces/{title,routes}.ts`, `runs/repository.ts`, `contracts/runs.ts`, migración 7,
+`ui/{event-log,labels}.ts(x)`, `screens/{workspace,runs}.tsx`, `api/queries.ts`.
+Prueba: `npx vitest run apps/core/test/title.test.ts` (15 casos, con los títulos reales de Claude
+y Codex).
+
 ---
 
 ## Bloque técnico · pendiente tras la migración
@@ -282,12 +319,22 @@ que lo lea.
 también se decide lanzar trabajo— no la enseñan. El dato ya está y es barato (`usage.lastKnown`
 no toca la red); falta decidir dónde cabe sin convertir cada pantalla en un panel de contadores.
 
-### TEC-09 · La cuota viene gratis en cada run de Claude, y se está tirando
-Cada ejecución emite un `rate_limit_event` con `unifiedWindows`: `five_hour` y `seven_day` con su
-utilización y su reinicio. En la campaña real coincidía **exactamente** con lo que el sondeo caro
-saca abriendo un TTY doce segundos. Aprovecharlo significa que la cuota se refresca sola cada vez
-que trabaja un agente y que el sondeo queda como respaldo para cuando no hay actividad reciente.
-Toca contratos (un tipo de evento nuevo) y el `UsageService`, así que va como ticket propio.
+### [x] TEC-09 · La cuota se aprende del propio trabajo
+
+Hecho 2026-09-02 · `apps/core/src/runs/service.ts` (`onQuota`), `apps/core/src/usage/service.ts`
+(`recordFromAgent`), cableado en `services.ts`
+
+Cada ejecución de Claude emite un `rate_limit_event` con `unifiedWindows` —`five_hour` y
+`seven_day`, con su utilización y su reinicio—, que es exactamente lo que el sondeo caro saca
+abriendo un TTY doce segundos y raspando una pantalla. Ahora el core lo lee al vuelo y actualiza el
+snapshot.
+
+Lo que lo hizo urgente: en vultr el sondeo por pantalla **no funciona** —la CLI es una versión
+distinta y el panel no se dibuja a tiempo—, así que la consola enseñaba «cuenta · sin cuota leída»
+sin más salida. Con esto, la cuota apareció sola en cuanto se lanzó un trabajo: sesión 86%
+disponible, semana 95%, con sus horas de reinicio. Es más fresco, más barato y no depende de la
+versión del CLI que haya en cada máquina; el sondeo queda de respaldo para cuando no hay actividad
+reciente.
 
 ### TEC-10 · No se puede empezar una sesión nueva desde Jarvis
 Todo run hace `resume` de una sesión existente. Para estrenar una conversación en una máquina hay
@@ -314,6 +361,98 @@ es como debería ser en los tres.
 
 Cosas que aparecieron trabajando en otra tarea. Se anotan aquí para que no se pierdan y para que
 quien las arregle sepa de dónde salieron.
+
+### [x] HZ-20 · Ninguna conversación de la flota se podía leer
+
+Hecho 2026-09-02 · `aisessions/src/aisessions/{serve,cli}.py`, `deploy/compose.yml`,
+`apps/core/src/sessions/service.ts`
+
+Abrir una sesión de goro2, goro3, vultr o bevrim enseñaba el destino, el título y el trabajo de
+Jarvis, pero la pestaña «Conversación» salía vacía y el resumen decía «0 mensajes». El motivo
+estaba en el índice: `/api/export` rechaza con 501 las sesiones que no son de su propia máquina,
+por una decisión suya —exportar una remota implica que el servidor abra un ssh—. Como el índice
+sólo indexa el bastión en local, eso dejaba fuera **toda la flota**, que es casi todo.
+
+En el despliegue de Jarvis esa precaución no aplica: el índice ya tiene la clave de la flota
+montada y ya sincroniza por ssh. Se añadió `--allow-remote-export` a `aisessions serve` (apagado
+por defecto, sólo lectura, claude y codex; opencode sigue necesitando el agente) y el compose lo
+activa. De paso, el core explica el 501 en vez de repetir «index responded 501»: dice de qué
+máquina es la sesión y qué sigue funcionando sin eso.
+
+Comprobado en la consola del bastión: una sesión de goro2 abre con sus 40 últimos mensajes de 368,
+con la procedencia a la vista («escrito por el agente en goro2, Jarvis sólo lo lee»).
+
+### [x] HZ-17 · Los dos stacks compartían identidad de Compose
+
+Hecho 2026-09-02 · `deploy/compose.yml` (`name: jarvis-next`)
+
+El compose nuevo declaraba `name: jarvis`, igual que el del stack anterior, y con servicios que se
+llaman igual (gateway, core, aisessions). Docker los trataba como el mismo proyecto: los
+contenedores nuevos ocupaban los nombres de los viejos, y **cualquier `docker compose up` lanzado
+desde el árbol anterior —o su `jarvis.service`, que seguía habilitado— los recreaba con las
+imágenes de antes, encima y sin avisar**. En el bastión eso significa que un reinicio podía
+deshacer el despliegue.
+
+Además, un `compose down` sobre ese proyecto se habría llevado por delante `tailscaled`, que es
+por donde se entra a zeus desde fuera: eran huérfanos del mismo nombre. El stack nuevo se llama
+ahora `jarvis-next`, con sus propios volúmenes (los datos se copiaron, los antiguos siguen
+intactos como vuelta atrás), y su unidad de systemd documenta que hay que desactivar la anterior.
+
+### [x] HZ-18 · `$HOME` en la configuración se expandía en el bastión
+
+Hecho 2026-09-02 · `deploy/compose.yml`, `deploy/.env.example`, `apps/core/src/main.ts`
+
+`JARVIS_SPOOL_ROOT=$HOME/...` parecía correcto, pero **Compose interpola `$HOME` con el entorno de
+la máquina donde se lanza**: al core le llegaba `/home/zeus/...` ya expandido, y entonces cada
+máquina de la flota intentaba escribir en el home del bastión. El síntoma al otro lado era
+`mkdir: cannot create directory '/home/zeus': Permission denied`, que no señala a la configuración
+por ningún lado.
+
+Se escribe con `~`, que no expande ni Compose ni el shell, y el core avisa al arrancar si el spool
+empieza por el home de su propio proceso —que es la huella de este error—.
+
+### [x] HZ-19 · El montaje de la clave de la flota apuntaba a un sitio inexistente
+
+Hecho 2026-09-02 · `deploy/compose.yml`, `deploy/.env.example`
+
+El compose montaba `./secrets/ssh`, y las rutas relativas se resuelven contra el fichero compose:
+`deploy/secrets/ssh`, un directorio que nadie crea y que el `.gitignore` ni siquiera cubre —protege
+`secrets/` en la raíz—. Docker creaba un directorio vacío y el core respondía «Could not resolve
+hostname bastion» para los seis hosts. Ahora el defecto es `../secrets/ssh` y el ejemplo explica
+que en un despliegue conviene ruta absoluta.
+
+### [x] HZ-14 · El empaquetado nunca se había construido desde cero
+
+Hecho 2026-09-02 · `.dockerignore` (nuevo), `deploy/Dockerfile.{core,gateway}`
+
+Al desplegar de verdad en zeus, la imagen del gateway falló con veinte errores encabezados por
+«Cannot find module `@jarvis/contracts`». La causa no estaba en el código: **no había
+`.dockerignore`**, así que el contexto de construcción se llevaba `node_modules`, `dist` y —lo que
+lo rompía— los `*.tsbuildinfo`, que viven fuera de `dist/`. Dentro del contenedor, `tsc -b` leía
+ese estado incremental heredado, daba los paquetes por compilados y no generaba los tipos; el
+build del front se caía después, señalando a un sitio que no era la causa.
+
+Ahora hay `.dockerignore` con lo que jamás debe entrar (incluidos secretos y bases) y los
+Dockerfiles compilan con `tsc -b --force`, para que el resultado no dependa de lo que traiga el
+contexto.
+
+### [x] HZ-15 · El stack no podía construir su propio índice de sesiones
+
+Hecho 2026-09-02 · `deploy/Dockerfile.aisessions` (nuevo), `deploy/aisessions-sync.sh` (nuevo)
+
+`deploy/compose.yml` esperaba una imagen `aisessions:latest` construida por otro. En zeus existía
+sólo porque la había construido el stack de LiteChat, que es justo el que se va a archivar: el
+despliegue nuevo no se podía reconstruir por sí mismo. Ahora el índice se construye desde el
+repositorio de aiSessions —vecino, con su ruta configurable— y el bucle de sincronización de la
+flota vive en `deploy/`, no prestado del repo anterior.
+
+### [x] HZ-16 · El puerto de la consola estaba fijo, y con él la posibilidad de un corte
+
+Hecho 2026-09-02 · `deploy/compose.lan.yml`
+
+La superposición de red local publicaba `8080` a pelo, que es el puerto que ocupa el stack
+anterior. Levantar el nuevo al lado para compararlos —que es como se hace un corte con vuelta
+atrás— exigía tumbar el viejo primero. Ahora es `JARVIS_LAN_PORT`.
 
 ### [x] HZ-09 · El spool por defecto hacía imposible lanzar cualquier trabajo
 

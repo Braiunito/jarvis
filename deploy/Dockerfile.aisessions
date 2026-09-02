@@ -1,0 +1,47 @@
+# El índice de sesiones: descubrimiento de sólo lectura sobre las máquinas de la flota.
+#
+# Se construye desde el repositorio de aiSessions, que es vecino de éste. Vive aquí y no allí
+# porque es una pieza de *este* despliegue: aiSessions es una herramienta de línea de comandos que
+# existe por su cuenta, y no tiene por qué saber cómo la empaqueta Jarvis.
+#
+# No hay `pip install` a propósito. aiSessions es sólo biblioteca estándar, que es justo lo que le
+# permite comprimirse en un fichero y viajar por una tubería SSH hasta una máquina que no tiene
+# más que `python3`. Instalarlo con un gestor de paquetes escondería esa propiedad.
+FROM python:3.12-alpine
+LABEL org.opencontainers.image.title="jarvis-aisessions"
+LABEL org.opencontainers.image.description="Índice de sólo lectura de sesiones de Claude Code, Codex y OpenCode"
+
+# La clave de la flota se monta desde el host con permisos 0600 y dueño conocido. Hornear ese
+# usuario en la imagen es lo que permite leerla sin aflojar sus permisos.
+ARG JARVIS_UID=1000
+ARG JARVIS_GID=1000
+
+RUN apk add --no-cache openssh-client tini \
+ && if getent passwd ${JARVIS_UID} >/dev/null; then \
+      deluser "$(getent passwd ${JARVIS_UID} | cut -d: -f1)"; \
+    fi \
+ && if getent group ${JARVIS_GID} >/dev/null; then \
+      delgroup "$(getent group ${JARVIS_GID} | cut -d: -f1)"; \
+    fi \
+ && addgroup -g ${JARVIS_GID} jarvis \
+ && adduser -D -u ${JARVIS_UID} -G jarvis jarvis
+
+WORKDIR /srv
+COPY --chown=jarvis:jarvis src/aisessions /srv/aisessions
+
+RUN printf '#!/bin/sh\nexec python3 -m aisessions "$@"\n' > /usr/local/bin/aisessions \
+ && chmod +x /usr/local/bin/aisessions
+
+ENV PYTHONPATH=/srv \
+    PYTHONUNBUFFERED=1 \
+    XDG_DATA_HOME=/var/lib/aisessions \
+    XDG_CACHE_HOME=/var/cache/aisessions
+
+RUN mkdir -p /var/lib/aisessions /var/cache/aisessions \
+ && chown -R jarvis:jarvis /var/lib/aisessions /var/cache/aisessions
+USER jarvis
+EXPOSE 8765
+VOLUME ["/var/lib/aisessions"]
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["aisessions", "serve", "--bind", "0.0.0.0", "--port", "8765"]

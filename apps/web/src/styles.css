@@ -855,6 +855,32 @@ a:hover { text-decoration: underline; }
 .event-card.answer.ok .badge { font-weight: 700; }
 .event-card.answer.danger { border-left-color: var(--danger); }
 
+/*
+ * Lo que pidió la persona.
+ *
+ * Mismo peso de lectura que una respuesta —es la otra mitad de la conversación— pero en azul, que
+ * es el color de «tú» en todo el producto. Sin esto, el hilo empezaba por «el agente arrancó» y
+ * había que acordarse de qué se había pedido.
+ */
+.event-card.user {
+  padding: 13px 14px;
+  border-left: 3px solid var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  cursor: default;
+}
+.event-card.user .event-body { font-size: 14px; line-height: 1.68; color: var(--text-strong); }
+.tl-dot.accent {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-card));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.badge.accent {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-card));
+}
+
 /* La síntesis del Assistant es la respuesta de un plan entero: mismo tratamiento. */
 .answer-card {
   border-left: 3px solid var(--running);
@@ -874,6 +900,7 @@ a:hover { text-decoration: underline; }
   display: grid;
   gap: 7px;
   width: 100%;
+  min-width: 0;
   text-align: left;
   font: inherit;
   color: var(--text);
@@ -895,8 +922,10 @@ a:hover { text-decoration: underline; }
 .event-card.accent { border-left-color: var(--accent); }
 
 .event-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-width: 0; }
-.event-headline { font-weight: 600; color: var(--text-strong); font-size: 13px; min-width: 0; }
-.event-seq { margin-left: auto; }
+.event-head > .badge { flex: 0 0 auto; }
+.event-headline { font-weight: 600; color: var(--text-strong); font-size: 13px; min-width: 0; flex: 0 1 auto; }
+/* Empuja el número de secuencia a la derecha, pero sin abrir un hueco si la línea ya envolvió. */
+.event-seq { margin-left: auto; flex: 0 0 auto; }
 .event-more { color: var(--text-faint); opacity: 0; transition: opacity 0.12s ease; }
 .event-card:hover .event-more, .event-card:focus-visible .event-more { opacity: 1; }
 .event-body {
@@ -913,12 +942,24 @@ a:hover { text-decoration: underline; }
  * Es lo que se enseña cuando el evento no se puede contar en una frase: un objeto plano se lee
  * mucho mejor como pares que como JSON, y deja de hacer falta descifrar llaves y comillas.
  */
-.facts { display: flex; flex-wrap: wrap; gap: 6px; }
+/*
+ * Un chip no puede empujar la tarjeta.
+ *
+ * Un valor largo —una lista de herramientas, un `cwd` hondo— hacía dos cosas a la vez: el chip se
+ * salía de la tarjeta y ningún hermano podía encogerse para dejarle sitio. Son los dos lados del
+ * mismo fallo: en un contenedor flex, un hijo no baja de su contenido salvo que se le diga
+ * `min-width: 0`, y sin eso `text-overflow` no llega a recortar nunca.
+ *
+ * Con esto el chip se recorta con puntos suspensivos, la fila envuelve, y el valor entero sigue
+ * disponible al pasar por encima y en el detalle en crudo.
+ */
+.facts { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .fact {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   max-width: 100%;
+  min-width: 0;
   padding: 3px 8px 3px 4px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -926,13 +967,22 @@ a:hover { text-decoration: underline; }
   font-size: 11.5px;
 }
 .fact-label {
+  flex: 0 0 auto;
   padding: 2px 7px;
   border-radius: 999px;
   background: var(--bg-elevated);
   color: var(--text-muted);
   letter-spacing: 0.01em;
 }
-.fact-value { color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fact-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(52ch, 100%);
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fact.running .fact-label { color: var(--running); }
 .fact.warn .fact-label { color: var(--warn); }
 .fact.ok .fact-label { color: var(--ok); }

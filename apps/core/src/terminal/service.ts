@@ -23,13 +23,73 @@ export interface TerminalServiceDeps {
   audit: AuditLog;
   capabilities: CapabilityCache;
   bastionHost: string;
+  /** La allowlist, para saber a quién preguntar al contar terminales. */
+  hosts?: readonly string[];
+}
+
+export interface OpenTerminalCount {
+  open: number;
+  byHost: Array<{ host: string; open: number }>;
+  at: string | null;
+  /** El dato es el último conocido y ya venció; se está refrescando por detrás. */
+  stale: boolean;
 }
 
 export class TerminalService {
   readonly #deps: TerminalServiceDeps;
+  #count: OpenTerminalCount = { open: 0, byHost: [], at: null, stale: true };
+  #counting: Promise<void> | null = null;
 
   constructor(deps: TerminalServiceDeps) {
     this.#deps = deps;
+  }
+
+  /**
+   * Cuántas terminales vivas hay, para el aviso de la navegación.
+   *
+   * Contarlas cuesta un ssh por máquina, así que nunca se hace dentro de la petición: se devuelve
+   * lo último que se supo y, si ya venció, se dispara el recuento por detrás. Una consola que se
+   * queda esperando a seis servidores para pintar un número es peor que un número de hace un
+   * minuto —y esto es un contador, no un dato con el que se decida nada—.
+   *
+   * Sólo se pregunta a los hosts que ya se sabían alcanzables y con tmux: uno caído no puede hacer
+   * que el resto de la cuenta tarde su timeout entero.
+   */
+  openCount({ ttlMs = 60_000 }: { ttlMs?: number } = {}): OpenTerminalCount {
+    const age = this.#count.at ? this.#deps.clock.nowMs() - Date.parse(this.#count.at) : Infinity;
+    if (age > ttlMs && !this.#counting) {
+      this.#counting = this.#refreshCount().finally(() => { this.#counting = null; });
+    }
+    return { ...this.#count, stale: age > ttlMs };
+  }
+
+  async #refreshCount(): Promise<void> {
+    // `detect` sirve de la caché de capacidades (diez minutos), así que esto no es una ronda de
+    // sondeos: es leer lo que ya se sabe y preguntar sólo por lo que caducó.
+    const reachable: string[] = [];
+    for (const host of this.#deps.hosts ?? []) {
+      try {
+        const known = await this.#deps.capabilities.detect(host);
+        if (known.tmux) reachable.push(host);
+      } catch {
+        // Un host inalcanzable no tiene terminales que contar.
+      }
+    }
+    const counted = await Promise.all(reachable.map(async (host) => {
+      try {
+        const sessions = await this.list(host);
+        return { host, open: sessions.filter((session) => session.kind === 'interactive').length };
+      } catch {
+        // Una máquina que no responde no cuenta terminales, pero tampoco rompe el recuento.
+        return { host, open: 0 };
+      }
+    }));
+    this.#count = {
+      open: counted.reduce((total, entry) => total + entry.open, 0),
+      byHost: counted.filter((entry) => entry.open > 0),
+      at: this.#deps.clock.nowIso(),
+      stale: false,
+    };
   }
 
   #exec(host: string, command: string, timeoutMs = 20_000) {

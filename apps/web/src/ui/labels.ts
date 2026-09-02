@@ -126,6 +126,20 @@ export const usageWindowName = (label: string): string => USAGE_WINDOW[label] ??
 export const USAGE_LOW_PERCENT = 15;
 
 /**
+ * Cómo se llama un trabajo en una lista.
+ *
+ * Por lo que se pidió, no por su identificador: `rt40nhvqeujq` no le dice nada a nadie, y una
+ * lista de doce trabajos con doce identificadores obliga a abrirlos uno a uno para saber cuál es
+ * cuál. El identificador sigue estando, debajo y en monoespaciada, que es donde hace falta cuando
+ * hay que citarlo.
+ */
+export function runTitle(run: { promptPreview?: string | null; id: string }, max = 72): string {
+  const text = (run.promptPreview ?? '').trim();
+  if (!text) return `trabajo ${run.id.slice(0, 8)}`;
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
+/**
  * Los checks de salud se identifican por una clave técnica —la que va en «copiar diagnóstico» y
  * la que se nombra al pedir ayuda—, pero al lado conviene decir qué es cada cosa.
  */

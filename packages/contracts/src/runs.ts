@@ -144,6 +144,21 @@ export const Run = Type.Object({
   errorMessage: Type.Union([Type.String(), Type.Null()]),
   resultOk: Type.Union([Type.Boolean(), Type.Null()]),
   resultSummary: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * Cuándo alguien dio este trabajo por visto.
+   *
+   * Sólo afecta a si sigue reclamando atención en la navegación: el trabajo, su estado y sus
+   * eventos no cambian. Un contador que no se puede vaciar deja de mirarse.
+   */
+  acknowledgedAt: Type.Optional(Type.Union([Iso8601, Type.Null()])),
+  /**
+   * Lo que pidió la persona, recortado.
+   *
+   * Un trabajo se reconoce por lo que se pidió, no por su identificador: `rt40nhvqeujq` no le dice
+   * nada a nadie. Va recortado y en una línea porque alimenta listas, no lectura; el prompt entero
+   * sigue sin salir del core, que es donde tiene que estar.
+   */
+  promptPreview: Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
 });
 export type Run = Static<typeof Run>;
 

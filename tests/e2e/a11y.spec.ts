@@ -220,7 +220,7 @@ test('con el teclado virtual abierto, la terminal y sus teclas siguen a la vista
  *
  * Cubre además todos los sitios donde aparece un distintivo, no sólo la cuota.
  */
-const TONES = ['ok', 'warn', 'danger', 'running', 'neutral'];
+const TONES = ['ok', 'warn', 'danger', 'running', 'neutral', 'accent'];
 
 async function badgeContrast(page: Page): Promise<Array<{ tone: string; ratio: number }>> {
   return page.evaluate((tones) => {

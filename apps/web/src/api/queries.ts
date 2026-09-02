@@ -59,6 +59,8 @@ export interface WorkspaceDetail {
   draft: Draft;
   runs: Run[];
   attachments: Attachment[];
+  /** El core está poniéndole nombre a esto ahora mismo. Ver `useWorkspace`. */
+  titlePending?: boolean;
 }
 
 const search = (query: SessionQuery): string => {
@@ -124,11 +126,21 @@ export const useWorkspaces = (): UseQueryResult<{ workspaces: Workspace[] }> => 
   staleTime: 10_000,
 });
 
+/**
+ * El detalle del workspace.
+ *
+ * Abrirlo puede disparar el nombrado automático en el core: cuando el título que traía la sesión
+ * es un hash o el preámbulo de una CLI, se sustituye por lo que la persona pidió. Eso tarda unos
+ * segundos y ocurre en el servidor, así que mientras `titlePending` esté puesto se vuelve a
+ * preguntar; en cuanto llega el nombre, se deja de preguntar. Sin esto habría que recargar para
+ * ver el título nuevo.
+ */
 export const useWorkspace = (id: string | null): UseQueryResult<WorkspaceDetail> => useQuery({
   queryKey: keys.workspace(id ?? 'none'),
   queryFn: () => get<WorkspaceDetail>(`/api/workspaces/${id as string}`),
   enabled: Boolean(id),
   staleTime: 5_000,
+  refetchInterval: (query) => (query.state.data?.titlePending ? 4_000 : false),
 });
 
 /** Cuántos mensajes finales se piden. La cabecera lo dice cuando la sesión tiene más. */

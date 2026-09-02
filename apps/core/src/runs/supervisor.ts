@@ -11,6 +11,8 @@ import type { Run, RunStatus } from '@jarvis/contracts';
 import { isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import { statusToRunStatus, type PollResult } from '@jarvis/agent-adapters';
 import type { Clock } from '../platform/clock.js';
+import type { CapabilityCache } from '@jarvis/agent-adapters';
+import { resolveSpoolRoot } from './spool.js';
 import type { RunRepository } from './repository.js';
 import type { RemoteRunner } from './remote-runner.js';
 import type { RunService } from './service.js';
@@ -24,6 +26,13 @@ export interface SupervisorDeps {
   interruptGraceMs: number;
   /** Tope de lectura para una sola línea del spool antes de darla por imposible. */
   maxLineBytes?: number;
+  /** Para barrer: los hosts que se pueden tocar, su home y la raíz configurada del spool. */
+  capabilities?: CapabilityCache;
+  hosts?: readonly string[];
+  spoolRoot?: string;
+  /** Cada cuánto se barren los spools y qué antigüedad se borra. */
+  sweepIntervalMs?: number;
+  spoolRetentionDays?: number;
   /** Cuánto se espera antes de dar por perdido un runner que no aparece por ninguna parte. */
   lostGraceMs?: number;
   onError?: (error: Error, runId: string) => void;
@@ -53,6 +62,10 @@ export class RunSupervisor {
   readonly #cancelSentAt = new Map<string, number>();
   readonly #inFlight = new Set<string>();
   #timer: NodeJS.Timeout | null = null;
+  #sweepTimer: NodeJS.Timeout | null = null;
+
+  /** Se llama cuando un barrido termina, para que Salud pueda decir cuándo fue. */
+  onSweep: ((at: string) => void) | null = null;
   #stopped = false;
 
   constructor(deps: SupervisorDeps) {
@@ -64,12 +77,64 @@ export class RunSupervisor {
     this.#stopped = false;
     await this.reconcile();
     this.#schedule();
+    /**
+     * Un barrido al arrancar, y luego cada intervalo.
+     *
+     * Sin el primero, un core recién levantado pasa horas diciendo «sin datos» en el check de
+     * limpieza —que es indistinguible de «esto no funciona»— y la salud se queda coja hasta el
+     * primer ciclo. Va sin esperar a que termine: limpiar no puede retrasar el arranque.
+     */
+    void this.sweep().catch(() => undefined);
+    this.#scheduleSweep();
   }
 
   stop(): void {
     this.#stopped = true;
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
+    if (this.#sweepTimer) clearTimeout(this.#sweepTimer);
+    this.#sweepTimer = null;
+  }
+
+  #scheduleSweep(): void {
+    if (this.#stopped || !this.#deps.capabilities || !this.#deps.hosts?.length) return;
+    const interval = this.#deps.sweepIntervalMs ?? 6 * 60 * 60 * 1000;
+    this.#sweepTimer = setTimeout(() => {
+      void this.sweep().finally(() => this.#scheduleSweep());
+    }, interval);
+    this.#sweepTimer.unref?.();
+  }
+
+  /**
+   * Barre los spools terminados de cada máquina alcanzable.
+   *
+   * Lo que queda en un host tras un trabajo son ficheros de trabajo —el wrapper, los eventos
+   * crudos, la salida—, no el registro: ese vive en la base del core. Sin barrerlos, el disco de
+   * cada servidor de la flota crece para siempre con ejecuciones de hace meses.
+   *
+   * Un host que no responde no detiene a los demás ni cancela el barrido: se anota y se sigue. El
+   * barrido cuenta como hecho si al menos una máquina se pudo limpiar, que es lo que Salud
+   * necesita saber para dejar de decir «sin datos».
+   */
+  async sweep(): Promise<{ host: string; ok: boolean; error?: string }[]> {
+    const { capabilities, hosts, spoolRoot, runner, clock } = this.#deps;
+    if (!capabilities || !hosts?.length || !spoolRoot) return [];
+    const days = this.#deps.spoolRetentionDays ?? 7;
+
+    const results = await Promise.all(hosts.map(async (host) => {
+      try {
+        const known = await capabilities.detect(host);
+        await runner.sweep({
+          host, spoolRoot: resolveSpoolRoot(spoolRoot, host, known.home), olderThanDays: days,
+        });
+        return { host, ok: true };
+      } catch (error) {
+        return { host, ok: false, error: (error as Error).message };
+      }
+    }));
+
+    if (results.some((result) => result.ok)) this.onSweep?.(clock.nowIso());
+    return results;
   }
 
   #schedule(): void {

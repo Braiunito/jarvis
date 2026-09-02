@@ -39,6 +39,25 @@ export interface RunRow {
   error_message: string | null;
   result_ok: number | null;
   result_summary: string | null;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+}
+
+/**
+ * El prompt, listo para una lista.
+ *
+ * Quita el preámbulo que añade Jarvis y el que arrastran las CLIs —el `<environment_context>` de
+ * Codex es lo primero que ve el agente y lo último que le importa a nadie—, junta los saltos de
+ * línea y recorta. Lo que queda es la frase que la persona escribió.
+ */
+export function promptPreview(prompt: string | null | undefined): string | null {
+  const text = (prompt ?? '')
+    .replace(/<environment_context>[\s\S]*?<\/environment_context>/gi, ' ')
+    .replace(/\[jarvis[^\]]*\][^\n]*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return null;
+  return text.length > 500 ? `${text.slice(0, 499)}…` : text;
 }
 
 export const toRun = (row: RunRow): Run => ({
@@ -68,6 +87,8 @@ export const toRun = (row: RunRow): Run => ({
   errorMessage: row.error_message,
   resultOk: row.result_ok === null ? null : row.result_ok === 1,
   resultSummary: row.result_summary,
+  acknowledgedAt: row.acknowledged_at ?? null,
+  promptPreview: promptPreview(row.prompt),
 });
 
 export interface NewRunRecord {
@@ -137,6 +158,24 @@ export class RunRepository {
   listRecent(limit = 50): Run[] {
     return (this.#db.prepare('SELECT * FROM runs ORDER BY created_at DESC LIMIT ?')
       .all(limit) as RunRow[]).map(toRun);
+  }
+
+  /**
+   * Dar por visto lo que pedía atención.
+   *
+   * Sin `runId` se dan por vistos todos los que reclaman ahora mismo, que es lo que hace falta
+   * cuando la lista lleva días arrastrando fallos ya resueltos.
+   */
+  acknowledge(user: string, at: string, runId?: string): number {
+    const statuses = ['failed', 'timed_out', 'waiting'];
+    const placeholders = statuses.map(() => '?').join(', ');
+    const result = runId
+      ? this.#db.prepare('UPDATE runs SET acknowledged_at = ?, acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL')
+        .run(at, user, runId)
+      : this.#db.prepare(
+        `UPDATE runs SET acknowledged_at = ?, acknowledged_by = ? WHERE acknowledged_at IS NULL AND status IN (${placeholders})`,
+      ).run(at, user, ...statuses);
+    return result.changes;
   }
 
   listByStatus(statuses: readonly RunStatus[]): Run[] {

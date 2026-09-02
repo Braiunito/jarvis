@@ -10,7 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import type {
-  AgentEvent, CreateRunRequest, PermissionProfile, Run, RunEvent, RunEventType, RunStatus,
+  AgentEvent, CreateRunRequest, PermissionProfile, Provider, Run, RunEvent, RunEventType, RunStatus,
   TargetPlan, UserIdentity, Workspace,
 } from '@jarvis/contracts';
 import { canTransition, isTerminalStatus, JarvisError, PERMISSION_PROFILES } from '@jarvis/contracts';
@@ -20,6 +20,7 @@ import {
 } from '@jarvis/agent-adapters';
 import type { Clock } from '../platform/clock.js';
 import { newRunId } from '../platform/ids.js';
+import { resolveSpoolRoot, spoolRootOf } from './spool.js';
 import type { AuditLog } from '../platform/audit.js';
 import type { WorkspaceService } from '../workspaces/use-cases.js';
 import type { RunEventBus } from './events-bus.js';
@@ -74,6 +75,17 @@ export class RunService {
    * workspace, por ejemplo—: si falla, el run ya terminó igual y nadie debería enterarse.
    */
   onRunFinished: ((run: Run, prompt: string) => void) | null = null;
+
+  /**
+   * Lo que el agente contó sobre la cuota de su cuenta mientras trabajaba.
+   *
+   * Mismo trato de gancho accesorio: llega dentro del stream de un trabajo y no puede afectarlo.
+   */
+  onQuota: ((quota: {
+    provider: Provider;
+    executionHost: string;
+    windows: Array<{ label: string; utilization: number; resetsAt?: number | null }>;
+  }) => void) | null = null;
 
   constructor(deps: RunServiceDeps) {
     this.#deps = deps;
@@ -143,22 +155,12 @@ export class RunService {
    * despliegue con la configuración por defecto no puede lanzar ni un solo trabajo.
    */
   #spoolRootFor(host: string, home: string | null | undefined): string {
-    const configured = this.#deps.limits.spoolRoot;
-    if (!/^(\$HOME|~)(\/|$)/.test(configured)) return configured;
-    if (!home) {
-      throw new JarvisError('HOST_UNREACHABLE',
-        `no se pudo averiguar el home de ${host}, y el spool está configurado como ${configured}`,
-        { scope: { host } });
-    }
-    return configured.replace(/^(\$HOME|~)/, home.replace(/\/+$/, ''));
+    return resolveSpoolRoot(this.#deps.limits.spoolRoot, host, home);
   }
 
   /** El root con el que se creó un run. Se lee del propio run, no de la configuración de hoy. */
   #spoolRootOf(run: Run): string | undefined {
-    const dir = this.#deps.repository.row(run.id)?.remote_spool_dir;
-    if (!dir) return undefined;
-    const suffix = `/${run.id}`;
-    return dir.endsWith(suffix) ? dir.slice(0, -suffix.length) : undefined;
+    return spoolRootOf(this.#deps.repository.row(run.id)?.remote_spool_dir, run.id);
   }
 
   async create(request: CreateRunRequest, user: UserIdentity, requestId: string): Promise<{ run: Run; target: TargetPlan; replayed: boolean }> {
@@ -476,6 +478,8 @@ export class RunService {
         events.push({ type: `agent.${event.type}` as RunEventType, at, payload: bounded });
         if ('sessionId' in event && event.sessionId) sessionId = event.sessionId;
         if (event.type === 'text' && event.text.trim()) lastText = event.text.slice(0, 4000);
+        // La cuota que el agente cuenta de paso: vale más que un sondeo, porque es de ahora mismo.
+        if (event.type === 'raw') this.#noteQuota(run, event.payload);
         if (event.type === 'result') {
           resultOk = event.ok;
           resultSummary = typeof event.text === 'string' && event.text.trim()
@@ -498,6 +502,36 @@ export class RunService {
     });
     this.#deps.bus.notify(runId);
     return { consumedBytes, events: events.length };
+  }
+
+  /**
+   * Traduce el aviso de límite de uso que emite el agente, si es que lo emitió.
+   *
+   * Con guardas y sin lanzar: llega dentro del stream de un trabajo, y un formato que cambie en la
+   * próxima versión del CLI no puede tumbar una ejecución.
+   */
+  #noteQuota(run: Run, payload: unknown): void {
+    if (!this.onQuota || !payload || typeof payload !== 'object') return;
+    const info = payload as { type?: string; rate_limit_info?: unknown };
+    if (info.type !== 'rate_limit_event') return;
+    const unified = (info.rate_limit_info as { unifiedWindows?: Record<string, unknown> } | undefined)?.unifiedWindows;
+    if (!unified || typeof unified !== 'object') return;
+
+    // Los nombres de las ventanas del agente se traducen a los que ya usa la consola.
+    const names: Record<string, string> = { five_hour: 'session', seven_day: 'week' };
+    const windows: Array<{ label: string; utilization: number; resetsAt?: number | null }> = [];
+    for (const [key, value] of Object.entries(unified)) {
+      const window = value as { utilization?: unknown; resetsAt?: unknown };
+      if (typeof window.utilization !== 'number') continue;
+      windows.push({
+        label: names[key] ?? key,
+        utilization: window.utilization,
+        resetsAt: typeof window.resetsAt === 'number' ? window.resetsAt : null,
+      });
+    }
+    if (windows.length) {
+      this.onQuota({ provider: run.provider, executionHost: run.executionHost, windows });
+    }
   }
 
   /** Aplica los presupuestos por evento. Nada se recorta en silencio: va marcado y con tamaño. */

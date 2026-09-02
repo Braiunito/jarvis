@@ -25,7 +25,7 @@ COPY packages/contracts packages/contracts
 COPY packages/agent-adapters packages/agent-adapters
 COPY packages/testkit packages/testkit
 COPY apps/core apps/core
-RUN npx tsc -b apps/core
+RUN npx tsc -b --force apps/core
 
 # Sólo las dependencias de producción viajan a la imagen final.
 RUN npm prune --omit=dev

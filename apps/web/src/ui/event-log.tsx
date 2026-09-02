@@ -297,7 +297,9 @@ function EventCard({ event, onOpen }: { event: RunEvent; onOpen: () => void }): 
           {rendered.facts.map((fact) => (
             <span key={fact.label} className={`fact ${fact.tone ?? ''}`}>
               <span className="fact-label">{fact.label}</span>
-              <span className={`fact-value ${fact.mono ? 'mono' : ''}`}>{fact.value}</span>
+              <span className={`fact-value ${fact.mono ? 'mono' : ''}`} title={fact.value}>
+                {fact.value}
+              </span>
             </span>
           ))}
         </span>
@@ -307,16 +309,52 @@ function EventCard({ event, onOpen }: { event: RunEvent; onOpen: () => void }): 
 }
 
 /**
+ * Lo que pidió la persona, como primera fila del hilo.
+ *
+ * Se distingue del resto por el azul —el color de «tú» en todo el producto— frente al violeta del
+ * agente, así que en un vistazo se ve quién dijo qué sin leer una sola etiqueta.
+ */
+function UserMessageRow({ text, alone }: { text: string; alone?: boolean }): JSX.Element {
+  return (
+    <div className="tl-row user">
+      <div className="tl-time" />
+      <div className="tl-rail">
+        <span className="tl-dot accent">
+          <Glyph icon={ACTION_ICON.send} size={13} />
+        </span>
+        {alone ? null : <span className="tl-line" />}
+      </div>
+      <div className="event-card user" role="note">
+        <span className="event-head">
+          <span className="badge accent">
+            <Glyph icon={ACTION_ICON.send} />
+            lo que pediste
+          </span>
+        </span>
+        <span className="event-body">{text}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * La línea de tiempo de un trabajo.
  *
  * La hora va fuera de la tarjeta, en su propia columna: al recorrerla se busca «qué pasó», no «a
  * qué hora»; la hora sirve cuando ya has encontrado el sitio.
  */
-export function EventTimeline({ events, empty, limit }: {
+export function EventTimeline({ events, empty, limit, userMessage }: {
   events: RunEvent[];
   /** Qué explicar cuando no hay nada: por qué está vacío y qué lo llenará. */
   empty?: string;
   limit?: number;
+  /**
+   * Lo que pidió la persona, al principio del hilo.
+   *
+   * Un hilo que empieza por «el agente arrancó» obliga a recordar qué se había pedido. Se enseña
+   * siempre, incluso cuando todavía no ha llegado ningún evento.
+   */
+  userMessage?: string | null;
 }): JSX.Element {
   const [open, setOpen] = useState<number | null>(null);
   const [onlyAnswers, setOnlyAnswers] = useState(false);
@@ -328,12 +366,15 @@ export function EventTimeline({ events, empty, limit }: {
 
   if (events.length === 0) {
     return (
-      <Empty
-        tight
-        icon={STATUS_ICON.activity}
-        title="Sin eventos todavía"
-        hint={empty ?? 'Cada cosa que diga el agente aparece aquí en cuanto llega, y se guarda para poder volver a leerla.'}
-      />
+      <>
+        {userMessage ? <UserMessageRow text={userMessage} alone /> : null}
+        <Empty
+          tight
+          icon={STATUS_ICON.activity}
+          title="Sin eventos todavía"
+          hint={empty ?? 'Cada cosa que diga el agente aparece aquí en cuanto llega, y se guarda para poder volver a leerla.'}
+        />
+      </>
     );
   }
 
@@ -366,6 +407,7 @@ export function EventTimeline({ events, empty, limit }: {
       ) : null}
 
       <div className="timeline">
+        {userMessage ? <UserMessageRow text={userMessage} /> : null}
         {shown.map((event, index) => {
           const visual = visualOf(event.type);
           return (

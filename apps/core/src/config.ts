@@ -52,6 +52,16 @@ export const config = {
   pollIntervalMs: Number(env['JARVIS_POLL_INTERVAL_MS'] || 700),
   pollChunkBytes: Number(env['JARVIS_POLL_CHUNK_BYTES'] || 512 * 1024),
 
+  /**
+   * Limpieza de spools en las máquinas de la flota.
+   *
+   * Lo que queda en un host tras un trabajo son ficheros de trabajo, no el registro —ese vive en
+   * la base del core—, así que se pueden borrar pasado un tiempo. Sin esto, el disco de cada
+   * servidor crece para siempre.
+   */
+  sweepIntervalMs: Number(env['JARVIS_SWEEP_INTERVAL_MS'] || 6 * 60 * 60 * 1000),
+  spoolRetentionDays: Number(env['JARVIS_SPOOL_RETENTION_DAYS'] || 7),
+
   capabilityTtlMs: Number(env['JARVIS_CAPABILITY_TTL_MS'] || 10 * 60 * 1000),
   usageTtlMs: Number(env['JARVIS_USAGE_TTL_MS'] || 5 * 60 * 1000),
   usageProbeTimeoutMs: Number(env['JARVIS_USAGE_PROBE_TIMEOUT_MS'] || 20_000),
@@ -90,6 +100,14 @@ export const config = {
   titleApiKey: env['JARVIS_TITLE_API_KEY'] || '',
   titleBaseUrl: env['JARVIS_TITLE_BASE_URL'] || 'https://api.groq.com/openai',
   titleModel: env['JARVIS_TITLE_MODEL'] || 'llama-3.1-8b-instant',
+  /*
+   * Llamadas de título por minuto en todo el proceso.
+   *
+   * Grok y Qwen en su capa gratuita tienen límites por minuto que se agotan enseguida si cada
+   * visita a un workspace dispara una llamada. Pasado el tope se nombra con el heurístico local,
+   * que da un nombre peor pero nunca un 429 ni una espera.
+   */
+  titlePerMinute: Number(env['JARVIS_TITLE_PER_MINUTE'] ?? '8') || 8,
   planIntervalMs: Number(env['JARVIS_PLAN_INTERVAL_MS'] || 1500),
 
   verbose: bool(env['JARVIS_VERBOSE'], false),

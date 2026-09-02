@@ -125,6 +125,10 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     runs, repository: runRepository, runner, clock,
     pollIntervalMs: config.pollIntervalMs,
     interruptGraceMs: config.interruptGraceMs,
+    // Para barrer hace falta saber a qué máquinas se puede llegar y dónde tienen su spool.
+    capabilities, hosts: config.hosts, spoolRoot: config.spoolRoot,
+    sweepIntervalMs: config.sweepIntervalMs,
+    spoolRetentionDays: config.spoolRetentionDays,
     ...(options.onSupervisorError ? { onError: options.onSupervisorError } : {}),
   });
 
@@ -148,7 +152,21 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const usage = new UsageService({ db, clock, sshConfig, ttlMs: config.usageTtlMs, probeTimeoutMs: config.usageProbeTimeoutMs });
   const metrics = new MetricsService({ db, clock });
   const health = new HealthService({ db, clock, fleet, index, runs: runRepository, version: VERSION });
-  const terminal = new TerminalService({ sshConfig, clock, audit, capabilities, bastionHost: config.bastionHost });
+  /**
+   * El barrido de spools le cuenta a Salud cuándo ocurrió.
+   *
+   * Se engancha aquí y no en el constructor del supervisor porque Salud se construye después; el
+   * check `runnerSweep` existía desde el principio pero nadie lo alimentaba, y por eso la pantalla
+   * decía «sin datos» para siempre.
+   */
+  supervisor.onSweep = (at) => health.noteSweep(at);
+
+  // El contador de terminales vive en el servicio que sabe hablar con tmux; las métricas sólo lo
+  // enseñan, y por eso es un gancho y no una dependencia: una consulta de panel no abre conexiones.
+  metrics.terminals = () => terminal.openCount();
+  const terminal = new TerminalService({
+    sshConfig, clock, audit, capabilities, bastionHost: config.bastionHost, hosts: config.hosts,
+  });
   const plans = new PlanService({
     db, clock, runs, workspaces, sessions, health, model, audit,
     maxToolCalls: config.assistantMaxToolCalls,
@@ -156,6 +174,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
   const imports = new ImportService({ db, clock, workspaces: workspaceRepository, audit, bastionHost: config.bastionHost });
   const titles = new TitleService({
+    perMinute: config.titlePerMinute,
     db,
     clock,
     model: config.titleApiKey
@@ -164,6 +183,19 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
       })
       : null,
   });
+  /**
+   * La cuota se aprende del propio trabajo: cada ejecución de Claude cuenta cuánto le queda a la
+   * cuenta, y eso es más fresco —y mucho más barato— que el sondeo que abre un TTY y raspa una
+   * pantalla, que además depende de la versión del CLI que haya en cada máquina.
+   */
+  runs.onQuota = (quota) => {
+    try {
+      usage.recordFromAgent(quota);
+    } catch {
+      // Un extra que llega dentro del stream de un run no puede estropear el run.
+    }
+  };
+
   // Nombrar el workspace es consecuencia de que un trabajo termine, así que se engancha ahí y no
   // en la ruta: da igual si el run lo lanzó una persona o el Assistant.
   runs.onRunFinished = (run, prompt) => {

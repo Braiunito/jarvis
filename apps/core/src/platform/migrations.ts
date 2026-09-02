@@ -301,4 +301,29 @@ export const MIGRATIONS: Migration[] = [
       CREATE UNIQUE INDEX plan_steps_plan_ordinal ON plan_steps (plan_id, ordinal);
     `,
   },
+  {
+    version: 7,
+    name: 'workspace_titled_at',
+    sql: `
+      -- Cuándo se puso el título. Es lo que sostiene la ventana de frescura: sin esta marca, entrar
+      -- dos veces seguidas en un workspace costaba dos llamadas al modelo y podía cambiarle el
+      -- nombre a alguien mientras lo estaba mirando.
+      ALTER TABLE workspaces ADD COLUMN titled_at TEXT;
+    `,
+  },
+  {
+    version: 8,
+    name: 'run_acknowledged',
+    sql: `
+      -- Cuándo alguien dio por visto un trabajo que pedía atención.
+      --
+      -- «Requieren atención» contaba todo lo que había fallado alguna vez, así que el aviso de la
+      -- navegación no bajaba nunca: un fallo de hace tres días seguía pidiendo lo mismo que uno de
+      -- hace un minuto. Un contador que no se puede vaciar deja de mirarse, y entonces no avisa de
+      -- nada. Esto no borra nada: el trabajo y sus eventos siguen enteros, sólo deja de reclamar.
+      ALTER TABLE runs ADD COLUMN acknowledged_at TEXT;
+      ALTER TABLE runs ADD COLUMN acknowledged_by TEXT;
+      CREATE INDEX idx_runs_attention ON runs (status, acknowledged_at);
+    `,
+  },
 ];

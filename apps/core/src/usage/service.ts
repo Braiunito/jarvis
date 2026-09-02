@@ -239,13 +239,23 @@ export class UsageService {
 
     let account: ProbeResult['account'] = null;
     try {
-      const parsed = JSON.parse(auth.stdout.trim()) as Record<string, string>;
+      const parsed = JSON.parse(auth.stdout.trim()) as Record<string, unknown>;
+      /**
+       * `loggedIn: false` no es una cuenta sin cuota: es una máquina donde nadie ha entrado. Sin
+       * esto la consola enseñaba «cuenta · sin cuota leída», que suena a fallo del panel cuando lo
+       * que hay que hacer es un login —y es además la causa de que los trabajos allí fallen con
+       * «OAuth session expired»—.
+       */
+      if (parsed['loggedIn'] === false) {
+        throw new Error(`Claude no ha iniciado sesión en ${host}: ejecuta \`claude auth login\` allí`);
+      }
       account = {
-        email: parsed['email'] ?? null,
-        plan: parsed['subscriptionType'] ?? null,
-        authMethod: parsed['authMethod'] ?? parsed['apiProvider'] ?? null,
+        email: (parsed['email'] as string) ?? null,
+        plan: (parsed['subscriptionType'] as string) ?? null,
+        authMethod: (parsed['authMethod'] as string) ?? (parsed['apiProvider'] as string) ?? null,
       };
-    } catch {
+    } catch (error) {
+      if ((error as Error).message.includes('claude auth login')) throw error;
       if (auth.code !== 0) throw new Error('Claude authentication status is unavailable');
     }
 
@@ -260,6 +270,40 @@ export class UsageService {
       throw new Error('Claude did not return account or usage data on this host');
     }
     return { account, limits };
+  }
+
+  /**
+   * La cuota que el propio agente regala mientras trabaja.
+   *
+   * Claude Code emite un `rate_limit_event` en cada ejecución con la utilización de sus dos
+   * ventanas. Es exactamente lo que el sondeo averigua abriendo un TTY doce segundos y raspando
+   * una pantalla —y a diferencia de aquél, no depende de la versión del CLI ni de que la pantalla
+   * se dibuje a tiempo—. Si el agente lo dice, se cree: es más fresco que cualquier snapshot.
+   *
+   * La cuenta no viene en el evento, así que se conserva la última conocida en vez de borrarla.
+   */
+  recordFromAgent({ provider, executionHost, windows }: {
+    provider: Provider;
+    executionHost: string;
+    windows: Array<{ label: string; utilization: number; resetsAt?: number | null }>;
+  }): void {
+    if (!windows.length) return;
+    const previous = this.#read(provider, executionHost);
+    const limits = windows.map((window) => limit(
+      window.label,
+      Math.round(window.utilization * 100),
+      window.label === 'session' ? 300 : window.label === 'week' ? 10_080 : null,
+      window.resetsAt ?? null,
+    ));
+    this.#write({
+      provider,
+      executionHost,
+      account: previous?.account ?? null,
+      limits,
+      fetchedAt: this.#deps.clock.nowIso(),
+      stale: false,
+      refreshError: null,
+    });
   }
 
   /** Lo último que se sabe, sin sondear. Sirve para pintar Health sin gastar una CLI. */

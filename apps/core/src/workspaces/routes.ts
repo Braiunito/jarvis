@@ -1,7 +1,39 @@
 import type { FastifyInstance } from 'fastify';
-import { JarvisError, type OpenWorkspaceRequest, type PutDraftRequest } from '@jarvis/contracts';
+import {
+  JarvisError, type OpenWorkspaceRequest, type PutDraftRequest, type Workspace,
+} from '@jarvis/contracts';
 import { identityOf } from '../app.js';
 import type { CoreServices } from '../services.js';
+
+/**
+ * Nombrar el workspace mientras la persona lo abre.
+ *
+ * Va en segundo plano a propósito: la pantalla no puede esperar a un modelo para pintarse, y el
+ * nombre no es información crítica. La respuesta dice `titlePending` para que la interfaz vuelva a
+ * preguntar en unos segundos en vez de quedarse con el hash.
+ *
+ * El material sale del transcript de la sesión —lo que la persona escribió en la máquina, con CLI
+ * o sin ella— y, si el índice no responde, de los prompts de los trabajos lanzados desde aquí.
+ */
+async function nameInBackground(services: CoreServices, workspace: Workspace): Promise<void> {
+  const runs = services.runs.listByWorkspace(workspace.id, 20);
+  let userMessages: string[] = [];
+  try {
+    const transcript = await services.sessions.transcript(workspace.ref, { last: 20 });
+    userMessages = transcript.messages
+      .filter((message) => message.role === 'user')
+      .map((message) => message.text);
+  } catch {
+    // El índice puede estar caído: se nombra con lo que haya en casa antes que no nombrar.
+  }
+  if (userMessages.length === 0) {
+    userMessages = [...runs].reverse()
+      .map((run) => run.promptPreview ?? '')
+      .filter(Boolean);
+  }
+  const lastResult = runs.find((run) => run.resultSummary)?.resultSummary ?? null;
+  await services.titles.nameOnOpen(workspace.id, { userMessages, lastResult });
+}
 
 export function registerWorkspaceRoutes(app: FastifyInstance, services: CoreServices): void {
   /**
@@ -25,11 +57,20 @@ export function registerWorkspaceRoutes(app: FastifyInstance, services: CoreServ
   app.get('/api/workspaces/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     const workspace = services.workspaces.require(id);
+
+    // Entrar en un workspace es el momento de arreglarle el nombre si lo tiene mal: es cuando hay
+    // más contexto y cuando alguien lo está mirando. Ni bloquea la respuesta ni se repite.
+    const titlePending = services.titles.needsTitle(id);
+    if (titlePending) {
+      void nameInBackground(services, workspace).catch(() => undefined);
+    }
+
     return reply.send({
       workspace,
       draft: services.workspaces.draft(id, identityOf(request)),
       runs: services.runs.listByWorkspace(id, 20),
       attachments: services.attachments.listForWorkspace(id),
+      titlePending,
     });
   });
 

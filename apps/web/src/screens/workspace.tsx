@@ -24,7 +24,7 @@ import {
 } from '../ui/bits.jsx';
 import { useAnnounceOnChange } from '../ui/announce.jsx';
 import { AssistantPanel } from '../ui/assistant.jsx';
-import { PERMISSION, PROVENANCE, RUN_STATUS } from '../ui/labels.js';
+import { PERMISSION, PROVENANCE, RUN_STATUS, runTitle } from '../ui/labels.js';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVENANCE_ICON, PROVIDER_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
@@ -343,6 +343,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   </div>
                   <EventTimeline
                     events={events}
+                    userMessage={activeRun.promptPreview}
                     empty="El trabajo ya está lanzado; en cuanto el agente diga algo aparece aquí, y se queda guardado."
                   />
                 </>
@@ -554,10 +555,14 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
               {runs.map((run) => (
                 <button key={run.id} type="button" className="list-item"
                   aria-current={activeRun?.id === run.id}
+                  title={run.promptPreview ?? undefined}
                   onClick={() => { setPinnedRunId(run.id); setTab('actividad'); }}>
                   <span className="row tight nowrap" style={{ minWidth: 0 }}>
                     <RunStatusBadge status={run.status} />
-                    <span className="small muted mono truncate">{run.id.slice(0, 8)}</span>
+                    <span className="cell-main">
+                      <span className="title truncate">{runTitle(run)}</span>
+                      <span className="tiny faint mono truncate">{run.id.slice(0, 8)}</span>
+                    </span>
                   </span>
                   <span className="row tight nowrap">
                     <span className={`badge ${PERMISSION[run.permissionProfile].tone}`}>

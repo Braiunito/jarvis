@@ -2,7 +2,12 @@
 #
 # La regla que ordena este fichero es el límite de privilegio (ADR-001): el gateway es lo que se
 # expone y no tiene clave SSH; el core tiene la clave y no publica puerto.
-name: jarvis
+# El nombre del proyecto es `jarvis-next` y no `jarvis` por una razón operativa concreta: el stack
+# anterior declara `jarvis`, con servicios que se llaman igual (gateway, core, aisessions). Con el
+# mismo nombre, un `docker compose up` lanzado desde el árbol viejo —o el `jarvis.service` que
+# quedara habilitado apuntando allí— recrea estos contenedores con las imágenes de antes, encima
+# de los de ahora, sin avisar. Dos árboles no pueden compartir identidad.
+name: jarvis-next
 
 services:
   caddy:
@@ -69,7 +74,14 @@ services:
       JARVIS_BASTION_HOST: ${JARVIS_BASTION_HOST:-bastion}
       JARVIS_INDEX_URL: http://aisessions:8765
       JARVIS_INDEX_TOKEN: ${JARVIS_INDEX_TOKEN:-}
-      JARVIS_SPOOL_ROOT: ${JARVIS_SPOOL_ROOT:-/var/lib/jarvis-spool/runs}
+      # El spool vive en la máquina que ejecuta, no en este contenedor: por eso va bajo el home
+      # del usuario remoto y no en una ruta del sistema que sólo root podría crear. El core lo
+      # resuelve con el home real de cada host.
+      #
+      # Se escribe con `~` y no con `$HOME` a propósito: Compose interpola `$HOME` con el entorno
+      # de la máquina donde se lanza, así que el contenedor recibiría el home del bastión y todos
+      # los hosts intentarían escribir en `/home/zeus`. La tilde no la expande nadie por el camino.
+      JARVIS_SPOOL_ROOT: ${JARVIS_SPOOL_ROOT:-~/.local/state/jarvis/runs}
       JARVIS_ATTACHMENT_ROOT: ${JARVIS_ATTACHMENT_ROOT:-/tmp/jarvis-attachments}
       JARVIS_INTERNAL_SECRET: ${JARVIS_INTERNAL_SECRET:?define JARVIS_INTERNAL_SECRET en .env}
       JARVIS_ALLOW_YOLO: ${JARVIS_ALLOW_YOLO:-false}
@@ -79,30 +91,52 @@ services:
     volumes:
       - jarvis-core-data:/var/lib/jarvis-core
       # La clave de la flota, de sólo lectura y sólo aquí.
-      - ${JARVIS_SSH_DIR:-./secrets/ssh}:/home/node/.ssh:ro
+      - ${JARVIS_SSH_DIR:-../secrets/ssh}:/home/node/.ssh:ro
     depends_on:
       aisessions:
         condition: service_started
 
   # El índice histórico: sólo lectura y reconstruible. Se reutiliza tal cual del repo aiSessions.
   aisessions:
-    image: ${JARVIS_AISESSIONS_IMAGE:-aisessions:latest}
+    build:
+      context: ${JARVIS_AISESSIONS_REPO:-../../aisessions}
+      dockerfile: ${JARVIS_AISESSIONS_DOCKERFILE:-../jarvis/deploy/Dockerfile.aisessions}
+      args:
+        JARVIS_UID: ${JARVIS_UID:-1000}
+        JARVIS_GID: ${JARVIS_GID:-1000}
+    image: ${JARVIS_AISESSIONS_IMAGE:-jarvis-aisessions:${JARVIS_VERSION:-dev}}
     restart: unless-stopped
-    command: ["serve", "--bind", "0.0.0.0", "--port", "8765"]
+    # `serve` es la API JSON de sólo lectura que consume el core. La imagen trae por defecto el
+    # servidor MCP, que es otra cosa y va en otro puerto.
+    # `--allow-remote-export` deja leer la conversación de una sesión que vive en otra máquina.
+    # Sigue siendo sólo lectura —trae el fichero por ssh, no ejecuta nada— y aquí es lo correcto:
+    # este índice ya tiene la clave de la flota montada y ya sincroniza por ssh. Sin esto, abrir
+    # una sesión de goro2 o de vultr enseña el destino pero no lo que se dijo.
+    command: ["aisessions", "serve", "--bind", "0.0.0.0", "--port", "8765", "--allow-remote-export"]
+    # El healthcheck de la imagen vigila el puerto del MCP; aquí no sirve.
+    healthcheck:
+      disable: true
     expose:
       - "8765"
     volumes:
       - aisessions-data:/var/lib/aisessions
-      - ${JARVIS_SSH_DIR:-./secrets/ssh}:/home/app/.ssh:ro
+      - ${JARVIS_SSH_DIR:-../secrets/ssh}:${JARVIS_AISESSIONS_SSH_DIR:-/home/jarvis/.ssh}:ro
 
   # La sincronización con los hosts remotos, aparte del servidor que sirve las consultas.
   aisessions-sync:
-    image: ${JARVIS_AISESSIONS_IMAGE:-aisessions:latest}
+    image: ${JARVIS_AISESSIONS_IMAGE:-jarvis-aisessions:${JARVIS_VERSION:-dev}}
     restart: unless-stopped
-    command: ["sync-loop", "--interval", "${JARVIS_SYNC_INTERVAL:-300}"]
+    command: ["/bin/sh", "/usr/local/lib/jarvis/aisessions-sync.sh"]
+    healthcheck:
+      disable: true
+    environment:
+      JARVIS_HOSTS: ${JARVIS_HOSTS:?define la allowlist de hosts en .env}
+      JARVIS_SYNC_INTERVAL: ${JARVIS_SYNC_INTERVAL:-300}
+      JARVIS_SYNC_HOST_TIMEOUT: ${JARVIS_SYNC_HOST_TIMEOUT:-240}
     volumes:
       - aisessions-data:/var/lib/aisessions
-      - ${JARVIS_SSH_DIR:-./secrets/ssh}:/home/app/.ssh:ro
+      - ${JARVIS_SSH_DIR:-../secrets/ssh}:${JARVIS_AISESSIONS_SSH_DIR:-/home/jarvis/.ssh}:ro
+      - ./aisessions-sync.sh:/usr/local/lib/jarvis/aisessions-sync.sh:ro
     depends_on:
       aisessions:
         condition: service_started

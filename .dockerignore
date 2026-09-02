@@ -1,0 +1,35 @@
+# Lo que NUNCA debe entrar en el contexto de construcción.
+#
+# No es sólo peso: `*.tsbuildinfo` es lo que hizo fallar el primer despliegue de verdad. Viaja
+# fuera de `dist/`, así que dentro del contenedor `tsc -b` lo lee, cree que los paquetes ya están
+# compilados y no genera los tipos; el build del front se cae con «Cannot find module
+# @jarvis/contracts» y el error no señala a la causa por ningún lado.
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Historia, estado de pruebas y datos: nada de esto se construye.
+.git
+.github
+.dev
+.e2e
+test-results
+playwright-report
+coverage
+evidence
+sketch
+docs
+
+# Secretos y bases: si algo de esto llega a una imagen, ya no se saca.
+.env
+.env.*
+!.env.example
+secrets
+deploy/data
+deploy/secrets
+*.db
+*.db-wal
+*.db-shm

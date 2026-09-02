@@ -47,6 +47,27 @@ export function registerRunRoutes(app: FastifyInstance, services: CoreServices):
     return reply.send({ run: await services.runs.cancel(id, identityOf(request), String(request.id)) });
   });
 
+  /**
+   * Dar por visto lo que pedía atención.
+   *
+   * No cambia el trabajo ni su estado: sólo deja de reclamar en la navegación. Sin `:id` se dan
+   * por vistos todos los que reclaman, que es lo que hace falta cuando la lista arrastra fallos de
+   * hace días ya resueltos.
+   */
+  app.post('/api/runs/ack', async (request, reply) => {
+    const user = identityOf(request);
+    const changed = services.runRepository.acknowledge(user.username, services.clock.nowIso());
+    return reply.send({ acknowledged: changed });
+  });
+
+  app.post('/api/runs/:id/ack', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const user = identityOf(request);
+    services.runs.require(id);
+    const changed = services.runRepository.acknowledge(user.username, services.clock.nowIso(), id);
+    return reply.send({ acknowledged: changed, run: services.runs.require(id) });
+  });
+
   /** Reintentar crea otro run enlazado al anterior: el original no se rebobina jamás. */
   app.post('/api/runs/:id/retry', async (request, reply) => {
     const { id } = request.params as { id: string };

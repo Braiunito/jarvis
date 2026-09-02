@@ -11,7 +11,9 @@ services:
 
   gateway:
     ports:
-      - "${JARVIS_LAN_BIND:-127.0.0.1}:8080:8080"
+      # El puerto del host es configurable para poder levantar el stack nuevo al lado del
+      # anterior durante un corte, sin que uno le quite el sitio al otro.
+      - "${JARVIS_LAN_BIND:-127.0.0.1}:${JARVIS_LAN_PORT:-8080}:8080"
     environment:
       # Sin Caddi delante, X-Forwarded-For es lo que quiera mandar quien llame.
       JARVIS_TRUST_PROXY: "false"

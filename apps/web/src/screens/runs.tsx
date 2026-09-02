@@ -15,7 +15,7 @@ import { useCancelRun, useMetrics, useRetryRun, useRun, useRuns } from '../api/q
 import { useRunStream } from '../api/run-stream.js';
 import { Empty, ErrorNote, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
 import { Sparkbars } from '../ui/charts.jsx';
-import { PERMISSION, RUN_STATUS } from '../ui/labels.js';
+import { PERMISSION, RUN_STATUS, runTitle } from '../ui/labels.js';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
@@ -163,8 +163,13 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                             <Glyph icon={PROVIDER_ICON[item.provider] ?? NAV_ICON.runs} size={15} />
                           </span>
                           <span className="cell-main">
-                            <RunStatusBadge status={item.status} />
-                            <span className="tiny faint mono truncate">{item.id.slice(0, 12)}</span>
+                            <span className="title truncate" title={item.promptPreview ?? undefined}>
+                              {runTitle(item)}
+                            </span>
+                            <span className="row tight nowrap">
+                              <RunStatusBadge status={item.status} />
+                              <span className="tiny faint mono truncate">{item.id.slice(0, 10)}</span>
+                            </span>
                           </span>
                         </div>
                       </td>
@@ -201,9 +206,14 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
             </p>
           ) : (
             <div className="stack">
-              <div className="row">
-                <RunStatusBadge status={run.status} />
-                <span className="tiny faint mono truncate">{run.id}</span>
+              <div className="stack" style={{ gap: 6 }}>
+                <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-strong)' }}>
+                  {runTitle(run, 140)}
+                </p>
+                <div className="row">
+                  <RunStatusBadge status={run.status} />
+                  <span className="tiny faint mono truncate">{run.id}</span>
+                </div>
               </div>
               <p className="tiny faint" style={{ margin: 0 }}>{RUN_STATUS[run.status].help}</p>
 
@@ -255,7 +265,7 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                 <p className="small muted" style={{ margin: '0 0 8px' }}>
                   Eventos {stream.connected ? '· en directo' : stream.ended ? '· cerrado' : '· reconectando…'}
                 </p>
-                <EventTimeline events={stream.events} limit={40}
+                <EventTimeline events={stream.events} limit={40} userMessage={run.promptPreview}
                   empty="Este trabajo no llegó a dejar ningún evento. Si terminó mal, el detalle está en su código de error." />
               </div>
             </div>

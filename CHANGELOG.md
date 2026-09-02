@@ -55,6 +55,16 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cerrar una terminal desde la interfaz**: junto a «Reconectar», y en cada fila de la lista de
   sesiones. Destruir sigue siendo explícito —salir de la pantalla no mata nada— así que lo pide
   con un diálogo que nombra la sesión y la máquina antes de tocarlas.
+- **Los workspaces se llaman por lo que se pidió** (UX-10): al entrar en uno cuyo nombre no sirve
+  —`Claude a758cca7`, el `<environment_context>` que arrastra Codex, un hash, un vacío— se sustituye
+  por lo que la persona pidió, en segundo plano y sin que la pantalla espere. Lo que escribe una
+  persona gana siempre y no se vuelve a tocar, un título recién puesto no se regenera, y si el
+  modelo no está o se agotó su cuota el nombre sale igual del propio mensaje.
+- **Los trabajos también**: en «Trabajos de este workspace» y en Trabajo, cada fila se titula con
+  el mensaje que se envió en vez de con su identificador, que sigue debajo para cuando hay que
+  citarlo.
+- **El hilo de Actividad empieza por lo que pediste**, en azul frente al violeta del agente, así
+  que se lee la respuesta sin tener que recordar la pregunta.
 - **Dónde contestó la IA se ve sin buscarlo** (UX-09): en un trabajo largo, lo que dijo el agente
   son dos líneas entre treinta de fontanería. Ahora la respuesta se pinta con tipografía de
   lectura, banda violeta y aire alrededor, y la línea de tiempo ofrece «Sólo respuestas» para
@@ -100,6 +110,9 @@ Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer
 - lo que contestaba una persona a una pregunta del Assistant no llegaba al modelo: el plan
   continuaba, pero sin haber leído la respuesta. Ahora viaja en el contexto del paso siguiente y
   queda en el historial del plan;
+- un chip con un valor largo —una lista de herramientas, un `cwd` hondo— se salía de su tarjeta y
+  además impedía que los de al lado se encogieran: en un contenedor flex nada baja de su contenido
+  sin `min-width: 0`, y sin eso el recorte con puntos suspensivos no llega a aplicarse nunca;
 - en el teléfono, los botones que sólo enseñan icono se quedaban sin nombre para un lector de
   pantalla: «Salir» era «botón». El texto se escondía de la vista y del árbol accesible a la vez;
 - los distintivos de estado perdían contraste según lo que tuvieran detrás —dentro de una fila

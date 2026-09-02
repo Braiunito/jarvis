@@ -1,0 +1,61 @@
+# Levanta el stack de Jarvis cuando arranca la máquina.
+#
+# `restart: unless-stopped` ya revive los contenedores que existen, así que un reinicio normal no
+# necesita nada más. Lo que no puede hacer es recrear los que ya no están: `bin/jarvis down` los
+# borra, y después de eso un reinicio deja el bastión sin consola y sin índice, sin nada que
+# explique por qué —para Docker no hay nada que reiniciar—.
+#
+# Ese hueco es el que cierra esto. Y de paso hace que el stack responda a los mismos comandos que
+# el resto de la máquina: `systemctl status jarvis`, y sus registros en el journal con los demás.
+#
+# Instalación (una vez, como root):
+#   cp deploy/jarvis.service /etc/systemd/system/jarvis.service
+#   systemctl daemon-reload && systemctl enable --now jarvis
+#
+# Ajusta User y WorkingDirectory si el checkout no vive en /home/zeus/jarvis/jarvis-next.
+
+# IMPORTANTE al sustituir un despliegue anterior: desactiva antes su unidad. Si dos unidades
+# apuntan a dos árboles distintos, gana la que arranque primero y el resultado depende del orden
+# de arranque, que es la peor clase de fallo intermitente.
+#
+#   sudo systemctl disable jarvis      # la del stack anterior. SIN `--now`.
+#
+# El `--now` de más tumba la VPN y con ella el acceso remoto a la máquina. El motivo: el `ExecStop`
+# de esa unidad es `docker compose stop` en su directorio, y allí `COMPOSE_FILE` encadena el
+# override de la VPN, así que `tailscaled` entra en el alcance de ese `stop`. Comprobarlo antes de
+# ejecutar nada es un `docker compose config --services` en el directorio de la unidad.
+#
+# `disable` a secas basta: la unidad es `oneshot` con `RemainAfterExit=yes`, ya se ejecutó y queda
+# `active (exited)` sin hacer nada más; lo que importa es que no vuelva a arrancar. Y `tailscaled`
+# tiene `restart: unless-stopped`, así que vuelve solo tras un reinicio.
+#
+# Si alguna vez hay que parar de verdad los servicios del stack anterior, es por nombre
+# —`docker stop jarvis-gateway-1`—, nunca con un `compose stop` desde aquel directorio.
+#
+[Unit]
+Description=Jarvis (consola, core, índice de sesiones)
+# Requires, no Wants: sin Docker no hay nada que arrancar, y fallar en voz alta es mejor que una
+# unidad que dice que todo fue bien mientras el stack no existe.
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=zeus
+Group=zeus
+WorkingDirectory=/home/zeus/jarvis/jarvis-next
+# La superposición de red local, mientras no haya certificado. Quítalo cuando entre Caddy con TLS.
+Environment=JARVIS_MODE=lan
+
+# `up` es idempotente: lo que ya está corriendo se queda como está, así que da igual si esto se
+# ejecuta tras un arranque limpio, tras un `jarvis down` o a mano.
+ExecStart=/home/zeus/jarvis/jarvis-next/bin/jarvis up
+ExecStop=/home/zeus/jarvis/jarvis-next/bin/jarvis down
+
+# Construir y bajar imágenes puede tardar en un arranque frío; los 90s por defecto no bastan.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

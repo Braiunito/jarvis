@@ -77,7 +77,21 @@ export class SessionService {
       };
     } catch (error) {
       if (error instanceof JarvisError) throw error;
-      throw new JarvisError('INDEX_UNAVAILABLE', `could not read the transcript: ${(error as Error).message}`);
+      const message = (error as Error).message;
+      /**
+       * El índice sirve transcripts de su propia máquina y rechaza los de las demás con un 501.
+       * Es una decisión suya —exportar una sesión remota implica que el servidor abra un ssh— y no
+       * un fallo pasajero, así que repetirlo no arregla nada: lo que hace falta es decir por qué
+       * esta conversación no se ve y qué sigue funcionando sin ella.
+       */
+      if (/\b501\b/.test(message)) {
+        throw new JarvisError('INDEX_UNAVAILABLE',
+          `el índice no sirve conversaciones de otras máquinas (${ref.host}), sólo las del bastión. `
+          + 'El trabajo que Jarvis lance sobre esta sesión se ve igual; lo anterior se lee entrando '
+          + 'por la terminal o con `aisessions export` en el bastión.',
+          { retryable: false, scope: { host: ref.host } });
+      }
+      throw new JarvisError('INDEX_UNAVAILABLE', `could not read the transcript: ${message}`);
     }
   }
 

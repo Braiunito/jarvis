@@ -5,7 +5,8 @@
  * fixtures; aquí sólo se ejecuta y se traducen los fallos a errores con código.
  */
 import {
-  buildCancelCommand, buildPollCommand, buildPrepareCommand, parsePollOutput, parsePrepareOutput,
+  buildCancelCommand, buildPollCommand, buildPrepareCommand, buildSweepCommand,
+  parsePollOutput, parsePrepareOutput,
   spoolLayout, sshExec, SshError, sshFailureReason, type PollResult, type PrepareOutcome,
   type RunnerMeta, type SpoolLayout, type SshConfig,
 } from '@jarvis/agent-adapters';
@@ -85,6 +86,24 @@ export class RemoteRunner {
       throw new JarvisError('HOST_UNREACHABLE', `could not read the run spool on ${host}: ${sshFailureReason(result)}`, { scope: { host } });
     }
     return parsePollOutput(result.stdout);
+  }
+
+  /**
+   * Borra del host los spools de trabajos ya terminados que superen el corte.
+   *
+   * Un spool no es un registro: el registro está en la base del core. Lo que queda en la máquina
+   * son los ficheros de trabajo —wrapper, eventos crudos, salida— y sin barrerlos el disco del
+   * host crece para siempre con ejecuciones de hace meses. Los que siguen vivos no se tocan: el
+   * comando comprueba el estado antes de borrar.
+   */
+  async sweep({ host, spoolRoot, olderThanDays }: {
+    host: string; spoolRoot: string; olderThanDays: number;
+  }): Promise<void> {
+    const result = await this.#exec(host, buildSweepCommand(spoolRoot, olderThanDays), 60_000);
+    if (result.code !== 0) {
+      throw new JarvisError('HOST_UNREACHABLE',
+        `could not sweep the spool on ${host}: ${sshFailureReason(result)}`, { scope: { host } });
+    }
   }
 
   async cancel({ host, runId, escalate = false, spoolRoot }: {

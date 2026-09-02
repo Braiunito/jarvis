@@ -35,6 +35,8 @@ export interface MetricsSnapshot {
   };
   workspaces: { total: number; openedInWindow: number };
   plans: { active: number; waitingApproval: number };
+  /** Terminales vivas, para el aviso de la navegación. Es lo último conocido, no una sonda. */
+  terminals: { open: number; byHost: Array<{ host: string; open: number }>; at: string | null; stale: boolean };
 }
 
 const ACTIVE_STATUSES = ['queued', 'preparing', 'running', 'waiting', 'cancelling'];
@@ -43,6 +45,9 @@ const ATTENTION_STATUSES = ['failed', 'timed_out', 'waiting'];
 export class MetricsService {
   readonly #db: Db;
   readonly #clock: Clock;
+
+  /** De dónde sale el número de terminales. Es un gancho: las métricas no abren conexiones. */
+  terminals: (() => { open: number; byHost: Array<{ host: string; open: number }>; at: string | null; stale: boolean }) | null = null;
 
   constructor({ db, clock }: { db: Db; clock: Clock }) {
     this.#db = db;
@@ -97,9 +102,10 @@ export class MetricsService {
           `SELECT COUNT(*) AS n FROM runs WHERE status IN (${ACTIVE_STATUSES.map(() => '?').join(',')})`,
           ...ACTIVE_STATUSES,
         ),
+        // Lo que todavía pide algo: un trabajo dado por visto deja de contar, aunque siga fallido.
         needsAttention: count(
           `SELECT COUNT(*) AS n FROM runs WHERE status IN (${ATTENTION_STATUSES.map(() => '?').join(',')})`
-          + ' AND created_at >= ?',
+          + ' AND created_at >= ? AND acknowledged_at IS NULL',
           ...ATTENTION_STATUSES, previousFrom,
         ),
         byProvider: byProviderRows.map((row) => ({
@@ -116,6 +122,7 @@ export class MetricsService {
         total: count('SELECT COUNT(*) AS n FROM workspaces'),
         openedInWindow: count('SELECT COUNT(*) AS n FROM workspaces WHERE last_opened_at >= ?', from),
       },
+      terminals: this.terminals?.() ?? { open: 0, byHost: [], at: null, stale: true },
       plans: {
         active: count("SELECT COUNT(*) AS n FROM plans WHERE status NOT IN ('completed','failed','cancelled')"),
         waitingApproval: count("SELECT COUNT(*) AS n FROM approvals WHERE status = 'pending'"),

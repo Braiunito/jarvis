@@ -9,7 +9,7 @@ import { FakeSessionIndex } from '@jarvis/testkit';
 import { openDatabase } from '../src/platform/db.js';
 import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
-import { titleFromPrompt, type TitleModel } from '../src/workspaces/title.js';
+import { looksAutomatic, TitleService, titleFromPrompt, type TitleModel } from '../src/workspaces/title.js';
 
 const user = { userId: 'u1', username: 'braian' };
 
@@ -111,5 +111,129 @@ describe('título automático', () => {
     expect(await fallback.nameFromRun(another.id, { prompt: 'arregla el deploy roto', resultSummary: null }))
       .toBe('arregla el deploy roto');
     withModel.close();
+  });
+});
+
+/**
+ * Los títulos que ponen las CLIs.
+ *
+ * Cada agente nombra sus sesiones a su manera y ninguna sirve para reconocer un trabajo en una
+ * lista: Claude pone su nombre y un hash, Codex arrastra el preámbulo entero del entorno. Estos
+ * casos son literales de sesiones reales, no inventados.
+ */
+describe('qué título no sirve', () => {
+  const codex = '<environment_context> <cwd>/home/zeus</cwd> <shell>zsh</shell> '
+    + '<current_date>2026-08-27</current_date> <timezone>America/Argentina/Buenos_Aires</timezone>';
+
+  it('reconoce lo que hay que sustituir', () => {
+    expect(looksAutomatic('Claude a758cca7')).toBe(true);
+    expect(looksAutomatic('Codex 9f2b1c3d4e5f')).toBe(true);
+    expect(looksAutomatic(codex)).toBe(true);
+    expect(looksAutomatic('<environment_context>')).toBe(true);
+    expect(looksAutomatic('a758cca7c9e14f0b')).toBe(true);
+    expect(looksAutomatic('7c9e4f0b-1a2b-4c3d-9e8f-0a1b2c3d4e5f')).toBe(true);
+    expect(looksAutomatic('/home/zeus/proyecto')).toBe(true);
+    expect(looksAutomatic('new session')).toBe(true);
+    expect(looksAutomatic('   ')).toBe(true);
+    expect(looksAutomatic(null)).toBe(true);
+    // El identificador de la sesión, aunque venga vestido de otra cosa.
+    expect(looksAutomatic('sesión sid-pool-42', 'sid-pool-42')).toBe(true);
+  });
+
+  it('no toca un título que sí sirve', () => {
+    expect(looksAutomatic('timeout del pool de conexiones')).toBe(false);
+    expect(looksAutomatic('el lío del pool')).toBe(false);
+    expect(looksAutomatic('migrar aisessions a sqlite')).toBe(false);
+    // Un nombre corto con números sigue siendo un nombre.
+    expect(looksAutomatic('deploy v2 roto')).toBe(false);
+  });
+
+  it('el preámbulo de Codex no acaba dentro del nombre', () => {
+    expect(titleFromPrompt(`${codex}\n\nrevisa por qué el deploy se cae en producción`))
+      .toBe('revisa por qué el deploy se cae');
+  });
+});
+
+/**
+ * Nombrar al entrar, que es lo que pidió el usuario.
+ *
+ * Lo que se prueba es cuándo **no** se llama al modelo: con un título bueno, con uno recién puesto,
+ * y cuando alguien ya escribió el suyo. Una llamada de más cuesta cuota; un renombrado de más
+ * cuesta confianza.
+ */
+describe('nombrar al abrir el workspace', () => {
+  const material = { userMessages: ['arregla el pool que se queda sin conexiones'] };
+
+  it('sustituye el hash de la CLI por lo que pidió la persona', async () => {
+    const workspace = open('sid-open-1', 'Claude a758cca7');
+    expect(services.titles.needsTitle(workspace.id)).toBe(true);
+
+    const title = await services.titles.nameOnOpen(workspace.id, material);
+    expect(title).toBe('arregla el pool que se queda sin');
+    expect(services.workspaces.require(workspace.id).title).toBe(title);
+    // Y ya no vuelve a hacer falta.
+    expect(services.titles.needsTitle(workspace.id)).toBe(false);
+  });
+
+  it('un título que ya sirve no se toca al abrir', async () => {
+    const workspace = open('sid-open-2', 'timeout del pool de conexiones');
+    expect(services.titles.needsTitle(workspace.id)).toBe(false);
+    expect(await services.titles.nameOnOpen(workspace.id, material)).toBeNull();
+  });
+
+  it('el título de la persona gana también aquí', async () => {
+    const workspace = open('sid-open-3', 'Claude a758cca7');
+    services.titles.setByUser(workspace.id, 'el lío del pool');
+    expect(services.titles.needsTitle(workspace.id)).toBe(false);
+    expect(await services.titles.nameOnOpen(workspace.id, material)).toBeNull();
+    expect(services.workspaces.require(workspace.id).title).toBe('el lío del pool');
+  });
+
+  it('un título recién puesto no se regenera: entrar dos veces no cuesta dos llamadas', async () => {
+    let calls = 0;
+    const counting: TitleModel = {
+      summarize: async () => { calls += 1; return `nombre ${calls}`; },
+    };
+    const service = new TitleService({ db: services.db, clock: services.clock, model: counting });
+    const workspace = open('sid-open-4', 'Claude a758cca7');
+
+    expect(await service.nameOnOpen(workspace.id, material)).toBe('nombre 1');
+    expect(await service.nameOnOpen(workspace.id, material)).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  /**
+   * El límite del proveedor no se puede tocar desde aquí, así que lo que se prueba es que llegar a
+   * él no rompe nada: se sigue nombrando, sólo que peor.
+   */
+  it('agotado el presupuesto de llamadas, se nombra igual sin modelo', async () => {
+    let calls = 0;
+    const model: TitleModel = { summarize: async () => { calls += 1; return 'nombre del modelo'; } };
+    const service = new TitleService({
+      db: services.db, clock: services.clock, model, perMinute: 1, freshnessMs: 0,
+    });
+
+    const first = open('sid-open-5', 'Claude aaaaaaaa');
+    const second = open('sid-open-6', 'Claude bbbbbbbb');
+
+    expect(await service.nameOnOpen(first.id, material)).toBe('nombre del modelo');
+    expect(await service.nameOnOpen(second.id, material)).toBe('arregla el pool que se queda sin');
+    expect(calls).toBe(1);
+  });
+
+  it('el primer mensaje y el último llegan juntos al modelo', async () => {
+    let seen = '';
+    const model: TitleModel = {
+      summarize: async ({ prompt }) => { seen = prompt; return 'lo que sea'; },
+    };
+    const service = new TitleService({ db: services.db, clock: services.clock, model });
+    const workspace = open('sid-open-7', 'Claude cccccccc');
+
+    await service.nameOnOpen(workspace.id, {
+      userMessages: ['el pool se queda sin conexiones', 'ya probé subir el máximo', 'sigue igual'],
+    });
+    expect(seen).toContain('el pool se queda sin conexiones');
+    expect(seen).toContain('sigue igual');
+    expect(seen).not.toContain('ya probé subir el máximo');
   });
 });
