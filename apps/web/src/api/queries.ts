@@ -28,6 +28,14 @@ export interface MetricsSnapshot {
   };
   workspaces: { total: number; openedInWindow: number };
   plans: { active: number; waitingApproval: number };
+  /**
+   * Terminales interactivas abiertas en la flota.
+   *
+   * Es lo último que se sabe, con su marca: contar de verdad cuesta una conexión por máquina, así
+   * que el core lo cachea. Con `at` en null no se ha contado nunca todavía —y ahí es mejor no
+   * pintar nada que pintar un cero que no es cierto.
+   */
+  terminals?: { open: number; byHost: Array<{ host: string; open: number }>; at: string | null; stale: boolean };
 }
 
 export const keys = {
@@ -415,6 +423,27 @@ export function useDestroyTerminal() {
       post<{ ok: true }>('/api/terminal/destroy', { host, name }),
     onSuccess: (_data, variables) => {
       void client.invalidateQueries({ queryKey: keys.terminals(variables.host) });
+    },
+  });
+}
+
+/**
+ * Dar por visto un trabajo que reclamaba atención.
+ *
+ * No cambia su estado: sigue fallido, con sus eventos y su evidencia. Lo único que cambia es que
+ * deja de contar en «requieren atención», que es lo que hacía que el aviso se quedara encendido
+ * para siempre por cuatro fallos de la semana pasada.
+ */
+export function useAcknowledgeRun() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (runId: string | null) =>
+      post<{ acknowledged: number }>(runId ? `/api/runs/${runId}/ack` : '/api/runs/ack'),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.runs });
+      void client.invalidateQueries({ queryKey: ['metrics'] });
+      void client.invalidateQueries({ queryKey: ['run'] });
     },
   });
 }

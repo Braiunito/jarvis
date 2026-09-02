@@ -55,6 +55,15 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cerrar una terminal desde la interfaz**: junto a «Reconectar», y en cada fila de la lista de
   sesiones. Destruir sigue siendo explícito —salir de la pantalla no mata nada— así que lo pide
   con un diálogo que nombra la sesión y la máquina antes de tocarlas.
+- **Lo que ya has mirado deja de reclamar**: un trabajo fallido se puede dar por visto, uno a uno
+  o todos de golpe, desde Trabajo. No cambia de estado —sigue fallido, con sus eventos y su
+  evidencia—, sólo deja de contar en «requieren atención». Sin eso, cuatro fallos de la semana
+  pasada dejaban el aviso encendido para siempre y el número acababa siendo ruido de fondo. El
+  contador baja a la vez en el carril, en la portada y en el Run Center: un aviso que se
+  contradice a sí mismo deja de mirarse.
+- **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
+  contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
+  ninguna.
 - **Los workspaces se llaman por lo que se pidió** (UX-10): al entrar en uno cuyo nombre no sirve
   —`Claude a758cca7`, el `<environment_context>` que arrastra Codex, un hash, un vacío— se sustituye
   por lo que la persona pidió, en segundo plano y sin que la pantalla espere. Lo que escribe una

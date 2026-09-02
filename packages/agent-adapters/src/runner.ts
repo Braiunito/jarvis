@@ -260,15 +260,29 @@ export function buildCancelCommand(layout: SpoolLayout, { escalate = false }: { 
   return lines.join('\n');
 }
 
-/** Limpieza de spools terminados más viejos que el corte. No toca los que siguen vivos. */
+/**
+ * Limpieza de spools terminados más viejos que el corte. No toca los que siguen vivos.
+ *
+ * El bucle es un `while read` y no un `find -exec sh -c '…'` porque aquello exigía anidar comillas
+ * simples dentro de comillas simples, y el resultado no lo parseaba **ningún** shell remoto: bash
+ * respondía `line 2: syntax error` y zsh `parse error near then`. El barrido fallaba en todas las
+ * máquinas a la vez, y como nadie miraba su resultado, el síntoma que se veía era otro —el check
+ * de salud diciendo «sin datos» para siempre—.
+ *
+ * Lo que se borra es sólo el directorio de un trabajo **terminado**: el estado se comprueba antes,
+ * leyendo su propio `status.json`.
+ */
 export function buildSweepCommand(root: string, olderThanDays: number): string {
   if (!root.startsWith('/')) throw new RunnerError('the spool root must be an absolute path');
   const days = Math.max(1, Math.floor(olderThanDays));
   return [
-    `find ${shellQuote(root)} -mindepth 1 -maxdepth 1 -type d -mtime +${days} -exec sh -c '`,
-    `  if [ -f "$1/status.json" ] && grep -q \\'"state":"\\\\(completed\\\\|failed\\\\|cancelled\\\\|timed_out\\\\)"\\' "$1/status.json"; then rm -rf -- "$1"; fi`,
-    "' sh {} ';' 2>/dev/null || true",
-    'printf \'%s\\n\' "jarvis:swept"',
+    `find ${shellQuote(root)} -mindepth 1 -maxdepth 1 -type d -mtime +${days} 2>/dev/null |`,
+    'while IFS= read -r dir; do',
+    '  [ -f "$dir/status.json" ] || continue',
+    `  grep -qE '"state":"(completed|failed|cancelled|timed_out)"' "$dir/status.json" || continue`,
+    '  rm -rf -- "$dir"',
+    'done',
+    `printf '%s\\n' "jarvis:swept"`,
   ].join('\n');
 }
 

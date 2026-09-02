@@ -141,7 +141,10 @@ export function HomeScreen(): JSX.Element {
 
   const all = runs.data?.runs ?? [];
   const active = all.filter((run) => ['queued', 'preparing', 'running', 'cancelling'].includes(run.status));
-  const attention = all.filter((run) => ['failed', 'timed_out', 'waiting'].includes(run.status));
+  // Lo dado por visto deja de reclamar aquí también: si la portada y el carril cuentan cosas
+  // distintas, el aviso deja de significar nada.
+  const attention = all.filter((run) =>
+    !run.acknowledgedAt && ['failed', 'timed_out', 'waiting'].includes(run.status));
   const recent = workspaces.data?.workspaces ?? [];
   const last = recent[0];
   const lastRun = last ? all.find((run) => run.workspaceId === last.id) : undefined;

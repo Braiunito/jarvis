@@ -250,6 +250,18 @@ Es a propósito el **único** sitio del producto con este realce: si todo destac
 
 Ficheros: `ui/event-log.tsx`, `ui/assistant.tsx`, `styles.css`.
 
+### [x] UX-11 · Descartar lo que ya has mirado, y ver cuántas terminales hay
+
+Cerrada el 2026-09-02, con el core de la sesión paralela (`acknowledged_at`, `POST /api/runs/ack`,
+`metrics.terminals`).
+
+- **Visto**: por fila en las que reclaman, y «Dar todos por vistos» en la tarjeta de «requieren que
+  mires». No cambia el estado del trabajo, sólo deja de reclamar. El filtro por `acknowledgedAt` se
+  aplicó también en el carril y en la portada, no sólo en `metrics`: si los tres sitios cuentan
+  distinto, el aviso deja de significar algo.
+- **Chip de terminales abiertas** junto a Terminal, y sólo cuando el core las ha contado alguna vez
+  (`terminals.at !== null`). Un cero que en realidad es «no lo sé» es peor que no pintar nada.
+
 ### [x] UX-10 · El título automático, al entrar y no sólo al terminar
 
 Cerrada el 2026-09-02. El nombre del workspace venía del índice, y lo que el índice sabe es lo que

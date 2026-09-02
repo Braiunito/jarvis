@@ -57,10 +57,12 @@ const queryClient = new QueryClient({
 
 const RAIL_KEY = 'jarvis.rail.collapsed';
 
-function Rail({ working, attention, insecure }: {
+function Rail({ working, attention, insecure, terminals }: {
   working: number;
   attention: number;
   insecure: boolean;
+  /** Terminales abiertas, o null si todavía no se ha contado ninguna vez. */
+  terminals: number | null;
 }): JSX.Element {
   const route = useRoute();
   const health = useHealth();
@@ -105,6 +107,13 @@ function Rail({ working, attention, insecure }: {
         <Link to="/terminal" aria-current={current('/terminal')}>
           <Glyph icon={NAV_ICON.terminal} size={17} />
           <span>Terminal</span>
+          {/*
+            * Sólo cuando se ha contado de verdad: un cero que en realidad es «no lo sé» hace creer
+            * que no hay nada abierto, y eso es peor que no enseñar nada.
+            */}
+          {terminals !== null && terminals > 0 ? (
+            <span className="count" title={`${terminals} sesión(es) de terminal abiertas`}>{terminals}</span>
+          ) : null}
         </Link>
         <Link to="/health" aria-current={current('/health')}>
           <Glyph icon={NAV_ICON.health} size={17} />
@@ -177,8 +186,11 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
   const working = (runs.data?.runs ?? []).filter((run) =>
     ['queued', 'preparing', 'running', 'cancelling'].includes(run.status)).length;
   const attention = (runs.data?.runs ?? []).filter((run) =>
-    run.status === 'waiting' || run.status === 'failed' || run.status === 'timed_out').length;
+    !run.acknowledgedAt
+    && (run.status === 'waiting' || run.status === 'failed' || run.status === 'timed_out')).length;
   const waitingApproval = metrics.data?.plans.waitingApproval ?? 0;
+  const terminals = metrics.data?.terminals;
+  const openTerminals = terminals && terminals.at !== null ? terminals.open : null;
 
   const content = (() => {
     if (section === 'sessions') return <ExplorerScreen />;
@@ -201,7 +213,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
         }}>
         Saltar al contenido
       </a>
-      <Rail working={working} attention={attention} insecure={Boolean(me.insecureLogin)} />
+      <Rail working={working} attention={attention} insecure={Boolean(me.insecureLogin)}
+        terminals={openTerminals} />
 
       <div className="workarea">
         <header className="topbar">

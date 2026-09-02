@@ -11,7 +11,9 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import type { Run } from '@jarvis/contracts';
-import { useCancelRun, useMetrics, useRetryRun, useRun, useRuns } from '../api/queries.js';
+import {
+  useAcknowledgeRun, useCancelRun, useMetrics, useRetryRun, useRun, useRuns,
+} from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import { Empty, ErrorNote, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
 import { Sparkbars } from '../ui/charts.jsx';
@@ -43,10 +45,11 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
   const stream = useRunStream(current);
   const cancel = useCancelRun();
   const retry = useRetryRun();
+  const acknowledge = useAcknowledgeRun();
 
   const all = runs.data?.runs ?? [];
   const active = all.filter((run) => ACTIVE.includes(run.status));
-  const attention = all.filter((run) => ATTENTION.includes(run.status));
+  const attention = all.filter((run) => ATTENTION.includes(run.status) && !run.acknowledgedAt);
 
   const visible = filter === 'activos' ? active
     : filter === 'atencion' ? attention
@@ -66,6 +69,19 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
         <Card>
           <Stat value={attention.length} label="requieren que mires"
             hint={attention.length ? 'parados, fallados o sin tiempo' : 'ninguno pendiente'} />
+          {/*
+            * Dar por visto no arregla nada ni cambia el estado del trabajo: sólo deja de reclamar.
+            * Sin esto, cuatro fallos de la semana pasada dejaban el aviso encendido para siempre y
+            * el número acababa siendo ruido de fondo.
+            */}
+          {attention.length ? (
+            <button type="button" className="btn small" style={{ marginTop: 10 }}
+              disabled={acknowledge.isPending}
+              onClick={() => acknowledge.mutate(null)}>
+              <Glyph icon={ACTION_ICON.approve} />
+              {acknowledge.isPending ? 'Marcando…' : 'Dar todos por vistos'}
+            </button>
+          ) : null}
         </Card>
         <Card>
           <Stat
@@ -189,7 +205,22 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                         <span className="small muted">{formatDuration(duration(item))}</span>
                       </td>
                       <td data-secondary="true">
-                        <span className="small muted">{relativeTime(item.finishedAt ?? item.startedAt ?? item.createdAt)}</span>
+                        <span className="row tight nowrap" style={{ justifyContent: 'flex-end' }}>
+                          <span className="small muted">
+                            {relativeTime(item.finishedAt ?? item.startedAt ?? item.createdAt)}
+                          </span>
+                          {ATTENTION.includes(item.status) && !item.acknowledgedAt ? (
+                            <button type="button" className="btn small ghost"
+                              title="Dejar de reclamar atención. El trabajo no cambia."
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                acknowledge.mutate(item.id);
+                              }}>
+                              <Glyph icon={ACTION_ICON.approve} />
+                              Visto
+                            </button>
+                          ) : null}
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -234,7 +265,8 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                   </button>
                 )}
               </div>
-              <ErrorNote error={cancel.error ?? retry.error} onRetry={() => void detail.refetch()} />
+              <ErrorNote error={cancel.error ?? retry.error ?? acknowledge.error}
+                onRetry={() => void detail.refetch()} />
 
               <div className="stack" style={{ gap: 7 }}>
                 <DataRow label="Ejecuta en"><span className="mono">{run.executionHost}</span></DataRow>

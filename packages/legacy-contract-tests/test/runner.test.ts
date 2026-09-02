@@ -5,13 +5,15 @@
  * de recuperación que sólo se prueba con dobles no prueba nada: lo que falla en producción es el
  * quoting, los permisos y el orden de escritura.
  */
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
-  buildCancelCommand, buildPollCommand, buildPrepareCommand, claudeAdapter, defaultSshConfig,
-  parsePollOutput, parsePrepareOutput, remoteScript, RunnerError, spoolLayout, sshExec, tmuxRunName,
+  buildCancelCommand, buildPollCommand, buildPrepareCommand, buildSweepCommand, claudeAdapter,
+  defaultSshConfig, parsePollOutput, parsePrepareOutput, remoteScript, RunnerError, spoolLayout,
+  sshExec, tmuxRunName,
 } from '@jarvis/agent-adapters';
 import type { TargetPlan } from '@jarvis/contracts';
 
@@ -196,5 +198,44 @@ describe('RUNNER-SPOOL-01: parseo defensivo', () => {
     expect(parsed.status).toBeNull();
     expect(parsed.size).toBe(10);
     expect(parsed.chunk).toBe('{"a":1}\n');
+  });
+});
+
+/**
+ * El barrido de spools, que nadie había ejecutado nunca.
+ *
+ * La versión anterior anidaba comillas simples dentro de comillas simples y **ningún** shell
+ * remoto la aceptaba: bash contestaba `syntax error` y zsh `parse error near then`. Como el
+ * resultado no lo miraba nadie, el síntoma visible era otro —el check de salud en «sin datos»—.
+ * Por eso este test no compara texto: ejecuta el comando en un shell de verdad.
+ */
+describe('RUNNER-SWEEP-01: la limpieza se puede ejecutar', () => {
+  it('borra lo terminado y viejo, y deja lo vivo y lo reciente', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jarvis-sweep-'));
+    const viejo = join(root, 'rviejo');
+    const vivo = join(root, 'rvivo');
+    const reciente = join(root, 'rreciente');
+    for (const dir of [viejo, vivo, reciente]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(viejo, 'status.json'), '{"state":"completed","exitCode":0}');
+    writeFileSync(join(vivo, 'status.json'), '{"state":"running"}');
+    writeFileSync(join(reciente, 'status.json'), '{"state":"failed","exitCode":1}');
+    // Envejecer los dos primeros más allá del corte; el tercero se queda de hoy.
+    const old = new Date(Date.now() - 30 * 86_400_000);
+    utimesSync(viejo, old, old);
+    utimesSync(vivo, old, old);
+
+    const output = execFileSync('/bin/sh', ['-c', buildSweepCommand(root, 7)], { encoding: 'utf8' });
+
+    expect(output).toContain('jarvis:swept');
+    expect(existsSync(viejo)).toBe(false);
+    // Un trabajo en marcha no se toca aunque su directorio sea viejo.
+    expect(existsSync(vivo)).toBe(true);
+    // Y lo terminado hace un rato tampoco: el corte es el corte.
+    expect(existsSync(reciente)).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('un spool que no es una ruta absoluta se rechaza antes de tocar nada', () => {
+    expect(() => buildSweepCommand('~/.local/state/jarvis/runs', 7)).toThrow(/absolute/);
   });
 });
