@@ -231,15 +231,12 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
   /**
    * Una sesión que no se puede continuar ni estrenar.
    *
-   * Se distingue de «sin estrenar» —que sí funciona y sólo espera su primer trabajo— por quién la
-   * creó: si no salió de Jarvis y no tiene un solo turno, no hay nada que reanudar al otro lado.
-   * Sólo se afirma con el transcript ya cargado: mientras carga, no se sabe.
+   * Lo dice el core, que lo comprobó contra la máquina y lleva dentro la excepción de la sesión
+   * estrenada aquí —también vacía, pero funciona, porque su primer trabajo la crea—. Se deducía en
+   * esta pantalla mirando el número de mensajes, y eso fallaba justo en las sesiones que sólo
+   * guardan un `/comando`: dos turnos de usuario, ninguno que diga nada, y nada que reanudar.
    */
-  const deadSession = workspace.sessionLaunched !== false
-    && !transcript.isLoading
-    && !transcript.error
-    && (transcript.data?.messageCount ?? null) === 0
-    && runs.length === 0;
+  const deadSession = transcript.data?.resumable === false;
   // Los que tiene la sesión, no los que caben en la página que se ha traído.
   const messageBadge = messageBadgeText({
     shown: messages.length, total: transcript.data?.messageCount ?? null,

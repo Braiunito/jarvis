@@ -176,6 +176,14 @@ export const useTranscript = (workspace: Workspace | undefined) => useQuery({
     truncated: boolean;
     /** Los mensajes que tiene la sesión, que no son los que caben en esta página. */
     messageCount: number | null;
+    /**
+     * Si esta conversación se puede continuar.
+     *
+     * Lo afirma el core comprobándolo contra la máquina, no se deduce del número de mensajes: hay
+     * sesiones con turnos que no son turnos —un `/comando` y su salida— y no tienen nada que
+     * reanudar.
+     */
+    resumable?: boolean;
   }>(
     `/api/sessions/transcript?host=${encodeURIComponent(workspace!.ref.host)}`
     + `&provider=${workspace!.ref.provider}&sessionId=${encodeURIComponent(workspace!.ref.sessionId)}&last=${TRANSCRIPT_PAGE}`,
