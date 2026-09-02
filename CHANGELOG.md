@@ -64,6 +64,9 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **El explorador enseñaba 50 sesiones de 73** y no lo decía: el core pedía al índice su página por
+  defecto. Ahora pide muchas más y, cuando aun así se llena, la pantalla avisa de que hay más y de
+  cómo llegar a ellas. Una lista recortada en silencio hace concluir que lo que falta no existe.
 - **El nombre puesto se queda puesto**: renombrar un workspace —a mano o automáticamente— ya no se
   deshace al volver al explorador y pulsar la misma sesión, y la lista de sesiones enseña ese
   nombre en vez del que trae el índice.

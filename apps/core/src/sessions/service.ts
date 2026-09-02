@@ -31,8 +31,17 @@ export class SessionService {
    */
   async search(query: SessionQuery): Promise<SessionSearchResult> {
     const { index, workspaces, clock, bastionHost } = this.#deps;
+    /*
+     * Cuántas sesiones se piden al índice.
+     *
+     * El valor de antes eran las 50 que trae el índice por defecto, y con 73 sesiones en la flota
+     * eso significaba que 23 no aparecían nunca en el explorador —sin decirlo—. Una lista recortada
+     * en silencio hace concluir que lo que falta no existe. Se pide bastante más y, cuando aun así
+     * se llena, se avisa.
+     */
+    const limit = query.limit ?? 300;
     const [list, hosts] = await Promise.all([
-      index.list(query),
+      index.list({ ...query, limit }),
       index.hosts().catch(() => ({ rows: [], stale: true, error: 'the index did not answer' })),
     ]);
 
@@ -61,6 +70,7 @@ export class SessionService {
       nextCursor: null,
       freshness,
       stale: list.stale,
+      truncated: list.rows.length >= limit,
       fetchedAt: clock.nowIso(),
     };
   }

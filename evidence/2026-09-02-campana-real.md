@@ -55,3 +55,22 @@ El `ssh` que usó el core es un envoltorio con su propia `ssh_config` (alias, cl
   expired`. Se ve bien reportado en la consola, pero hay que reautenticar en esa máquina.
 - TEC-09 (aprovechar la cuota que ya viene en cada run), TEC-10 (empezar una sesión nueva) y
   TEC-11 (una sesión sin `cwd` no se puede reanudar) quedan anotados en el backlog.
+
+## Redespliegue del índice · esquema v3 (mismo día, más tarde)
+
+`aisessions` ganó un contador nuevo —`user_text_messages`, los turnos en que la persona dice algo,
+sin envoltorios de comando ni resultados de herramienta— y con él subió su `SCHEMA_VERSION` de 2 a
+3. Al arrancar, el índice se reconstruye solo; no hay migración a mano.
+
+Qué se hizo, en orden: copia del volumen del índice a `/home/zeus/aisessions-index-*.tgz` (es
+reconstruible, pero una copia cuesta segundos), sincronizar los dos repos, reconstruir las tres
+imágenes, levantar y esperar al re-escaneo de la flota.
+
+Resultado medido sobre los datos reales de zeus: **73 sesiones**, todas con el contador nuevo. 20
+salen vacías, y de ellas **3 son las que engañaban** —`user_messages: 2` pero `user_text_messages:
+0`, porque sus únicos turnos eran envoltorios de `/comando`—. Esas tres pasaban por sesiones
+normales y no tienen nada que reanudar. La consola las oculta con un «17 vacías ocultas» que se
+puede desplegar, y la lista enseña por fin títulos de verdad en lugar de hashes.
+
+Coste del corte: el índice queda vacío entre el arranque y el primer barrido de la flota (unos
+minutos). Nada más se detiene: los trabajos, la terminal y la autenticación no dependen de él.

@@ -179,6 +179,17 @@ export function ExplorerScreen(): JSX.Element {
         </div>
       </Card>
 
+      {sessions.data?.truncated ? (
+        <p className="stale-note" role="status">
+          <Glyph icon={ACTION_ICON.filters} size={16} />
+          <span>
+            El índice tiene más sesiones de las que caben en una consulta: aquí se ven las
+            {' '}{sessions.data.sessions.length} más recientes. Afina con el buscador o los filtros
+            para llegar a las demás.
+          </span>
+        </p>
+      ) : null}
+
       <StaleNote stale={sessions.data?.stale} freshness={sessions.data?.freshness} />
       <ErrorNote error={sessions.error} onRetry={() => void sessions.refetch()} />
 

@@ -83,6 +83,13 @@ export const SessionSearchResult = Type.Object({
   nextCursor: Type.Union([Type.String(), Type.Null()]),
   freshness: Type.Array(HostFreshness),
   stale: Type.Boolean(),
+  /**
+   * El índice devolvió tantas como se le pidieron, así que hay más y no se están viendo.
+   *
+   * Se dice en vez de callarlo: una lista recortada en silencio es la peor clase de dato, porque
+   * quien la mira concluye que lo que falta no existe.
+   */
+  truncated: Type.Boolean(),
   fetchedAt: Iso8601,
 });
 export type SessionSearchResult = Static<typeof SessionSearchResult>;

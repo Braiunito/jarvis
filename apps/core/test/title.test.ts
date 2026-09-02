@@ -323,3 +323,29 @@ describe('sesiones sin nada dentro', () => {
     expect(empty.get('solo-comandos')).toBe(false);
   });
 });
+
+/**
+ * Una lista recortada se dice.
+ *
+ * El explorador pedía las 50 que el índice trae por defecto. Con 73 sesiones en la flota, 23 no
+ * aparecían nunca y nada lo indicaba: quien mira una lista así concluye que lo que falta no
+ * existe, que es la peor forma de equivocarse con un dato.
+ */
+describe('el índice no cabe entero', () => {
+  it('avisa cuando la consulta se llenó', async () => {
+    const many = Array.from({ length: 6 }, (_, index) => indexRow({
+      session_id: `sid-${index}`, path: `/f${index}.jsonl`,
+    }));
+    const local = buildServices({
+      db: openDatabase({ path: ':memory:' }),
+      clock: fixedClock('2026-09-02T12:00:00.000Z'),
+      index: new FakeSessionIndex(many) as never,
+      model: null,
+      config: { hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-title-spool' },
+    });
+
+    expect((await local.sessions.search({ limit: 6 })).truncated).toBe(true);
+    expect((await local.sessions.search({ limit: 20 })).truncated).toBe(false);
+    local.close();
+  });
+});

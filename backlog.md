@@ -262,6 +262,21 @@ Cerrada el 2026-09-02, con el core de la sesión paralela (`acknowledged_at`, `P
 - **Chip de terminales abiertas** junto a Terminal, y sólo cuando el core las ha contado alguna vez
   (`terminals.at !== null`). Un cero que en realidad es «no lo sé» es peor que no pintar nada.
 
+### [x] HZ-24 · El explorador enseñaba 50 de 73 sesiones, y no lo decía
+
+Encontrado el 2026-09-02 al no cuadrar dos números: el core marcaba 20 sesiones vacías y la consola
+decía «17 ocultas». No era un fallo de pintado —el bundle servido coincidía con el compilado— sino
+que `index-client.ts` mandaba `limit: String(query.limit ?? 50)`, heredando el valor por defecto
+del índice. Medido contra el índice desplegado: `/api/sessions?limit=2000` devuelve 73 filas con 20
+vacías; `/api/sessions` a secas devuelve 50 con 17.
+
+Con 73 sesiones en la flota, 23 no aparecían nunca en el explorador y nada lo indicaba. Quien mira
+una lista recortada en silencio concluye que lo que falta no existe.
+
+Arreglado en dos partes, porque subir el número a secas sólo mueve el problema más lejos: el límite
+se decide en el servicio (300) y `SessionSearchResult` gana `truncated`, que el explorador dice
+cuando la consulta se llenó. Test: «el índice no cabe entero».
+
 ### [x] UX-12 · El nombre se queda puesto, y las sesiones fantasma no estorban
 
 Cerrada el 2026-09-02, con dos fallos que se veían como uno solo.
