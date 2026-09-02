@@ -45,6 +45,20 @@ export function registerWorkspaceRoutes(app: FastifyInstance, services: CoreServ
     return reply.send({ target });
   });
 
+  /**
+   * El título que escribe una persona. A partir de aquí, el automático no vuelve a tocarlo.
+   */
+  app.put('/api/workspaces/:id/title', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as { title?: string };
+    if (typeof body.title !== 'string' || !body.title.trim()) {
+      throw new JarvisError('BAD_REQUEST', 'title es obligatorio');
+    }
+    services.workspaces.require(id);
+    services.titles.setByUser(id, body.title.trim());
+    return reply.send({ workspace: services.workspaces.require(id) });
+  });
+
   app.get('/api/workspaces/:id/draft', async (request, reply) => {
     const { id } = request.params as { id: string };
     return reply.send(services.workspaces.draft(id, identityOf(request)));

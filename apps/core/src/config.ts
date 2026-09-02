@@ -73,6 +73,17 @@ export const config = {
    * la durabilidad de un plan sin red, sin credencial y sin gastar cuota.
    */
   assistantScripted: bool(env['JARVIS_ASSISTANT_SCRIPTED'], false),
+
+  /**
+   * El modelo que pone nombre a los workspaces.
+   *
+   * Va aparte del Assistant: nombrar es un goteo constante de llamadas diminutas, y pagarlo a
+   * precio de coordinador es tirar dinero. Aparte también significa que quedarse sin cuota en uno
+   * no silencia al otro.
+   */
+  titleApiKey: env['JARVIS_TITLE_API_KEY'] || '',
+  titleBaseUrl: env['JARVIS_TITLE_BASE_URL'] || 'https://api.groq.com/openai',
+  titleModel: env['JARVIS_TITLE_MODEL'] || 'llama-3.1-8b-instant',
   planIntervalMs: Number(env['JARVIS_PLAN_INTERVAL_MS'] || 1500),
 
   verbose: bool(env['JARVIS_VERBOSE'], false),

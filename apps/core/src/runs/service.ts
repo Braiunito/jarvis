@@ -65,6 +65,14 @@ function boundedTail(value: string, maxBytes: number): { text: string; truncated
 export class RunService {
   readonly #deps: RunServiceDeps;
 
+  /**
+   * Qué hacer cuando un run llega a estado terminal.
+   *
+   * Es un gancho y no una dependencia porque lo que cuelga de aquí es accesorio —poner nombre al
+   * workspace, por ejemplo—: si falla, el run ya terminó igual y nadie debería enterarse.
+   */
+  onRunFinished: ((run: Run, prompt: string) => void) | null = null;
+
   constructor(deps: RunServiceDeps) {
     this.#deps = deps;
   }
@@ -295,7 +303,15 @@ export class RunService {
     }
 
     this.#deps.bus.notify(runId);
-    return repository.find(runId) as Run;
+    const updated = repository.find(runId) as Run;
+    if (isTerminalStatus(to) && this.onRunFinished) {
+      try {
+        this.onRunFinished(updated, row.prompt);
+      } catch {
+        // Lo accesorio no puede estropear una transición que ya está confirmada.
+      }
+    }
+    return updated;
   }
 
   // ---- preparación remota -------------------------------------------------

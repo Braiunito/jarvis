@@ -11,11 +11,13 @@ import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PermissionProfile, Run, RunEvent } from '@jarvis/contracts';
 import {
-  useCancelRun, useCreateRun, useSaveDraft, useTarget, useTranscript, useUsage, useWorkspace,
+  useCancelRun, useCreateRun, useRenameWorkspace, useSaveDraft, useTarget, useTranscript, useUsage,
+  useWorkspace,
 } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import { ErrorNote, Link, Loading, RunStatusBadge, StaleNote, TargetChip, relativeTime } from '../ui/bits.jsx';
 import { AssistantPanel } from '../ui/assistant.jsx';
+import { EVENT_KIND, PERMISSION, PROVENANCE } from '../ui/labels.js';
 
 const PROFILES: PermissionProfile[] = ['safe', 'auto', 'yolo'];
 
@@ -55,6 +57,9 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
   const createRun = useCreateRun(workspaceId);
   const cancelRun = useCancelRun();
   const saveDraft = useSaveDraft(workspaceId);
+
+  const rename = useRenameWorkspace(workspaceId);
+  const [editingTitle, setEditingTitle] = useState<string | null>(null);
 
   const [body, setBody] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -121,7 +126,38 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <div>
-            <h2 style={{ marginBottom: 2 }}>{workspace.title ?? workspace.ref.sessionId}</h2>
+            {editingTitle === null ? (
+              <h2 style={{ marginBottom: 2 }}>
+                <button
+                  type="button"
+                  className="title-edit"
+                  title="Cambiar el nombre de este workspace"
+                  onClick={() => setEditingTitle(workspace.title ?? '')}
+                >
+                  {workspace.title ?? 'Sin nombre todavía'}
+                </button>
+              </h2>
+            ) : (
+              <form
+                className="row"
+                style={{ marginBottom: 2 }}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (editingTitle.trim()) rename.mutate(editingTitle.trim());
+                  setEditingTitle(null);
+                }}
+              >
+                <input
+                  className="input"
+                  autoFocus
+                  value={editingTitle}
+                  aria-label="Nombre del workspace"
+                  onChange={(event) => setEditingTitle(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Escape') setEditingTitle(null); }}
+                />
+                <button type="submit" className="btn small primary">Guardar</button>
+              </form>
+            )}
             <p className="small muted mono" style={{ margin: 0 }}>
               {workspace.ref.host} · {workspace.ref.provider} · {workspace.ref.sessionId}
               {workspace.cwd ? ` · ${workspace.cwd}` : ''}
@@ -166,7 +202,10 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                 <div className="timeline">
                   {events.map((event) => (
                     <div key={event.seq} className={`event ${eventTone(event.type)}`}>
-                      <div className="kind">#{event.seq} · {event.type} · {new Date(event.at).toLocaleTimeString()}</div>
+                      <div className="kind">
+                        #{event.seq} · {EVENT_KIND[event.type] ?? event.type}
+                        {' · '}{new Date(event.at).toLocaleTimeString()}
+                      </div>
                       <pre>{eventText(event)}</pre>
                     </div>
                   ))}
@@ -202,10 +241,12 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
             </label>
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <label className="row small">
-                <span className="muted">Permiso</span>
-                <select className="select control-sm" value={profile}
+                <span className="muted">Qué puede hacer</span>
+                <select className="select control-md" value={profile}
                   onChange={(event) => setProfile(event.target.value as PermissionProfile)}>
-                  {PROFILES.map((value) => <option key={value} value={value}>{value}</option>)}
+                  {PROFILES.map((value) => (
+                    <option key={value} value={value}>{PERMISSION[value].name}</option>
+                  ))}
                 </select>
               </label>
               <button type="button" className="btn primary" disabled={createRun.isPending || !body.trim()}
@@ -214,13 +255,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
               </button>
             </div>
             <ErrorNote error={createRun.error} />
-            {profile !== 'safe' ? (
-              <p className="small muted" style={{ margin: 0 }}>
-                {profile === 'auto'
-                  ? 'El agente podrá escribir ficheros en el destino.'
-                  : 'Sin sandbox: el agente podrá ejecutar cualquier cosa en el destino.'}
-              </p>
-            ) : null}
+            <p className="small muted" style={{ margin: 0 }}>{PERMISSION[profile].help}</p>
           </div>
         </div>
 
@@ -240,7 +275,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                 <div key={index} className={`message ${message.role}`}>
                   <div className="who">
                     <span>{message.role}</span>
-                    <span className="badge neutral">{message.provenance}</span>
+                    <span className="badge neutral">{PROVENANCE[message.provenance] ?? message.provenance}</span>
                     {message.at ? <span>{new Date(message.at).toLocaleString()}</span> : null}
                   </div>
                   <div className="body">{message.text}</div>
@@ -261,7 +296,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   <span className="row">
                     <RunStatusBadge status={run.status} />
                     <span className="small muted mono">{run.id.slice(0, 8)}</span>
-                    <span className="badge neutral">{run.permissionProfile}</span>
+                    <span className="badge neutral">{PERMISSION[run.permissionProfile].name}</span>
                   </span>
                   <span className="small muted">{relativeTime(run.createdAt)}</span>
                 </button>

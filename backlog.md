@@ -16,7 +16,9 @@ Encargo del 2026-09-02: repensar UI/UX, revisar qué librerías merece la pena i
 textos, reordenar los accesos alrededor de flujos de trabajo reales, y asegurar que Assistant y
 título automático existen.
 
-### UX-01 · Vocabulario del producto, en español y sin jerga heredada
+### [x] UX-01 · Vocabulario del producto, en español y sin jerga heredada
+
+Hecho 2026-09-02 · `apps/web/src/ui/labels.ts` + las cinco pantallas · `npm run test:e2e`
 
 `safe` / `auto` / `yolo` son nombres de la CLI, no del producto. La etiqueta que ve una persona
 tiene que decir qué puede hacer el agente, no cómo se llama la bandera por dentro.
@@ -36,7 +38,11 @@ tiene que decir qué puede hacer el agente, no cómo se llama la bandera por den
 - Todo mensaje de error debe decir **qué pasó, dónde y qué hacer ahora**; el código técnico va en
   segundo plano, para copiar.
 
-### UX-02 · Elegir librerías de interfaz (decisión con ADR)
+### [x] UX-02 · Elegir librerías de interfaz (decisión con ADR)
+
+Hecho 2026-09-02 · [ADR-008](docs/adr/0008-ui-libraries.md). Entra `cmdk` con UX-04; Radix por
+componente cuando llegue el ticket que lo pida. Base UI se revisa cuando publique estable — su
+1.0 sigue saliendo como `rc` en npm. Bundle: 156 → 176 KiB gzip, techo 400.
 
 Hoy el front es React + CSS propio, sin dependencias de UI. Funciona, pero hay piezas que no
 merece la pena escribir a mano: menús accesibles, diálogos con foco atrapado, paleta de comandos,
@@ -59,7 +65,12 @@ de la migración) y de que cada una resuelva un problema concreto:
 Entregable: ADR-008 con la decisión, el presupuesto de bundle (hoy 155 KiB gzip; techo 400 KiB) y
 la lista de lo que **no** se adopta y por qué.
 
-### UX-03 · Assistant: que exista de verdad en la interfaz
+### [-] UX-03 · Assistant: que exista de verdad en la interfaz
+
+Hay panel en el workspace: delegar un objetivo, ver los pasos con su estado, aprobar o rechazar
+con la acción, el destino y el permiso a la vista, y la síntesis final. Falta: `waiting_input` en
+la interfaz, enlazar cada paso con su run y avisar cuando un plan pide permiso estando en otra
+pantalla.
 
 El core ya tiene planes, pasos, aprobaciones y despertar durable (M4). Falta la parte que se ve:
 
@@ -69,7 +80,12 @@ El core ya tiene planes, pasos, aprobaciones y despertar durable (M4). Falta la 
 - la síntesis final enlaza a los runs y a la evidencia, sin copiar buffers enteros;
 - notificación in-app cuando un plan pasa a `waiting_approval` o termina.
 
-### UX-04 · Reordenar los accesos por flujo, no por entidad
+### [-] UX-04 · Reordenar los accesos por flujo, no por entidad
+
+Hecho: paleta de comandos (Ctrl+K y botón, porque el atajo se lo queda algún navegador), «seguir
+donde lo dejaste» como primera acción de la portada, contador de trabajo y de lo que pide atención
+en la navegación, y barra inferior en móvil. Falta: abrir la terminal desde el workspace con el
+host y la sesión ya elegidos sin pasar por los selectores.
 
 Hoy la navegación es una lista de secciones (Inicio, Sesiones, Runs, Terminal, Salud). Los flujos
 reales son otros:
@@ -88,7 +104,12 @@ Trabajo concreto:
 - Run Center accesible desde cualquier pantalla con un indicador de cuántos piden atención;
 - móvil: barra inferior con las cuatro acciones reales, no el menú de escritorio encogido.
 
-### UX-05 · Título automático del workspace
+### [x] UX-05 · Título automático del workspace
+
+Hecho 2026-09-02 · `apps/core/src/workspaces/title.ts`, migración 5 (`title_source`), título
+editable en la consola. Sin modelo configurado se nombra con el prompt; con `JARVIS_TITLE_*` se
+usa un modelo pequeño. El título que escribe una persona gana y no se vuelve a tocar
+(`npx vitest run apps/core/test/title.test.ts`).
 
 Un workspace se llama hoy como el título que trae el índice, o como su id, que no dice nada.
 

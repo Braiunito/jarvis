@@ -11,33 +11,14 @@ import type { Approval, Plan, PlanStep } from '@jarvis/contracts';
 import { useCancelPlan, useCreatePlan, usePlan, usePlans, useResolveApproval } from '../api/queries.js';
 import { ErrorNote, relativeTime } from './bits.jsx';
 
-const PLAN_LABEL: Record<string, string> = {
-  ready: 'listo',
-  running: 'pensando',
-  waiting_run: 'esperando al agente',
-  waiting_approval: 'esperando tu permiso',
-  waiting_input: 'esperando tu respuesta',
-  completed: 'terminado',
-  failed: 'falló',
-  cancelled: 'cancelado',
-};
-
-const PLAN_TONE: Record<string, string> = {
-  ready: 'neutral',
-  running: 'running',
-  waiting_run: 'running',
-  waiting_approval: 'warn',
-  waiting_input: 'warn',
-  completed: 'ok',
-  failed: 'danger',
-  cancelled: 'neutral',
-};
+import { PERMISSION, PLAN_STATUS, PLAN_STEP_KIND } from './labels.js';
 
 function PlanBadge({ status }: { status: string }): JSX.Element {
+  const label = PLAN_STATUS[status];
   return (
-    <span className={`badge ${PLAN_TONE[status] ?? 'neutral'}`}>
+    <span className={`badge ${label?.tone ?? 'neutral'}`} title={label?.help}>
       <span className="dot" aria-hidden="true" />
-      {PLAN_LABEL[status] ?? status}
+      {label?.name ?? status}
     </span>
   );
 }
@@ -56,8 +37,8 @@ function ApprovalCard({ approval, onDecide, pending }: {
       <div className="row small" style={{ marginBottom: 8 }}>
         <span className="badge neutral">{approval.actionType}</span>
         {target.host ? <span className="badge neutral mono">{target.host}</span> : null}
-        <span className={`badge ${target.permissionProfile === 'auto' ? 'warn' : 'danger'}`}>
-          permiso: {target.permissionProfile}
+        <span className={`badge ${PERMISSION[target.permissionProfile as 'auto' | 'yolo']?.tone ?? 'warn'}`}>
+          {PERMISSION[target.permissionProfile as 'auto' | 'yolo']?.name ?? target.permissionProfile}
         </span>
         <span className="muted">caduca en {expiresIn} min</span>
       </div>
@@ -86,7 +67,7 @@ function StepRow({ step }: { step: PlanStep }): JSX.Element {
         <PlanBadge status={step.status} />
         <span className="small muted">#{step.ordinal + 1}</span>
         <span className="title">{step.title}</span>
-        <span className="badge neutral">{step.kind}</span>
+        <span className="badge neutral">{PLAN_STEP_KIND[step.kind] ?? step.kind}</span>
       </span>
       {output?.summary ? <span className="small muted">{output.summary.slice(0, 200)}</span> : null}
       {step.errorCode ? <span className="small" style={{ color: 'var(--danger)' }}>{step.errorCode}</span> : null}

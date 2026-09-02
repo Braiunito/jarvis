@@ -7,36 +7,14 @@
 import type { JSX, ReactNode } from 'react';
 import type { HostFreshness, Run, RunStatus, TargetPlan } from '@jarvis/contracts';
 import { navigate } from '../router.js';
-
-const STATUS_TONE: Record<RunStatus, string> = {
-  queued: 'neutral',
-  preparing: 'neutral',
-  running: 'running',
-  waiting: 'warn',
-  cancelling: 'warn',
-  completed: 'ok',
-  failed: 'danger',
-  cancelled: 'neutral',
-  timed_out: 'danger',
-};
-
-const STATUS_LABEL: Record<RunStatus, string> = {
-  queued: 'en cola',
-  preparing: 'preparando',
-  running: 'ejecutando',
-  waiting: 'esperando',
-  cancelling: 'cancelando',
-  completed: 'completado',
-  failed: 'fallido',
-  cancelled: 'cancelado',
-  timed_out: 'tiempo agotado',
-};
+import { PERMISSION, RUN_STATUS } from './labels.js';
 
 export function RunStatusBadge({ status }: { status: RunStatus }): JSX.Element {
+  const label = RUN_STATUS[status];
   return (
-    <span className={`badge ${STATUS_TONE[status]}`}>
+    <span className={`badge ${label.tone}`} title={label.help}>
       <span className="dot" aria-hidden="true" />
-      {STATUS_LABEL[status]}
+      {label.name}
     </span>
   );
 }
@@ -50,15 +28,16 @@ export function RunStatusBadge({ status }: { status: RunStatus }): JSX.Element {
 export function TargetChip({ target }: { target: TargetPlan | undefined }): JSX.Element {
   if (!target) return <span className="badge neutral">destino desconocido</span>;
   const strategy = target.strategy === 'A'
-    ? `en ${target.executionHost} → trabaja sobre ${target.workHost}`
+    ? `en ${target.executionHost}, trabajando sobre ${target.workHost}`
     : `en ${target.executionHost}`;
+  const permission = PERMISSION[target.permissionProfile];
   return (
     <>
       <span className="badge neutral" title={target.reason ?? undefined}>
         {target.provider} · {strategy}
       </span>
-      <span className={`badge ${target.permissionProfile === 'safe' ? 'ok' : target.permissionProfile === 'auto' ? 'warn' : 'danger'}`}>
-        permiso: {target.permissionProfile}
+      <span className={`badge ${permission.tone}`} title={permission.help}>
+        {permission.name}
       </span>
       {target.cwd ? <span className="badge neutral mono">{target.cwd}</span> : null}
     </>
@@ -138,7 +117,7 @@ export function RunRow({ run, onOpen }: { run: Run; onOpen: (run: Run) => void }
         <RunStatusBadge status={run.status} />
         <span className="small muted mono">{run.id.slice(0, 8)}</span>
         <span className="small muted">{run.provider} · {run.executionHost}</span>
-        {run.strategy === 'A' ? <span className="badge warn">estrategia A → {run.workHost}</span> : null}
+        {run.strategy === 'A' ? <span className="badge warn">trabaja sobre {run.workHost}</span> : null}
       </span>
       <span className="small muted">
         {new Date(run.createdAt).toLocaleString()}

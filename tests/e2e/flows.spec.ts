@@ -45,24 +45,25 @@ test('flujo 1 · retomar trabajo: buscar, previsualizar y abrir', async ({ page 
 
   await page.getByRole('button', { name: /workspace/i }).click();
   await expect(page).toHaveURL(/\/w\//);
-  // El transcript remoto se ve, y dice que es remoto.
-  await expect(page.getByText('remote-transcript').first()).toBeVisible();
+  // El transcript remoto se ve, y dice de dónde salió.
+  await expect(page.getByText('escrito en la máquina').first()).toBeVisible();
 });
 
 test('flujo 2 · trabajo directo: destino visible antes de enviar, y resultado en vivo', async ({ page }) => {
   await openWorkspace(page, 'timeout del pool');
 
-  // Lo que se ve antes de pulsar es exactamente lo que se va a ejecutar.
+  // Lo que se ve antes de pulsar es exactamente lo que se va a ejecutar, y en un idioma que
+  // dice qué puede hacer el agente, no cómo se llama la bandera de la CLI.
   await expect(page.getByText('claude · en bastion')).toBeVisible();
-  await expect(page.getByText('permiso: safe')).toBeVisible();
+  await expect(page.getByText('Sólo lectura').first()).toBeVisible();
 
   await page.getByLabel('Prompt').fill('@@slow:3 revisa el pool');
   await page.getByRole('button', { name: 'Enviar' }).click();
 
   // El borrador se limpia sólo cuando el servidor confirmó el trabajo.
   await expect(page.getByLabel('Prompt')).toHaveValue('');
-  await expect(page.getByText('completado').first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText('agent.result').first()).toBeVisible();
+  await expect(page.getByText('Terminado').first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText('resultado').first()).toBeVisible();
 });
 
 test('flujo 3 · el borrador sobrevive a navegar y volver', async ({ page }) => {
@@ -71,7 +72,7 @@ test('flujo 3 · el borrador sobrevive a navegar y volver', async ({ page }) => 
   // El guardado es con retardo: se le da su momento antes de irse.
   await page.waitForTimeout(1200);
 
-  await page.getByRole('link', { name: 'Runs' }).click();
+  await page.getByRole('link', { name: /Trabajo/ }).click();
   await expect(page).toHaveURL(/\/runs/);
   await page.goto(url);
 
@@ -100,6 +101,24 @@ test('flujo 5 · diagnóstico: qué salto está roto y cómo se copia', async ({
   await expect(page.getByText('database')).toBeVisible();
 
   await expect(page.getByRole('button', { name: 'Copiar diagnóstico' })).toBeVisible();
+});
+
+test('la paleta lleva a un contexto sin pasar por tres pantallas', async ({ page }) => {
+  await openWorkspace(page, 'timeout del pool');
+  await page.getByRole('link', { name: 'Inicio' }).click();
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(page.getByRole('dialog', { name: 'Ir a' })).toBeVisible();
+
+  await page.getByPlaceholder('Ir a un workspace').fill('timeout');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/w\//);
+
+  // Y también lleva a una sección, escribiendo lo que uno recuerda.
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByPlaceholder('Ir a un workspace').fill('salud');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/health/);
 });
 
 test('la terminal se abre, adjunta y no se cierra al salir', async ({ page }) => {

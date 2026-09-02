@@ -281,4 +281,14 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 5,
+    name: 'workspace_title_source',
+    sql: `
+      -- De dónde salió el título. Existe para una regla concreta: el que escribe una persona
+      -- gana siempre y no se vuelve a tocar. En el stack anterior el título automático pisaba
+      -- el que el usuario había puesto, y eso es de las cosas que más molestan.
+      ALTER TABLE workspaces ADD COLUMN title_source TEXT NOT NULL DEFAULT 'index';
+    `,
+  },
 ];

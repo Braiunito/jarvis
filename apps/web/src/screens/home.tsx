@@ -20,8 +20,21 @@ export function HomeScreen(): JSX.Element {
   const attention = (runs.data?.runs ?? []).filter((run) =>
     run.status === 'failed' || run.status === 'timed_out');
 
+  const last = workspaces.data?.workspaces[0];
+
   return (
     <div className="page">
+      {last ? (
+        <Link to={`/w/${last.id}`} className="card resume" style={{ textDecoration: 'none', color: 'inherit', marginBottom: 12 }}>
+          <span className="small muted">Seguir donde lo dejaste</span>
+          <span className="resume-title">{last.title ?? last.ref.sessionId}</span>
+          <span className="small muted">
+            {last.ref.provider} · {last.ref.host}
+            {last.cwd ? ` · ${last.cwd}` : ''} · {relativeTime(last.lastOpenedAt)}
+          </span>
+        </Link>
+      ) : null}
+
       <div className="grid-2">
         <div>
           <div className="card">

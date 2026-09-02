@@ -8,6 +8,7 @@ import type { JSX } from 'react';
 import { useState } from 'react';
 import { useHealth, useHosts } from '../api/queries.js';
 import { ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
+import { HEALTH } from '../ui/labels.js';
 
 export function HealthScreen(): JSX.Element {
   const health = useHealth();
@@ -51,8 +52,8 @@ export function HealthScreen(): JSX.Element {
           {Object.entries(health.data?.checks ?? {}).map(([name, check]) => (
             <div key={name} className="list-item" style={{ cursor: 'default' }}>
               <span className="row">
-                <span className={`badge ${check.status === 'ok' ? 'ok' : check.status === 'failed' ? 'danger' : 'warn'}`}>
-                  <span className="dot" aria-hidden="true" />{check.status}
+                <span className={`badge ${HEALTH[check.status]?.tone ?? 'neutral'}`}>
+                  <span className="dot" aria-hidden="true" />{HEALTH[check.status]?.name ?? check.status}
                 </span>
                 <span className="mono small">{name}</span>
                 {check.code ? <span className="small muted">{check.code}</span> : null}
@@ -72,7 +73,8 @@ export function HealthScreen(): JSX.Element {
             <div key={host.host} className="list-item" style={{ cursor: 'default' }}>
               <span className="row">
                 <span className={`badge ${host.reachable ? (host.stale ? 'warn' : 'ok') : 'danger'}`}>
-                  <span className="dot" aria-hidden="true" />{host.reachable ? (host.stale ? 'viejo' : 'ok') : 'inalcanzable'}
+                  <span className="dot" aria-hidden="true" />
+                  {host.reachable ? (host.stale ? 'sin refrescar' : 'bien') : 'no responde'}
                 </span>
                 <span className="mono">{host.host}</span>
                 {host.host === hosts.data?.bastionHost ? <span className="badge neutral">bastión</span> : null}

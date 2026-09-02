@@ -29,6 +29,7 @@ import { AnthropicModel, ScriptedModel, type AssistantModel } from './assistant/
 import { PlanService } from './plans/service.js';
 import { PlanSupervisor } from './plans/supervisor.js';
 import { ImportService } from './import/service.js';
+import { OpenAiCompatibleTitleModel, TitleService } from './workspaces/title.js';
 
 export const VERSION = '0.1.0';
 
@@ -54,6 +55,7 @@ export interface CoreServices {
   plans: PlanService;
   planSupervisor: PlanSupervisor;
   imports: ImportService;
+  titles: TitleService;
   close(): void;
 }
 
@@ -141,11 +143,26 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const plans = new PlanService({ db, clock, runs, workspaces, model, audit });
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
   const imports = new ImportService({ db, clock, workspaces: workspaceRepository, audit, bastionHost: config.bastionHost });
+  const titles = new TitleService({
+    db,
+    clock,
+    model: config.titleApiKey
+      ? new OpenAiCompatibleTitleModel({
+        apiKey: config.titleApiKey, baseUrl: config.titleBaseUrl, model: config.titleModel,
+      })
+      : null,
+  });
+  // Nombrar el workspace es consecuencia de que un trabajo termine, así que se engancha ahí y no
+  // en la ruta: da igual si el run lo lanzó una persona o el Assistant.
+  runs.onRunFinished = (run, prompt) => {
+    void titles.nameFromRun(run.workspaceId, { prompt, resultSummary: run.resultSummary })
+      .catch(() => undefined);
+  };
 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
-    plans, planSupervisor, imports,
+    plans, planSupervisor, imports, titles,
     close() {
       supervisor.stop();
       planSupervisor.stop();

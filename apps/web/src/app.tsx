@@ -10,6 +10,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { get, post, UnauthenticatedError } from './api/client.js';
 import { useRoute } from './router.js';
 import { Link } from './ui/bits.jsx';
+import { CommandPalette, openCommandPalette } from './ui/command-palette.jsx';
+import { useRuns } from './api/queries.js';
 import { LoginScreen } from './screens/login.jsx';
 import { HomeScreen } from './screens/home.jsx';
 import { ExplorerScreen } from './screens/explorer.jsx';
@@ -45,6 +47,14 @@ const queryClient = new QueryClient({
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element {
   const route = useRoute();
   const [section] = route.segments;
+  const runs = useRuns();
+
+  // Dos números distintos: lo que está en marcha y lo que se paró mal. Mezclarlos haría que el
+  // segundo pasara desapercibido, que es justo el que hay que mirar.
+  const working = (runs.data?.runs ?? []).filter((run) =>
+    ['queued', 'preparing', 'running', 'cancelling'].includes(run.status)).length;
+  const attention = (runs.data?.runs ?? []).filter((run) =>
+    run.status === 'waiting' || run.status === 'failed' || run.status === 'timed_out').length;
 
   const content = (() => {
     if (section === 'sessions') return <ExplorerScreen />;
@@ -65,11 +75,22 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
         <nav className="nav" aria-label="Secciones">
           <Link to="/" aria-current={current('/')}>Inicio</Link>
           <Link to="/sessions" aria-current={current('/sessions')}>Sesiones</Link>
-          <Link to="/runs" aria-current={current('/runs')}>Runs</Link>
+          <Link to="/runs" aria-current={current('/runs')}>
+            Trabajo
+            {attention > 0 ? (
+              <span className="count attention" title={`${attention} necesitan que mires`}>{attention}</span>
+            ) : working > 0 ? (
+              <span className="count" title={`${working} en marcha`}>{working}</span>
+            ) : null}
+          </Link>
           <Link to="/terminal" aria-current={current('/terminal')}>Terminal</Link>
           <Link to="/health" aria-current={current('/health')}>Salud</Link>
         </nav>
         <div className="topbar-right">
+          <button type="button" className="btn small palette-button" onClick={openCommandPalette}
+            title="Ir a un workspace, una sesión o un host">
+            Ir a… <span className="kbd">Ctrl K</span>
+          </button>
           {me.insecureLogin ? (
             <span className="badge warn" title="La entrada por contraseña sobre HTTP sigue abierta">
               HTTP sin cifrar
@@ -80,6 +101,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
         </div>
       </header>
       <main>{content}</main>
+      <CommandPalette />
     </div>
   );
 }

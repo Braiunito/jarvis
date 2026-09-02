@@ -227,6 +227,19 @@ export function useOpenWorkspace() {
   });
 }
 
+/** El nombre que pone una persona: a partir de ahí, el automático no vuelve a tocarlo. */
+export function useRenameWorkspace(workspaceId: string | null) {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (title: string) => put<{ workspace: Workspace }>(`/api/workspaces/${workspaceId as string}/title`, { title }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.workspace(workspaceId ?? 'none') });
+      void client.invalidateQueries({ queryKey: keys.workspaces });
+    },
+  });
+}
+
 export function useSaveDraft(workspaceId: string | null) {
   const client = useQueryClient();
   return useMutation({

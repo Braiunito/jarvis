@@ -1,0 +1,104 @@
+/**
+ * El vocabulario del producto, en un solo sitio.
+ *
+ * Los valores internos (`safe`, `running`, `waiting_run`…) son contrato: viajan a las CLIs, a la
+ * auditoría y al histórico, así que no se renombran. Lo que sí es nuestro es cómo se cuentan, y
+ * una etiqueta tiene que decir **qué puede hacer el agente**, no cómo se llama la bandera de la
+ * CLI por dentro.
+ */
+import type { PermissionProfile, RunStatus } from '@jarvis/contracts';
+
+export interface PermissionLabel {
+  name: string;
+  help: string;
+  tone: 'ok' | 'warn' | 'danger';
+}
+
+export const PERMISSION: Record<PermissionProfile, PermissionLabel> = {
+  safe: {
+    name: 'Sólo lectura',
+    help: 'Puede mirar y proponer. No cambia nada en la máquina.',
+    tone: 'ok',
+  },
+  auto: {
+    name: 'Puede editar',
+    help: 'Escribe ficheros en el destino. Lo que toque, queda tocado.',
+    tone: 'warn',
+  },
+  yolo: {
+    name: 'Sin restricciones',
+    help: 'Ejecuta cualquier cosa en la máquina, sin aislamiento.',
+    tone: 'danger',
+  },
+};
+
+export const permissionName = (profile: string): string =>
+  PERMISSION[profile as PermissionProfile]?.name ?? profile;
+
+export interface StatusLabel {
+  name: string;
+  tone: 'neutral' | 'running' | 'warn' | 'ok' | 'danger';
+  /** Lo que significa para quien mira, no lo que significa en la base. */
+  help: string;
+}
+
+export const RUN_STATUS: Record<RunStatus, StatusLabel> = {
+  queued: { name: 'En cola', tone: 'neutral', help: 'Aceptado; esperando turno para empezar.' },
+  preparing: { name: 'Preparando', tone: 'neutral', help: 'Montando el entorno en la máquina.' },
+  running: { name: 'Trabajando', tone: 'running', help: 'El agente está en ello ahora mismo.' },
+  waiting: { name: 'Esperando', tone: 'warn', help: 'Parado hasta que alguien intervenga.' },
+  cancelling: { name: 'Parando', tone: 'warn', help: 'Se pidió parar; falta confirmar que paró.' },
+  completed: { name: 'Terminado', tone: 'ok', help: 'Acabó y dejó su resultado.' },
+  failed: { name: 'Falló', tone: 'danger', help: 'Terminó mal. El detalle está en los eventos.' },
+  cancelled: { name: 'Parado', tone: 'neutral', help: 'Se paró a petición, y está confirmado.' },
+  timed_out: { name: 'Sin tiempo', tone: 'danger', help: 'Agotó su plazo y se detuvo.' },
+};
+
+export const PLAN_STATUS: Record<string, StatusLabel> = {
+  ready: { name: 'Listo', tone: 'neutral', help: 'Va a decidir el siguiente paso.' },
+  running: { name: 'Pensando', tone: 'running', help: 'Decidiendo qué hacer ahora.' },
+  waiting_run: { name: 'Trabajando', tone: 'running', help: 'Un agente está ejecutando un paso.' },
+  waiting_approval: { name: 'Necesita tu permiso', tone: 'warn', help: 'No sigue sin que lo autorices.' },
+  waiting_input: { name: 'Te pregunta algo', tone: 'warn', help: 'Necesita una respuesta tuya.' },
+  completed: { name: 'Terminado', tone: 'ok', help: 'Cerró el objetivo con una síntesis.' },
+  failed: { name: 'Falló', tone: 'danger', help: 'Se detuvo por un problema.' },
+  cancelled: { name: 'Parado', tone: 'neutral', help: 'Se paró antes de terminar.' },
+};
+
+export const PLAN_STEP_KIND: Record<string, string> = {
+  run: 'trabajo',
+  approval: 'permiso',
+  input: 'pregunta',
+  synthesis: 'cierre',
+};
+
+/** Cómo se cuenta de dónde salió lo que se está leyendo. */
+export const PROVENANCE: Record<string, string> = {
+  'remote-transcript': 'escrito en la máquina',
+  'jarvis-run': 'trabajo de Jarvis',
+  'litechat-import': 'importado de LiteChat',
+  system: 'del sistema',
+};
+
+/** Los estados de salud, que la gente lee de un vistazo y sin leer. */
+export const HEALTH: Record<string, { name: string; tone: 'ok' | 'warn' | 'danger' | 'neutral' }> = {
+  ok: { name: 'bien', tone: 'ok' },
+  stale: { name: 'sin refrescar', tone: 'warn' },
+  degraded: { name: 'a medias', tone: 'warn' },
+  failed: { name: 'caído', tone: 'danger' },
+  unknown: { name: 'sin datos', tone: 'neutral' },
+};
+
+export const EVENT_KIND: Record<string, string> = {
+  'run.target': 'destino',
+  'run.status': 'estado',
+  'run.cancel_requested': 'petición de parada',
+  'runner.stderr': 'salida de error',
+  'agent.started': 'el agente arrancó',
+  'agent.text': 'respuesta',
+  'agent.reasoning': 'razonamiento',
+  'agent.tool': 'herramienta',
+  'agent.result': 'resultado',
+  'agent.error': 'error',
+  'agent.raw': 'salida sin clasificar',
+};

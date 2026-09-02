@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { useCancelRun, useRetryRun, useRun, useRuns } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import { ErrorNote, Empty, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
+import { EVENT_KIND, PERMISSION } from '../ui/labels.js';
 
 export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Element {
   const runs = useRuns();
@@ -97,8 +98,13 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                 <dl className="small" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 10px', margin: 0 }}>
                   <dt className="muted">Ejecuta en</dt><dd style={{ margin: 0 }} className="mono">{detail.data.run.executionHost}</dd>
                   <dt className="muted">Trabaja sobre</dt><dd style={{ margin: 0 }} className="mono">{detail.data.run.workHost}</dd>
-                  <dt className="muted">Estrategia</dt><dd style={{ margin: 0 }}>{detail.data.run.strategy}{detail.data.run.strategyReason ? ` · ${detail.data.run.strategyReason}` : ''}</dd>
-                  <dt className="muted">Permiso</dt><dd style={{ margin: 0 }}>{detail.data.run.permissionProfile}</dd>
+                  <dt className="muted">Cómo</dt><dd style={{ margin: 0 }}>
+                    {detail.data.run.strategy === 'A'
+                      ? 'desde el bastión, por ssh'
+                      : 'en la propia máquina'}
+                    {detail.data.run.strategyReason ? ` · ${detail.data.run.strategyReason}` : ''}
+                  </dd>
+                  <dt className="muted">Podía</dt><dd style={{ margin: 0 }}>{PERMISSION[detail.data.run.permissionProfile].name}</dd>
                   <dt className="muted">Creado</dt><dd style={{ margin: 0 }}>{new Date(detail.data.run.createdAt).toLocaleString()}</dd>
                   {detail.data.run.finishedAt ? (<><dt className="muted">Terminado</dt><dd style={{ margin: 0 }}>{new Date(detail.data.run.finishedAt).toLocaleString()}</dd></>) : null}
                   {detail.data.run.errorCode ? (<><dt className="muted">Error</dt><dd style={{ margin: 0 }}>{detail.data.run.errorCode}</dd></>) : null}
@@ -115,7 +121,7 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                 <div className="timeline">
                   {stream.events.map((event) => (
                     <div key={event.seq} className="event">
-                      <div className="kind">#{event.seq} · {event.type}</div>
+                      <div className="kind">#{event.seq} · {EVENT_KIND[event.type] ?? event.type}</div>
                       <pre>{JSON.stringify(event.payload).slice(0, 500)}</pre>
                     </div>
                   ))}
