@@ -291,4 +291,14 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE workspaces ADD COLUMN title_source TEXT NOT NULL DEFAULT 'index';
     `,
   },
+  {
+    version: 6,
+    name: 'plan_step_position_is_unique',
+    sql: `
+      -- Dos pasos no pueden ocupar la misma posición de un plan. El motor ya serializa los turnos,
+      -- pero esto es lo que hace que una carrera se convierta en un error visible en vez de en un
+      -- plan con un paso que nadie pidió: la base sostiene la regla aunque el proceso se equivoque.
+      CREATE UNIQUE INDEX plan_steps_plan_ordinal ON plan_steps (plan_id, ordinal);
+    `,
+  },
 ];

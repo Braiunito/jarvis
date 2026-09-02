@@ -78,7 +78,10 @@ const link = (target, path) => {
 // se consigue enlazando a mano lo que ese host declara tener.
 const POSIX_TOOLS = ['sh', 'base64', 'find', 'grep', 'tail', 'head', 'wc', 'cat', 'date', 'mv',
   'rm', 'mkdir', 'chmod', 'touch', 'kill', 'env', 'sleep', 'tr', 'ls', 'sed', 'dirname',
-  'xargs', 'stat', 'cut', 'wait'];
+  'xargs', 'stat', 'cut', 'wait',
+  // `script` y `timeout` son los que le dan un TTY desechable al sondeo de cuota: sin ellos ese
+  // camino se salta entero y en local parece que la cuenta no tiene datos.
+  'script', 'timeout'];
 for (const tool of POSIX_TOOLS) {
   for (const candidate of [`/usr/bin/${tool}`, `/bin/${tool}`]) {
     if (existsSync(candidate)) { link(candidate, join(binDir, tool)); break; }

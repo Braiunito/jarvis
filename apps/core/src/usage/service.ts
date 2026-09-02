@@ -128,13 +128,25 @@ export class UsageService {
    * Si el refresco falla y hay un snapshot anterior, se devuelve ese marcado `stale` con el error:
    * un dato viejo y fechado es útil, una pantalla vacía no.
    */
-  async get({ provider, executionHost }: { provider: Provider; executionHost: string }): Promise<UsageSnapshot> {
+  async get(
+    { provider, executionHost, retryPartial = false }:
+    { provider: Provider; executionHost: string; retryPartial?: boolean },
+  ): Promise<UsageSnapshot> {
     if (provider !== 'claude' && provider !== 'codex') {
       throw new JarvisError('BAD_REQUEST', `usage is unavailable for provider: ${provider}`);
     }
     const key = `${provider}:${executionHost}`;
     const cached = this.#read(provider, executionHost);
-    if (cached && this.#deps.clock.nowMs() - Date.parse(cached.fetchedAt) < this.#deps.ttlMs) {
+    /**
+     * Un sondeo a medias: se leyó la cuenta pero no las cuotas.
+     *
+     * A un Claude recién instalado le sale una pantalla de bienvenida antes de `/usage`, así que
+     * el primer sondeo de una máquina nueva se queda sin límites. Esperar cinco minutos a
+     * reintentarlo enseña media verdad todo ese rato; por eso quien lo pide puede saltarse el TTL
+     * **una vez**, y sólo para este caso concreto.
+     */
+    const partial = provider === 'claude' && retryPartial && cached?.limits.length === 0;
+    if (cached && !partial && this.#deps.clock.nowMs() - Date.parse(cached.fetchedAt) < this.#deps.ttlMs) {
       return cached;
     }
 
@@ -242,6 +254,11 @@ export class UsageService {
       claudeLimit(terminal, 'Current session', 'session'),
       claudeLimit(terminal, 'Current week (all models)', 'week'),
     ].filter((value): value is UsageLimit => value !== null);
+    // Ni cuenta ni cuotas es «no se pudo leer», no «una cuenta vacía». Guardar eso como snapshot
+    // bueno enseña un hueco durante todo el TTL sin decir que hubo un problema.
+    if (!account && !limits.length) {
+      throw new Error('Claude did not return account or usage data on this host');
+    }
     return { account, limits };
   }
 

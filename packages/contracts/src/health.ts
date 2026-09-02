@@ -24,5 +24,14 @@ export const Health = Type.Object({
   version: Type.String(),
   at: Iso8601,
   checks: Type.Record(Type.String(), HealthCheck),
+  /** Lo que la barra de estado enseña sin tener que preguntar a nadie más. */
+  system: Type.Optional(Type.Object({
+    startedAt: Iso8601,
+    uptimeSeconds: Type.Integer(),
+    node: Type.String(),
+    sqlite: Type.String(),
+    hosts: Type.Integer(),
+    bastionHost: Type.String(),
+  })),
 });
 export type Health = Static<typeof Health>;

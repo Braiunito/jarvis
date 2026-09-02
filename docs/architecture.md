@@ -64,6 +64,37 @@ Las dos cosas que no se pueden confundir: `remote_cursor_bytes` es **cómo lee e
 **identidad pública** del evento. La primera puede cambiar de implementación; la segunda no se
 reutiliza jamás.
 
+## Un turno del Assistant
+
+El Assistant coordina; el estado lo posee el core. Un turno es corto y siempre acaba en algo que
+se puede guardar:
+
+```
+contexto (resúmenes + referencias)
+  → el modelo consulta lo que le falte      search_sessions · get_session_context · get_health
+                                            list_runs · get_run · cancel_run · open_terminal_offer
+  → decide una acción del core              create_run · request_approval · ask_human · finish
+  → el core persiste el checkpoint y el turno termina
+```
+
+Las herramientas llaman a los **mismos casos de uso que REST**, nunca a la API HTTP ni a una copia
+de la lógica, y van atadas al plan: no alcanzan el trabajo de otro workspace ni actúan como otra
+persona. Lo que devuelven va acotado y dice que va acotado; un modelo al que se le recorta la
+evidencia en silencio concluye sobre lo que no vio.
+
+Tres frenos, y ninguno vive en el prompt:
+
+- el presupuesto de consultas por turno lo aplica el toolbox, porque un modelo puede llamar a una
+  herramienta que no se le ofreció;
+- `finish` cita los trabajos por id y la interfaz enlaza a la evidencia: la síntesis no copia
+  buffers;
+- ofrecer una terminal deja un dato en el plan; abrirla es un gesto de la persona.
+
+Lo que espera —un run de horas, una aprobación, una respuesta humana— no se espera dentro del
+turno: se persiste como paso y el despertador vuelve cuando hay motivo. Por eso un plan sobrevive
+a un reinicio del core sin repetir el efecto: la clave de idempotencia es del paso, no de la
+ejecución.
+
 ## Estrategia A y B
 
 Una sesión vive en una máquina, pero el agente que trabaja sobre ella no tiene por qué correr

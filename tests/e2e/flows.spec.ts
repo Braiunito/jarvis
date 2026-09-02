@@ -9,18 +9,29 @@ import { expect, test, type Page } from '@playwright/test';
 
 const PASSWORD = 'e2e-password-de-pruebas';
 
+/**
+ * Los destinos del carril.
+ *
+ * Se busca dentro del carril y no en toda la página a propósito: «Sesiones» o «Trabajo» aparecen
+ * también como atajos dentro de las pantallas, y un test que pincha el primero que encuentra deja
+ * de probar la navegación para probar la suerte.
+ */
+const nav = (page: Page, name: string | RegExp) =>
+  page.locator('.rail').getByRole('link', { name });
+
 async function login(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByLabel('Usuario').fill('braian');
   await page.getByLabel('Contraseña').fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
-  await expect(page.getByRole('link', { name: 'Sesiones' })).toBeVisible();
+  await expect(nav(page, 'Sesiones')).toBeVisible();
 }
 
 /** Abre el workspace de una sesión concreta y devuelve su URL. */
 async function openWorkspace(page: Page, title: string): Promise<string> {
-  await page.getByRole('link', { name: 'Sesiones' }).click();
-  await page.getByRole('button', { name: new RegExp(title, 'i') }).click();
+  await nav(page, 'Sesiones').click();
+  // La lista es una tabla: se compara entre sesiones, así que cada una es una fila.
+  await page.getByRole('row', { name: new RegExp(title, 'i') }).click();
   await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
   await expect(page).toHaveURL(/\/w\//);
   return page.url();
@@ -31,21 +42,22 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('flujo 1 · retomar trabajo: buscar, previsualizar y abrir', async ({ page }) => {
-  await page.getByRole('link', { name: 'Sesiones' }).click();
-  await expect(page.getByRole('button', { name: /timeout del pool/i })).toBeVisible();
+  await nav(page, 'Sesiones').click();
+  await expect(page.getByRole('row', { name: /timeout del pool/i })).toBeVisible();
 
   // Buscar es una consulta: filtra la lista y no toca nada más.
   await page.getByLabel('Buscar sesiones').fill('certificado');
-  await expect(page.getByRole('button', { name: /certificado caducado/i })).toBeVisible();
-  await expect(page.getByRole('button', { name: /timeout del pool/i })).toHaveCount(0);
+  await expect(page.getByRole('row', { name: /certificado caducado/i })).toBeVisible();
+  await expect(page.getByRole('row', { name: /timeout del pool/i })).toHaveCount(0);
 
   await page.getByLabel('Buscar sesiones').fill('');
-  await page.getByRole('button', { name: /timeout del pool/i }).click();
+  await page.getByRole('row', { name: /timeout del pool/i }).click();
   await expect(page.getByText('el pool se queda sin conexiones')).toBeVisible();
 
   await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
   await expect(page).toHaveURL(/\/w\//);
   // El transcript remoto se ve, y dice de dónde salió.
+  await page.getByRole('tab', { name: /Conversación/ }).click();
   await expect(page.getByText('escrito en la máquina').first()).toBeVisible();
 });
 
@@ -55,28 +67,29 @@ test('flujo 2 · trabajo directo: destino visible antes de enviar, y resultado e
   // Lo que se ve antes de pulsar es exactamente lo que se va a ejecutar, y en un idioma que
   // dice qué puede hacer el agente, no cómo se llama la bandera de la CLI.
   await expect(page.getByText('claude · en bastion')).toBeVisible();
-  await expect(page.getByText('Sólo lectura').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sólo lectura', pressed: true })).toBeVisible();
 
-  await page.getByLabel('Prompt').fill('@@slow:3 revisa el pool');
+  await page.getByLabel('Qué quieres que haga el agente').fill('@@slow:3 revisa el pool');
   await page.getByRole('button', { name: 'Enviar' }).click();
 
   // El borrador se limpia sólo cuando el servidor confirmó el trabajo.
-  await expect(page.getByLabel('Prompt')).toHaveValue('');
+  await expect(page.getByLabel('Qué quieres que haga el agente')).toHaveValue('');
   await expect(page.getByText('Terminado').first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText('resultado').first()).toBeVisible();
 });
 
 test('flujo 3 · el borrador sobrevive a navegar y volver', async ({ page }) => {
   const url = await openWorkspace(page, 'pipeline de despliegue');
-  await page.getByLabel('Prompt').fill('esto es un borrador a medio escribir');
+  await page.getByLabel('Qué quieres que haga el agente').fill('esto es un borrador a medio escribir');
   // El guardado es con retardo: se le da su momento antes de irse.
   await page.waitForTimeout(1200);
 
-  await page.getByRole('link', { name: /Trabajo/ }).click();
+  await nav(page, /^Trabajo/).click();
   await expect(page).toHaveURL(/\/runs/);
   await page.goto(url);
 
-  await expect(page.getByLabel('Prompt')).toHaveValue('esto es un borrador a medio escribir');
+  await expect(page.getByLabel('Qué quieres que haga el agente'))
+    .toHaveValue('esto es un borrador a medio escribir');
 });
 
 test('flujo 4 · delegar un objetivo al Assistant', async ({ page }) => {
@@ -92,7 +105,7 @@ test('flujo 4 · delegar un objetivo al Assistant', async ({ page }) => {
 });
 
 test('flujo 5 · diagnóstico: qué salto está roto y cómo se copia', async ({ page }) => {
-  await page.getByRole('link', { name: 'Salud' }).click();
+  await nav(page, /^Salud/).click();
 
   await expect(page.getByText('ssh:bastion')).toBeVisible();
   // Un host caído deja su check en rojo y el resto de la aplicación en pie.
@@ -105,7 +118,7 @@ test('flujo 5 · diagnóstico: qué salto está roto y cómo se copia', async ({
 
 test('la paleta lleva a un contexto sin pasar por tres pantallas', async ({ page }) => {
   await openWorkspace(page, 'timeout del pool');
-  await page.getByRole('link', { name: 'Inicio' }).click();
+  await nav(page, 'Inicio').click();
 
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.getByRole('dialog', { name: 'Ir a' })).toBeVisible();
@@ -122,14 +135,37 @@ test('la paleta lleva a un contexto sin pasar por tres pantallas', async ({ page
 });
 
 test('la terminal se abre, adjunta y no se cierra al salir', async ({ page }) => {
-  await page.getByRole('link', { name: 'Terminal' }).click();
+  await nav(page, 'Terminal').click();
   await page.getByRole('button', { name: 'Conectar' }).click();
 
   await expect(page.getByText('conectada')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/Claude Code \(falso\)/)).toBeVisible({ timeout: 30_000 });
+
+  // Adjuntar de verdad se prueba escribiendo: si vuelve el eco, hay un TTY al otro lado. Mirar el
+  // banner sólo funciona la primera vez —al reengancharse, tmux redibuja la pantalla actual, no
+  // el historial—, y eso hacía que el test dependiera de quién llegó antes.
+  await page.locator('.terminal-host').click();
+  await page.keyboard.type('hola-jarvis');
+  await expect(page.getByText(/hola-jarvis/).first()).toBeVisible({ timeout: 20_000 });
 
   // Salir de la pantalla no mata la sesión: al volver sigue en la lista.
-  await page.getByRole('link', { name: 'Inicio' }).click();
-  await page.getByRole('link', { name: 'Terminal' }).click();
+  await nav(page, 'Inicio').click();
+  await nav(page, 'Terminal').click();
   await expect(page.getByText(/jarvis-claude/).first()).toBeVisible({ timeout: 20_000 });
+});
+
+test('cerrar la terminal sí la mata, y lo dice antes de hacerlo', async ({ page }) => {
+  await nav(page, 'Terminal').click();
+  await page.getByRole('button', { name: /Conectar|Reconectar/ }).click();
+  await expect(page.getByText('conectada')).toBeVisible({ timeout: 30_000 });
+
+  // Destruir es explícito: nombra la sesión y la máquina antes de tocarlas.
+  await page.getByRole('button', { name: 'Cerrar la terminal', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('No se puede deshacer')).toBeVisible();
+  await expect(dialog.getByText(/bastion/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cerrar la terminal' }).click();
+
+  // Y al volver ya no está.
+  await expect(page.getByText('conectada')).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.getByText(/jarvis-claude/)).toHaveCount(0, { timeout: 20_000 });
 });

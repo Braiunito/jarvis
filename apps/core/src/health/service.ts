@@ -22,6 +22,9 @@ export interface HealthServiceDeps {
   version: string;
 }
 
+/** Cuándo arrancó este proceso: es lo que convierte «uptime» en un dato y no en una sensación. */
+const STARTED_AT = new Date();
+
 export class HealthService {
   readonly #deps: HealthServiceDeps;
   #lastSweepAt: string | null = null;
@@ -80,6 +83,14 @@ export class HealthService {
       version: this.#deps.version,
       at: this.#deps.clock.nowIso(),
       checks,
+      system: {
+        startedAt: STARTED_AT.toISOString(),
+        uptimeSeconds: Math.max(0, Math.round((this.#deps.clock.nowMs() - STARTED_AT.getTime()) / 1000)),
+        node: process.version,
+        sqlite: (this.#deps.db.prepare('select sqlite_version() as v').get() as { v: string }).v,
+        hosts: this.#deps.fleet.hosts.length,
+        bastionHost: this.#deps.fleet.bastionHost,
+      },
     };
   }
 }

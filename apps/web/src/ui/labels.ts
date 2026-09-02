@@ -104,6 +104,28 @@ export const EVENT_KIND: Record<string, string> = {
 };
 
 /**
+ * Las ventanas de cuota del agente.
+ *
+ * Las etiquetas vienen de cada CLI (`session`, `week`, `5h`, `primary`…) y no se renombran por
+ * dentro. Lo que se enseña es cuánto **queda**, que es lo que se mira antes de mandar trabajo:
+ * «45% usado» obliga a restar mentalmente justo cuando importa no equivocarse.
+ */
+export const USAGE_WINDOW: Record<string, string> = {
+  session: 'sesión',
+  week: 'semana',
+  '5h': '5 h',
+  // Las genéricas sólo salen cuando la ventana no es una de las conocidas: no se les pone una
+  // duración inventada, que la de verdad viaja en `windowMinutes`.
+  primary: 'principal',
+  secondary: 'secundaria',
+};
+
+export const usageWindowName = (label: string): string => USAGE_WINDOW[label] ?? label;
+
+/** Por debajo de esto, lo que queda deja de ser un dato y pasa a ser un aviso. */
+export const USAGE_LOW_PERCENT = 15;
+
+/**
  * Los checks de salud se identifican por una clave técnica —la que va en «copiar diagnóstico» y
  * la que se nombra al pedir ayuda—, pero al lado conviene decir qué es cada cosa.
  */

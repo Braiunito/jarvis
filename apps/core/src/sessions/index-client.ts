@@ -50,7 +50,7 @@ export interface SessionQuery {
 export interface SessionIndex {
   list(query: SessionQuery): Promise<{ rows: IndexRow[]; stale: boolean; error: string | null }>;
   hosts(): Promise<{ rows: IndexHostRow[]; stale: boolean; error: string | null }>;
-  transcript(ref: SessionRef, options?: { last?: number }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean }>;
+  transcript(ref: SessionRef, options?: { last?: number }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount?: number | null }>;
   health(): Promise<{ ok: boolean; error: string | null; lastOkAt: string | null }>;
 }
 
@@ -153,7 +153,7 @@ export class HttpSessionIndex implements SessionIndex {
     return this.#withFallback('hosts', () => this.#get<IndexHostRow[]>('/api/hosts'));
   }
 
-  async transcript(ref: SessionRef, { last }: { last?: number } = {}): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean }> {
+  async transcript(ref: SessionRef, { last }: { last?: number } = {}): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null }> {
     // El índice indexa por `session_key`; se localiza por el id, que es lo único que Jarvis guarda.
     const listed = await this.#get<IndexRow[]>('/api/sessions', { limit: '500', host: ref.host, provider: ref.provider });
     const row = listed.find((candidate) => candidate.session_id === ref.sessionId);
@@ -169,6 +169,9 @@ export class HttpSessionIndex implements SessionIndex {
         text: message.text,
       })),
       truncated: Boolean(payload.truncated),
+      // Cuántos mensajes tiene la sesión, no cuántos cabían en esta página. La fila del índice ya
+      // se ha buscado para resolver la clave, así que el dato sale gratis.
+      messageCount: (row.user_messages ?? 0) + (row.assistant_messages ?? 0),
     };
   }
 

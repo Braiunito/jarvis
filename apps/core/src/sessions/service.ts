@@ -60,7 +60,7 @@ export class SessionService {
     };
   }
 
-  async transcript(ref: SessionRef, options: { last?: number } = {}): Promise<{ messages: TranscriptMessage[]; truncated: boolean }> {
+  async transcript(ref: SessionRef, options: { last?: number } = {}): Promise<{ messages: TranscriptMessage[]; truncated: boolean; messageCount: number | null }> {
     try {
       const payload = await this.#deps.index.transcript(ref, options);
       return {
@@ -73,6 +73,7 @@ export class SessionService {
           provenance: 'remote-transcript',
         })),
         truncated: payload.truncated,
+        messageCount: payload.messageCount ?? null,
       };
     } catch (error) {
       if (error instanceof JarvisError) throw error;

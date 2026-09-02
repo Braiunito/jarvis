@@ -12,3 +12,11 @@ deploy/data/
 *.db-wal
 *.db-shm
 evidence/*.png
+
+# Lo que dejan las pruebas al correr. Se regenera solo, y dentro va estado del gateway —
+# `session.key`, `users.json` con el hash de la contraseña de prueba— que no tiene que estar
+# versionado aunque sea de mentira: la regla no se aplica a ratos.
+.dev/
+.e2e/
+test-results/
+playwright-report/

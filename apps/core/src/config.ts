@@ -73,6 +73,12 @@ export const config = {
    * la durabilidad de un plan sin red, sin credencial y sin gastar cuota.
    */
   assistantScripted: bool(env['JARVIS_ASSISTANT_SCRIPTED'], false),
+  /**
+   * Cuántas consultas puede encadenar el coordinador dentro de un turno antes de tener que
+   * decidir algo. Es un presupuesto del core, no del modelo: sin él, un turno puede irse en
+   * investigar y no proponer nada, que es la forma cara de no hacer nada.
+   */
+  assistantMaxToolCalls: Number(env['JARVIS_ASSISTANT_MAX_TOOL_CALLS'] || 6),
 
   /**
    * El modelo que pone nombre a los workspaces.

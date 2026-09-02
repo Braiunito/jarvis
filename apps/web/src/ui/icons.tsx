@@ -17,11 +17,13 @@
  */
 import type { JSX } from 'react';
 import {
-  Ban, Bot, Cable, Check, CircleAlert, CircleCheck, CircleDot, CircleHelp, CircleSlash, CircleStop,
-  CircleX, Clock, Copy, CornerDownLeft, Download, Eye, FileText, FolderOpen, HeartPulse, History,
-  Hourglass, House, Inbox, ListChecks, LoaderCircle, LogOut, Paperclip, Pencil, RotateCcw, Search,
-  SendHorizontal, Server, ShieldOff, SquareTerminal, Timer, TimerOff, TriangleAlert, Wrench, X,
-  Zap, type LucideIcon,
+  Activity, Ban, Bot, Boxes, Cable, ChevronLeft, ChevronRight, Check, CircleAlert, CircleCheck,
+  CircleDot, CircleHelp, CircleSlash, CircleStop, CircleX, Clock, Copy, CornerDownLeft, Database,
+  Download, ExternalLink, Eye, FileText, Filter, FolderOpen, Gauge, Hexagon, HeartPulse, History,
+  Hourglass, House, Inbox, ListChecks, LoaderCircle, LogOut, MessageSquare, Paperclip, Pencil,
+  Plus, RotateCcw, Search, SendHorizontal, Server, Settings2, ShieldCheck, ShieldOff, Sparkles,
+  SlidersHorizontal, SquareTerminal, Timer, TimerOff, TriangleAlert, Wrench, X, Zap, Braces,
+  Code, type LucideIcon,
 } from 'lucide-react';
 import type { PermissionProfile, RunStatus } from '@jarvis/contracts';
 
@@ -99,11 +101,35 @@ export const PROVENANCE_ICON: Record<string, LucideIcon> = {
 
 /** Las secciones. En el móvil son lo único que se ve antes que el texto. */
 export const NAV_ICON = {
+  brand: Hexagon,
   home: House,
   sessions: Search,
   runs: ListChecks,
   terminal: SquareTerminal,
   health: HeartPulse,
+  settings: Settings2,
+} as const;
+
+/**
+ * Un icono por proveedor.
+ *
+ * Son formas distintas, no marcas: sirven para recorrer una columna de sesiones sin leer cada
+ * fila. Si algún día hay logotipos oficiales, se cambian aquí y en ningún otro sitio.
+ */
+export const PROVIDER_ICON: Record<string, LucideIcon> = {
+  claude: Sparkles,
+  codex: Braces,
+  opencode: Boxes,
+};
+
+/** Formas sueltas que aparecen en cabeceras y filas de datos. */
+export const STATUS_ICON = {
+  clock: Clock,
+  activity: Activity,
+  gauge: Gauge,
+  message: MessageSquare,
+  host: Server,
+  folder: FolderOpen,
 } as const;
 
 /** Acciones. Siempre junto a su palabra: un botón que sólo es un dibujo se adivina, no se lee. */
@@ -125,4 +151,19 @@ export const ACTION_ICON = {
   empty: Inbox,
   error: TriangleAlert,
   insecure: ShieldOff,
+  secure: ShieldCheck,
+  chevron: ChevronRight,
+  collapse: ChevronLeft,
+  expand: ChevronRight,
+  external: ExternalLink,
+  filter: Filter,
+  filters: SlidersHorizontal,
+  new: Plus,
+  hosts: Boxes,
+  database: Database,
+  node: Hexagon,
+  settings: Settings2,
+  message: MessageSquare,
+  rename: Pencil,
+  expandJson: Code,
 } as const;

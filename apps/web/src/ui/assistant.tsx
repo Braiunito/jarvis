@@ -8,11 +8,68 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import type { Approval, Plan, PlanStep } from '@jarvis/contracts';
-import { useCancelPlan, useCreatePlan, usePlan, usePlans, useResolveApproval } from '../api/queries.js';
-import { ErrorNote, relativeTime } from './bits.jsx';
+import {
+  useAnswerPlan, useCancelPlan, useCreatePlan, usePlan, usePlans, useResolveApproval,
+} from '../api/queries.js';
+import { ErrorNote, Link, relativeTime } from './bits.jsx';
 
-import { PERMISSION, PLAN_STATUS, PLAN_STEP_KIND } from './labels.js';
-import { ACTION_ICON, Glyph, PERMISSION_ICON, PLAN_STATUS_ICON } from './icons.jsx';
+import { PERMISSION, PLAN_STATUS, PLAN_STEP_KIND, RUN_STATUS } from './labels.js';
+import {
+  ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PLAN_STATUS_ICON, RUN_STATUS_ICON, STATUS_ICON,
+} from './icons.jsx';
+import { Card } from './primitives.jsx';
+
+/** Lo que el plan dejó preparado para que lo abras tú. El modelo no abre terminales. */
+interface TerminalOffer {
+  host: string;
+  provider: string;
+  sessionId: string;
+  cwd: string | null;
+  permissionProfile: string;
+  reason: string;
+}
+
+/** Un trabajo citado por la síntesis: el enlace a la evidencia, no su copia. */
+interface EvidenceRef {
+  runId: string;
+  title: string;
+  status: string;
+  summary: string | null;
+}
+
+const offerOf = (value: unknown): TerminalOffer | null =>
+  (value as { terminalOffer?: TerminalOffer } | null)?.terminalOffer ?? null;
+
+/**
+ * La oferta de terminal.
+ *
+ * El plan ya sabe en qué máquina y en qué sesión hay que mirar, así que aquí no se vuelve a
+ * preguntar: el enlace lleva la terminal ya elegida. Sigue abriéndola una persona.
+ */
+function TerminalOfferButton({ offer, workspaceId }: {
+  offer: TerminalOffer;
+  workspaceId: string;
+}): JSX.Element {
+  const href = `/terminal?host=${encodeURIComponent(offer.host)}`
+    + `&provider=${offer.provider}`
+    + `&sessionId=${encodeURIComponent(offer.sessionId)}`
+    + `&from=${encodeURIComponent(workspaceId)}`;
+  return (
+    <div className="note">
+      <Glyph icon={NAV_ICON.terminal} size={16} />
+      <span>
+        <span className="small">{offer.reason}</span>
+        <span className="row tight" style={{ marginTop: 8 }}>
+          <Link to={href} className="btn small">
+            <Glyph icon={NAV_ICON.terminal} />
+            Abrir terminal en {offer.host}
+          </Link>
+          <span className="tiny faint mono">{offer.cwd ?? offer.sessionId}</span>
+        </span>
+      </span>
+    </div>
+  );
+}
 
 function PlanBadge({ status }: { status: string }): JSX.Element {
   const label = PLAN_STATUS[status];
@@ -34,8 +91,8 @@ function ApprovalCard({ approval, onDecide, pending }: {
   const target = approval.target as { host?: string; permissionProfile?: string; prompt?: string };
   const expiresIn = Math.max(0, Math.round((Date.parse(approval.expiresAt) - Date.now()) / 60_000));
   return (
-    <div className="card" style={{ borderColor: 'var(--warn)' }}>
-      <h3 className="row" style={{ color: 'var(--warn)', gap: 6 }}>
+    <div className="card warn-card">
+      <h3 className="row" style={{ color: 'var(--warn)', gap: 6, margin: '0 0 6px' }}>
         <Glyph icon={PLAN_STATUS_ICON['waiting_approval'] as never} size={16} />
         Necesita tu permiso
       </h3>
@@ -68,18 +125,78 @@ function ApprovalCard({ approval, onDecide, pending }: {
   );
 }
 
+/**
+ * Un paso del plan.
+ *
+ * Cuando el paso lanzó trabajo real, se enseña el enlace: sin él, el plan cuenta una historia que
+ * no se puede comprobar, y la evidencia de lo que pasó en la máquina está justo al otro lado.
+ */
 function StepRow({ step }: { step: PlanStep }): JSX.Element {
-  const output = step.output as { summary?: string; status?: string } | null;
+  const output = step.output as { summary?: string; status?: string; answer?: string } | null;
   return (
     <div className="list-item" style={{ cursor: 'default' }}>
-      <span className="row">
+      <span className="row tight nowrap" style={{ minWidth: 0 }}>
         <PlanBadge status={step.status} />
-        <span className="small muted">#{step.ordinal + 1}</span>
-        <span className="title">{step.title}</span>
-        <span className="badge neutral">{PLAN_STEP_KIND[step.kind] ?? step.kind}</span>
+        <span className="cell-main">
+          <span className="row tight nowrap">
+            <span className="tiny faint">#{step.ordinal + 1}</span>
+            <span className="title truncate">{step.title}</span>
+          </span>
+          {output?.summary ? (
+            <span className="tiny faint truncate">{output.summary.slice(0, 160)}</span>
+          ) : null}
+          {output?.answer ? (
+            <span className="tiny faint truncate">respondiste: {output.answer.slice(0, 120)}</span>
+          ) : null}
+        </span>
       </span>
-      {output?.summary ? <span className="small muted">{output.summary.slice(0, 200)}</span> : null}
-      {step.errorCode ? <span className="small" style={{ color: 'var(--danger)' }}>{step.errorCode}</span> : null}
+      <span className="row tight nowrap">
+        {step.errorCode ? <span className="badge danger">{step.errorCode}</span> : null}
+        <span className="badge neutral">{PLAN_STEP_KIND[step.kind] ?? step.kind}</span>
+        {step.runId ? (
+          <Link to={`/runs/${step.runId}`} className="btn small" title="Ver el trabajo que lanzó este paso">
+            <Glyph icon={NAV_ICON.runs} size={13} />
+            Trabajo
+          </Link>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Lo que el plan pregunta.
+ *
+ * Es la otra cara de la aprobación: allí se autoriza una acción, aquí se aporta un dato que
+ * falta. Sin este hueco, un plan que pregunta se queda parado y no se sabe por qué.
+ */
+function QuestionCard({ step, planId }: { step: PlanStep; planId: string }): JSX.Element {
+  const [answer, setAnswer] = useState('');
+  const respond = useAnswerPlan();
+  const question = (step.input as { question?: string } | null)?.question ?? step.title;
+  return (
+    <div className="card warn-card">
+      <h3 className="row" style={{ color: 'var(--warn)', gap: 6, margin: '0 0 6px' }}>
+        <Glyph icon={PLAN_STATUS_ICON['waiting_input'] as never} size={16} />
+        Te pregunta algo
+      </h3>
+      <p style={{ margin: '0 0 8px' }}>{question}</p>
+      <form className="stack" onSubmit={(event) => {
+        event.preventDefault();
+        if (!answer.trim()) return;
+        respond.mutate({ planId, answer: answer.trim() }, { onSuccess: () => setAnswer('') });
+      }}>
+        <input className="input" value={answer} aria-label="Tu respuesta"
+          placeholder="Escribe la respuesta y el plan sigue"
+          onChange={(event) => setAnswer(event.target.value)} />
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button type="submit" className="btn primary" disabled={respond.isPending || !answer.trim()}>
+            <Glyph icon={ACTION_ICON.send} />
+            {respond.isPending ? 'Enviando…' : 'Responder'}
+          </button>
+        </div>
+        <ErrorNote error={respond.error} />
+      </form>
     </div>
   );
 }
@@ -96,6 +213,7 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
     !['completed', 'failed', 'cancelled'].includes(plan.status));
   const currentId = openPlanId ?? active?.id ?? plans.data?.plans[0]?.id ?? null;
   const detail = usePlan(currentId);
+  const pendingCount = (plans.data?.approvals ?? []).length;
 
   async function submit(): Promise<void> {
     if (!objective.trim()) return;
@@ -106,23 +224,31 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
 
   if (plans.data && !plans.data.assistantAvailable) {
     return (
-      <div className="card">
-        <h2>Assistant</h2>
+      <Card title="Assistant" icon={ACTION_ICON.delegate}>
         <p className="small muted" style={{ margin: 0 }}>
           No hay modelo configurado en el core, así que el Assistant está apagado. El trabajo
           directo funciona igual.
         </p>
-      </div>
+      </Card>
     );
   }
 
+  const question = (detail.data?.steps ?? []).find(
+    (step) => step.kind === 'input' && step.status === 'waiting_input');
+
+  const synthesis = (detail.data?.steps ?? []).find((step) => step.kind === 'synthesis');
+  const evidence = ((synthesis?.output as { evidence?: EvidenceRef[] } | null)?.evidence) ?? [];
+  // La última oferta gana: si el plan volvió a mirar, el sitio al que mandaba antes ya no es el
+  // sitio donde está lo interesante.
+  const offer = (detail.data?.steps ?? [])
+    .map((step) => offerOf(step.output) ?? offerOf(step.input))
+    .filter((value): value is TerminalOffer => value !== null)
+    .at(-1) ?? null;
+
   return (
-    <div className="card">
-      <h2 className="row" style={{ gap: 7 }}>
-        <Glyph icon={ACTION_ICON.delegate} size={16} />
-        Assistant
-      </h2>
-      <p className="small muted" style={{ marginTop: 0 }}>
+    <Card title="Assistant" icon={ACTION_ICON.delegate}
+      {...(pendingCount ? { count: pendingCount, countTone: 'attention' as const } : {})}>
+      <p className="small muted" style={{ margin: '0 0 10px' }}>
         Describe un objetivo y el asistente lo parte en pasos. Cada paso es trabajo real en la
         máquina; lo que tenga efectos te lo pedirá antes.
       </p>
@@ -145,6 +271,12 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
         </div>
         <ErrorNote error={create.error} />
       </div>
+
+      {offer ? <TerminalOfferButton offer={offer} workspaceId={workspaceId} /> : null}
+
+      {question && detail.data ? (
+        <QuestionCard step={question} planId={detail.data.plan.id} />
+      ) : null}
 
       {(plans.data?.approvals ?? []).map((approval) => (
         <ApprovalCard
@@ -178,8 +310,34 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
           </div>
           {detail.data.plan.summary ? (
             <div className="card" style={{ background: 'var(--bg-sunken)' }}>
-              <h3>Resultado</h3>
+              <h3 style={{ margin: '0 0 6px', fontSize: 13 }}>Resultado</h3>
               <p className="small" style={{ margin: 0 }}>{detail.data.plan.summary}</p>
+              {evidence.length ? (
+                <>
+                  <p className="tiny faint" style={{ margin: '10px 0 6px' }}>
+                    Lo que sostiene esta conclusión:
+                  </p>
+                  <div className="list">
+                    {evidence.map((item) => (
+                      <Link key={item.runId} to={`/runs/${item.runId}`} className="list-item">
+                        <span className="row tight nowrap" style={{ minWidth: 0 }}>
+                          <Glyph icon={RUN_STATUS_ICON[item.status as keyof typeof RUN_STATUS_ICON]
+                            ?? STATUS_ICON.activity} size={13} />
+                          <span className="cell-main">
+                            <span className="title truncate">{item.title}</span>
+                            {item.summary ? (
+                              <span className="tiny faint truncate">{item.summary}</span>
+                            ) : null}
+                          </span>
+                        </span>
+                        <span className="tiny faint nowrap">
+                          {RUN_STATUS[item.status as keyof typeof RUN_STATUS]?.name ?? item.status}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -202,6 +360,6 @@ export function AssistantPanel({ workspaceId }: { workspaceId: string }): JSX.El
           </div>
         </details>
       ) : null}
-    </div>
+    </Card>
   );
 }

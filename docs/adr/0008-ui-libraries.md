@@ -69,10 +69,24 @@ No entran:
 |---|---|---|---|---|
 | 2026-09-02 | `cmdk` | 1.1.1 | 156 → 176 KiB gzip | UX-04, paleta de comandos |
 | 2026-09-02 | `lucide-react` | 1.39.0 | 176 → 180 KiB gzip (≈40 iconos) | iconografía |
+| 2026-09-02 | `@radix-ui/react-dialog` | 1.1.23 | 191 → 194 KiB gzip (con el visor) | UX-08, detalle de un evento |
+| 2026-09-02 | `react-json-view-lite` | 2.5.0 | incluido en la línea anterior | UX-08, JSON plegable |
 
 El coste de los iconos es de 4 KiB para cuarenta siluetas porque se importan por nombre y el
 paquete es ESM: sólo viaja lo que se usa. Importar `import * as icons` costaría el paquete entero,
 así que no se hace.
+
+**Por qué esas dos y no las de siempre.** Para el modal se descartó SweetAlert2: pesa unas diez
+veces más, es imperativo —se llama, no se declara— y trae su propia paleta, que habría que pelear
+token a token. Radix Dialog ya estaba aprobado por componente en esta misma decisión, pesa poco y
+trae lo que cuesta hacer bien a mano: foco atrapado, `Escape`, `aria-modal` y devolver el foco al
+salir.
+
+Para el JSON se miraron `react-json-view` (sin mantenimiento, pide React 17), su fork de Microlink
+(mismo problema con menos ojos encima) y `@textea/json-viewer` (arrastra emotion). Se eligió
+`react-json-view-lite`: MIT, 7 KiB, compatible con React 19 y —lo que decidió— permite pasarle las
+clases del producto, así que el árbol viste con nuestros tokens en vez de traer su tema. No se
+importa su `index.css`.
 
 Dónde se usan y por qué ahí, en `apps/web/src/ui/icons.tsx`: la regla es que un icono acompaña al
 texto y nunca lo sustituye, salvo en la barra estrecha del móvil, donde el botón lleva su etiqueta

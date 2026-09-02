@@ -72,13 +72,21 @@ export class WorkspaceRepository {
     );
   }
 
+  /**
+   * Reabrir una sesión refresca lo que el índice sabe: dónde trabaja y cómo se llama.
+   *
+   * Con una excepción que no es negociable: **el título que escribió una persona no se toca**. El
+   * explorador manda el título del índice en cada apertura, así que sin esta condición volver a
+   * pulsar la misma sesión deshacía el nombre que alguien puso a mano — la misma regresión que el
+   * stack anterior tenía con el título automático, entrando por otra puerta.
+   */
   touch(id: string, at: string, patch: { cwd?: string | null; sourceRoot?: string | null; title?: string | null } = {}): void {
     this.#db.prepare(`UPDATE workspaces SET
         last_opened_at = ?,
         updated_at = ?,
         cwd = COALESCE(?, cwd),
         source_root = COALESCE(?, source_root),
-        title = COALESCE(?, title)
+        title = CASE WHEN title_source = 'user' THEN title ELSE COALESCE(?, title) END
       WHERE id = ?`).run(at, at, patch.cwd ?? null, patch.sourceRoot ?? null, patch.title ?? null, id);
   }
 

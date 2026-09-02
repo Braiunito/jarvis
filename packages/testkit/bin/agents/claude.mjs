@@ -6,6 +6,22 @@
  * fallo o un cuelgue sin canales laterales: `@@fail`, `@@hang`, `@@slow:<n>`, `@@big:<kib>`.
  */
 const argv = process.argv.slice(2);
+
+/**
+ * `claude auth status --json`: lo que el core lee para saber de quién es la cuenta.
+ *
+ * Sin esto, el sondeo de cuenta y cuota no se puede probar en local y el badge de la consola sale
+ * vacío en desarrollo por un motivo que no tiene nada que ver con el producto.
+ */
+if (argv[0] === 'auth' && argv[1] === 'status') {
+  process.stdout.write(`${JSON.stringify({
+    email: 'operador@ejemplo.dev',
+    subscriptionType: 'max',
+    authMethod: 'claude.ai',
+  })}\n`);
+  process.exit(0);
+}
+
 const promptIndex = argv.indexOf('-p');
 const prompt = promptIndex !== -1 ? (argv[promptIndex + 1] ?? '') : '';
 const resumeIndex = argv.indexOf('--resume');
@@ -32,6 +48,18 @@ function interactive() {
   process.stdin.on('data', (chunk) => {
     // Eco como haría un TTY, para que el test pueda comprobar que la entrada llegó.
     process.stdout.write(chunk.replace(/\r/g, '\r\n'));
+    // `/usage` es una pantalla local de la CLI, y es de donde el core saca las cuotas. Se dibuja
+    // con las mismas cabeceras y el mismo «N% used» que la de verdad, porque eso es exactamente
+    // lo que el parser busca.
+    if (chunk.includes('/usage')) {
+      process.stdout.write('\r\n Current session\r\n');
+      process.stdout.write(' █████░░░░░ 45% used\r\n');
+      process.stdout.write(' Resets 2:30pm (Europe/Madrid)\r\n\r\n');
+      process.stdout.write(' Current week (all models)\r\n');
+      process.stdout.write(' ██░░░░░░░░ 12% used\r\n');
+      process.stdout.write(' Resets Sep 8\r\n\r\n');
+    }
+    if (chunk.includes('/exit')) process.exit(0);
     if (chunk.includes('\r') || chunk.includes('\n')) process.stdout.write(' > ');
   });
   process.stdin.on('end', () => process.exit(0));

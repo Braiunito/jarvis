@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import type {
-  Approval, Plan, PlanStep, PlanStatus, Run, UserIdentity,
+  Approval, Plan, PlanStep, PlanStatus, Run, UserIdentity, Workspace,
 } from '@jarvis/contracts';
 import { isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
@@ -17,7 +17,12 @@ import { newApprovalId, newPlanId, newStepId } from '../platform/ids.js';
 import type { AuditLog } from '../platform/audit.js';
 import type { RunService } from '../runs/service.js';
 import type { WorkspaceService } from '../workspaces/use-cases.js';
-import type { AssistantModel, PlanContext } from '../assistant/model.js';
+import type { SessionService } from '../sessions/service.js';
+import type { HealthService } from '../health/service.js';
+import type {
+  AssistantModel, EvidenceRef, PlanContext, PlanHistoryEntry,
+} from '../assistant/model.js';
+import { CoreAssistantToolbox, type ToolboxLimits } from '../assistant/toolbox.js';
 
 interface PlanRow {
   id: string; workspace_id: string; created_by: string; objective: string; status: string;
@@ -86,26 +91,53 @@ const toApproval = (row: ApprovalRow): Approval => ({
   consumedAt: row.consumed_at,
 });
 
+/**
+ * Lo que un paso ya dado le cuenta al modelo en una línea.
+ *
+ * Cada tipo de paso guarda su resultado de otra forma, y lo que importa es que ninguno se quede
+ * mudo en el historial: un paso sin resumen es un paso que el modelo repite.
+ */
+function stepSummary(step: PlanStep): string | null {
+  const output = step.output as Record<string, unknown> | null;
+  if (!output) return null;
+  if (typeof output['summary'] === 'string') return output['summary'];
+  if (typeof output['answer'] === 'string') return `la persona respondió: ${output['answer']}`;
+  if (typeof output['error'] === 'string') return `falló: ${output['error']}`;
+  if (typeof output['status'] === 'string') return `la aprobación quedó ${output['status']}`;
+  return null;
+}
+
 export interface PlanServiceDeps {
   db: Db;
   clock: Clock;
   runs: RunService;
   workspaces: WorkspaceService;
+  /** Las herramientas de lectura del Assistant salen de estos mismos casos de uso, no de REST. */
+  sessions: SessionService;
+  health: HealthService;
   model: AssistantModel | null;
   audit: AuditLog;
   approvalTtlMs?: number;
   maxSteps?: number;
+  /** Cuántas consultas puede encadenar el modelo antes de tener que decidir algo. */
+  maxToolCalls?: number;
+  toolLimits?: Partial<ToolboxLimits>;
 }
 
 export class PlanService {
   readonly #deps: PlanServiceDeps;
   readonly #approvalTtlMs: number;
   readonly #maxSteps: number;
+  readonly #maxToolCalls: number;
+  /** Turnos en curso y turnos en cola, por plan. Ver `advance`. */
+  readonly #running = new Map<string, Promise<Plan>>();
+  readonly #queued = new Map<string, Promise<Plan>>();
 
   constructor(deps: PlanServiceDeps) {
     this.#deps = deps;
     this.#approvalTtlMs = deps.approvalTtlMs ?? 30 * 60 * 1000;
     this.#maxSteps = deps.maxSteps ?? 12;
+    this.#maxToolCalls = deps.maxToolCalls ?? 6;
   }
 
   get hasModel(): boolean { return this.#deps.model !== null; }
@@ -191,8 +223,40 @@ export class PlanService {
    *
    * Devuelve el plan tal como quedó. Es seguro llamarlo de más: cada estado sabe si le toca hacer
    * algo o esperar, y los efectos van con clave de idempotencia.
+   *
+   * **Los turnos de un plan se serializan.** Se llama desde cuatro sitios —el supervisor, crear el
+   * plan, responder una pregunta y resolver una aprobación— y dentro hay dos esperas largas:
+   * lanzar un run y preguntarle al modelo. Sin esta cola dos llamadas entran a la vez, las dos ven
+   * el mismo historial y las dos proponen un paso; el plan acaba con un paso que nadie pidió y con
+   * una llamada al modelo de más. Un turno esperando vale por todos los que lleguen mientras
+   * espera, porque todos quieren lo mismo: que el plan avance después de lo que está pasando ahora.
    */
-  async advance(planId: string, user: UserIdentity): Promise<Plan> {
+  advance(planId: string, user: UserIdentity): Promise<Plan> {
+    const waiting = this.#queued.get(planId);
+    if (waiting) return waiting;
+
+    const running = this.#running.get(planId);
+    if (!running) return this.#startTurn(planId, user);
+
+    const queued = running.catch(() => undefined).then(() => {
+      this.#queued.delete(planId);
+      return this.#startTurn(planId, user);
+    });
+    this.#queued.set(planId, queued);
+    return queued;
+  }
+
+  #startTurn(planId: string, user: UserIdentity): Promise<Plan> {
+    const turn = this.#advanceOnce(planId, user);
+    this.#running.set(planId, turn);
+    const release = (): void => {
+      if (this.#running.get(planId) === turn) this.#running.delete(planId);
+    };
+    turn.then(release, release);
+    return turn;
+  }
+
+  async #advanceOnce(planId: string, user: UserIdentity): Promise<Plan> {
     const plan = this.require(planId);
     if (['completed', 'failed', 'cancelled'].includes(plan.status)) return plan;
 
@@ -297,39 +361,34 @@ export class PlanService {
     return true;
   }
 
-  /** Pide al modelo el siguiente paso y lo persiste **antes** de ejecutar nada. */
+  /**
+   * Pide al modelo el siguiente paso y lo persiste **antes** de ejecutar nada.
+   *
+   * El modelo recibe dos cosas: un paquete de contexto con resúmenes y referencias —nunca los
+   * buffers de los runs— y unas herramientas para pedir lo que le falte. Lo que devuelve es una
+   * decisión, y una decisión es un checkpoint.
+   */
   async #proposeNext(planId: string, user: UserIdentity): Promise<Plan> {
-    const { db, clock, runs, model } = this.#deps;
+    const { db, clock, runs, model, sessions, health, audit, toolLimits } = this.#deps;
     if (!model) return this.#finish(planId, 'failed', 'no hay modelo configurado');
 
     const plan = this.require(planId);
     const workspace = this.#deps.workspaces.require(plan.workspaceId);
     const steps = this.steps(planId);
+    const context = this.#contextFor(plan, workspace, steps);
 
-    const context: PlanContext = {
-      objective: plan.objective,
-      workspace: {
-        id: workspace.id,
-        host: workspace.ref.host,
-        provider: workspace.ref.provider,
-        sessionId: workspace.ref.sessionId,
-        cwd: workspace.cwd,
-      },
-      // Resúmenes, no buffers: el contexto del modelo no puede crecer con cada línea de salida.
-      history: steps.map((step) => ({
-        ordinal: step.ordinal,
-        kind: step.kind,
-        title: step.title,
-        status: step.status,
-        summary: (step.output as { summary?: string } | null)?.summary ?? null,
-      })),
-      pendingInput: null,
-    };
+    // Las herramientas se construyen por turno y atadas a este plan: ninguna alcanza el trabajo de
+    // otro workspace ni actúa como otra persona.
+    const toolbox = new CoreAssistantToolbox({
+      plan, workspace, sessions, health, runs, audit, user,
+      maxObservations: this.#maxToolCalls,
+      ...(toolLimits ? { limits: toolLimits } : {}),
+    });
 
     this.#setPlanStatus(planId, 'running');
     let decision;
     try {
-      decision = await model.decide(context);
+      decision = await model.decide(context, toolbox);
     } catch (error) {
       return this.#finish(planId, 'failed', `el modelo falló: ${(error as Error).message}`);
     }
@@ -340,12 +399,20 @@ export class PlanService {
     // La clave se deriva del plan y del ordinal: repetir este paso tras un reinicio no puede
     // producir un segundo run.
     const idempotencyKey = `plan:${planId}:${ordinal}`;
+    // Lo que el modelo dejó ofrecido viaja con el paso. Ofrecer no es hacer: la terminal la abre
+    // la persona desde la interfaz, y si no la abre no ha pasado nada.
+    const offer = toolbox.terminalOffer;
+    const withOffer = (payload: Record<string, unknown>): Record<string, unknown> =>
+      (offer ? { ...payload, terminalOffer: offer } : payload);
 
     if (decision.kind === 'finish') {
+      // La síntesis enlaza a la evidencia por id; el contenido sigue donde estaba (M4-11).
+      const evidence = this.#evidenceFor(steps, decision.evidenceRunIds);
       db.prepare(`INSERT INTO plan_steps
         (id, plan_id, ordinal, kind, status, title, input_json, output_json, idempotency_key, attempt, finished_at)
         VALUES (?, ?, ?, 'synthesis', 'completed', ?, ?, ?, ?, 1, ?)`)
-        .run(stepId, planId, ordinal, 'Síntesis', JSON.stringify({}), JSON.stringify({ summary: decision.summary }), idempotencyKey, at);
+        .run(stepId, planId, ordinal, 'Síntesis', JSON.stringify({}),
+          JSON.stringify(withOffer({ summary: decision.summary, evidence })), idempotencyKey, at);
       return this.#finish(planId, 'completed', decision.summary);
     }
 
@@ -353,7 +420,8 @@ export class PlanService {
       db.prepare(`INSERT INTO plan_steps
         (id, plan_id, ordinal, kind, status, title, input_json, idempotency_key, attempt)
         VALUES (?, ?, ?, 'input', 'waiting_input', ?, ?, ?, 1)`)
-        .run(stepId, planId, ordinal, decision.title, JSON.stringify({ question: decision.question }), idempotencyKey);
+        .run(stepId, planId, ordinal, decision.title,
+          JSON.stringify(withOffer({ question: decision.question })), idempotencyKey);
       this.#setPlanStatus(planId, 'waiting_input');
       return this.require(planId);
     }
@@ -380,7 +448,7 @@ export class PlanService {
         (id, plan_id, ordinal, kind, status, title, input_json, approval_id, idempotency_key, attempt)
         VALUES (?, ?, ?, 'approval', 'waiting_approval', ?, ?, ?, ?, 1)`)
         .run(stepId, planId, ordinal, decision.title,
-          JSON.stringify({ prompt: decision.prompt, permissionProfile: decision.permissionProfile }),
+          JSON.stringify(withOffer({ prompt: decision.prompt, permissionProfile: decision.permissionProfile })),
           approvalId, idempotencyKey);
       this.#setPlanStatus(planId, 'waiting_approval');
       this.#deps.audit.record({
@@ -396,7 +464,9 @@ export class PlanService {
       (id, plan_id, ordinal, kind, status, title, input_json, idempotency_key, attempt, started_at)
       VALUES (?, ?, ?, 'run', 'running', ?, ?, ?, 1, ?)`)
       .run(stepId, planId, ordinal, decision.title,
-        JSON.stringify({ prompt: decision.prompt, permissionProfile: decision.permissionProfile, rationale: decision.rationale }),
+        JSON.stringify(withOffer({
+          prompt: decision.prompt, permissionProfile: decision.permissionProfile, rationale: decision.rationale,
+        })),
         idempotencyKey, at);
 
     try {
@@ -416,6 +486,83 @@ export class PlanService {
       return this.#finish(planId, 'failed', `no se pudo crear el trabajo: ${message}`);
     }
     return this.require(planId);
+  }
+
+  /**
+   * El paquete de contexto (05 §10.3).
+   *
+   * Resúmenes, referencias y límites. Lo que el modelo quiera ver de verdad —el transcript de la
+   * sesión, la salida de un run, la salud de un host— lo pide con una herramienta, acotado y sólo
+   * cuando le hace falta. Reenviar buffers «por si acaso» es cómo un plan de cuatro pasos acaba
+   * costando lo que uno de cuarenta.
+   */
+  #contextFor(plan: Plan, workspace: Workspace, steps: PlanStep[]): PlanContext {
+    const history: PlanHistoryEntry[] = steps.map((step) => ({
+      ordinal: step.ordinal,
+      kind: step.kind,
+      title: step.title,
+      status: step.status,
+      summary: stepSummary(step),
+      runId: step.runId,
+      errorCode: step.errorCode,
+    }));
+
+    // La respuesta de una persona es «pendiente» sólo mientras sea lo último que ha pasado. Después
+    // sigue en el historial, pero ya no es una instrucción nueva que atender.
+    const last = steps.at(-1);
+    const pendingInput = last && last.kind === 'input' && last.status === 'completed'
+      ? (last.output as { answer?: string } | null)?.answer ?? null
+      : null;
+
+    const pendingApprovals = steps
+      .map((step) => (step.approvalId ? this.approval(step.approvalId) : null))
+      .filter((approval): approval is Approval => approval !== null && approval.status === 'pending')
+      .map((approval) => ({ id: approval.id, summary: approval.summary, expiresAt: approval.expiresAt }));
+
+    return {
+      objective: plan.objective,
+      workspace: {
+        id: workspace.id,
+        host: workspace.ref.host,
+        provider: workspace.ref.provider,
+        sessionId: workspace.ref.sessionId,
+        cwd: workspace.cwd,
+        title: workspace.title,
+      },
+      history,
+      pendingInput,
+      pendingApprovals,
+      limits: {
+        stepsUsed: steps.length,
+        maxSteps: this.#maxSteps,
+        maxToolCalls: this.#maxToolCalls,
+        maxToolOutputBytes: 60_000,
+      },
+    };
+  }
+
+  /**
+   * Los trabajos que sostienen la síntesis.
+   *
+   * Si el modelo citó algunos, se respetan esos; si no citó ninguno, valen todos los del plan. Lo
+   * que nunca se copia es la salida entera: va el resumen del run y su id, y la interfaz abre la
+   * evidencia completa desde ahí.
+   */
+  #evidenceFor(steps: PlanStep[], cited?: string[]): EvidenceRef[] {
+    const withRun = steps.filter((step) => step.runId !== null);
+    const chosen = cited?.length
+      ? withRun.filter((step) => cited.includes(step.runId as string))
+      : withRun;
+    return chosen.map((step) => {
+      const runId = step.runId as string;
+      const run = this.#deps.runs.find(runId);
+      return {
+        runId,
+        title: step.title,
+        status: run?.status ?? step.status,
+        summary: run?.resultSummary ? run.resultSummary.slice(0, 600) : null,
+      };
+    });
   }
 
   // ---- intervención humana ------------------------------------------------

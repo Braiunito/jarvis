@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { get, post } from '../api/client.js';
 import type { AuthConfig } from '@jarvis/contracts';
 import { ErrorNote } from '../ui/bits.jsx';
+import { ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON } from '../ui/icons.jsx';
 
 const b64uToBytes = (value: string): Uint8Array => {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -86,13 +87,19 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
   }
 
   return (
-    <div className="page" style={{ maxWidth: 420, paddingTop: 48 }}>
-      <h1 style={{ fontSize: 22, marginBottom: 4 }}>Jarvis</h1>
-      <p className="muted small" style={{ marginTop: 0 }}>Consola de agentes sobre el bastión.</p>
+    <div className="login">
+      <div style={{ width: 'min(420px, 100%)' }}>
+        <div className="login-brand">
+          <span className="rail-mark"><Glyph icon={NAV_ICON.brand} size={19} /></span>
+          <div>
+            <h1>Jarvis</h1>
+            <p>Consola de agentes sobre el bastión</p>
+          </div>
+        </div>
 
       {config?.insecureLogin ? (
         <p className="stale-note" role="status" style={{ marginBottom: 12 }}>
-          <span aria-hidden="true">⚠</span>
+          <Glyph icon={ACTION_ICON.insecure} size={16} />
           <span>
             Entrada por contraseña sobre HTTP sin cifrar. Es temporal: mientras no haya certificado,
             las passkeys no existen para el navegador. Todo lo que escribas viaja en claro.
@@ -103,7 +110,9 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
       <div className="card stack">
         {config?.steps.includes('passkey') && !config.insecureLogin ? (
           <>
-            <button type="button" className="btn primary" disabled={busy || !passkeySupported} onClick={() => void loginWithPasskey()}>
+            <button type="button" className="btn primary block" disabled={busy || !passkeySupported}
+              onClick={() => void loginWithPasskey()}>
+              <Glyph icon={ACTION_ICON.secure} />
               {busy ? 'Esperando al autenticador…' : 'Entrar con huella'}
             </button>
             {!passkeySupported ? (
@@ -127,15 +136,22 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
               <input className="input" type="password" value={password} autoComplete="current-password"
                 onChange={(event) => setPassword(event.target.value)} required />
             </label>
-            <button type="submit" className="btn primary" disabled={busy}>Entrar</button>
+            <button type="submit" className="btn primary block" disabled={busy}>
+              <Glyph icon={ACTION_ICON.go} />
+              Entrar
+            </button>
           </form>
         ) : null}
 
         <ErrorNote error={error} />
-        <p className="small muted" style={{ margin: 0 }}>
-          No hay registro público: una cuenta existe sólo si alguien la creó por terminal con
-          <span className="mono"> jarvis-users add</span>.
+        <p className="small muted permission-help" style={{ margin: 0 }}>
+          <Glyph icon={PERMISSION_ICON.safe} />
+          <span>
+            No hay registro público: una cuenta existe sólo si alguien la creó por terminal con
+            <span className="mono"> jarvis-users add</span>.
+          </span>
         </p>
+        </div>
       </div>
     </div>
   );

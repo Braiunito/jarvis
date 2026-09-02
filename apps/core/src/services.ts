@@ -30,6 +30,7 @@ import { PlanService } from './plans/service.js';
 import { PlanSupervisor } from './plans/supervisor.js';
 import { ImportService } from './import/service.js';
 import { OpenAiCompatibleTitleModel, TitleService } from './workspaces/title.js';
+import { MetricsService } from './metrics/service.js';
 
 export const VERSION = '0.1.0';
 
@@ -56,6 +57,7 @@ export interface CoreServices {
   planSupervisor: PlanSupervisor;
   imports: ImportService;
   titles: TitleService;
+  metrics: MetricsService;
   close(): void;
 }
 
@@ -132,15 +134,24 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const model = options.model !== undefined
     ? options.model
     : config.modelApiKey
-      ? new AnthropicModel({ apiKey: config.modelApiKey, baseUrl: config.modelBaseUrl, model: config.modelName })
+      ? new AnthropicModel({
+        apiKey: config.modelApiKey,
+        baseUrl: config.modelBaseUrl,
+        model: config.modelName,
+        maxToolCalls: config.assistantMaxToolCalls,
+      })
       : config.assistantScripted
         ? new ScriptedModel()
         : null;
 
   const usage = new UsageService({ db, clock, sshConfig, ttlMs: config.usageTtlMs, probeTimeoutMs: config.usageProbeTimeoutMs });
+  const metrics = new MetricsService({ db, clock });
   const health = new HealthService({ db, clock, fleet, index, runs: runRepository, version: VERSION });
   const terminal = new TerminalService({ sshConfig, clock, audit, capabilities, bastionHost: config.bastionHost });
-  const plans = new PlanService({ db, clock, runs, workspaces, model, audit });
+  const plans = new PlanService({
+    db, clock, runs, workspaces, sessions, health, model, audit,
+    maxToolCalls: config.assistantMaxToolCalls,
+  });
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
   const imports = new ImportService({ db, clock, workspaces: workspaceRepository, audit, bastionHost: config.bastionHost });
   const titles = new TitleService({
@@ -162,7 +173,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
-    plans, planSupervisor, imports, titles,
+    plans, planSupervisor, imports, titles, metrics,
     close() {
       supervisor.stop();
       planSupervisor.stop();

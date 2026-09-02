@@ -10,10 +10,11 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import type { Provider } from '@jarvis/contracts';
-import { post } from '../api/client.js';
-import { useHosts, useTerminals } from '../api/queries.js';
+import { useDestroyTerminal, useHosts, useOpenTerminal, useTerminals } from '../api/queries.js';
 import { ErrorNote, relativeTime } from '../ui/bits.jsx';
-import { ACTION_ICON, Glyph, NAV_ICON, RUN_STATUS_ICON } from '../ui/icons.jsx';
+import { ACTION_ICON, Glyph, NAV_ICON, RUN_STATUS_ICON, STATUS_ICON } from '../ui/icons.jsx';
+import { usePageMeta } from '../ui/page-meta.jsx';
+import { Card, ConfirmDialog } from '../ui/primitives.jsx';
 
 /** Las teclas que un teléfono no tiene y una terminal necesita. */
 const MOBILE_KEYS: Array<{ label: string; bytes: string }> = [
@@ -32,6 +33,8 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   const [host, setHost] = useState(query.get('host') ?? '');
   const [provider, setProvider] = useState<Provider>((query.get('provider') as Provider) ?? 'claude');
   const [sessionId] = useState(query.get('sessionId') ?? '');
+  // De dónde se vino: si fue de un workspace, hay que poder volver sin buscarlo otra vez.
+  const [origin] = useState(query.get('from') ?? '');
   const [attached, setAttached] = useState<{ name: string; host: string } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [connected, setConnected] = useState(false);
@@ -40,11 +43,35 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   const holder = useRef<HTMLDivElement | null>(null);
   const term = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
+  const autoOpened = useRef(false);
+  const destroy = useDestroyTerminal();
+  const openTerminal = useOpenTerminal();
+  /** Qué sesión se está a punto de destruir. Nunca se destruye sin nombrarla. */
+  const [killing, setKilling] = useState<{ host: string; name: string } | null>(null);
+
+  usePageMeta({
+    title: 'Terminal',
+    subtitle: 'Una tmux viva en la máquina, no un chat',
+    ...(origin ? { parent: { label: 'Workspace', to: `/w/${origin}` } } : {}),
+  });
 
   useEffect(() => {
     if (!hosts.data || host) return;
     setHost(hosts.data.bastionHost);
   }, [hosts.data, host]);
+
+  /**
+   * Llegar con destino en la URL es una decisión ya tomada.
+   *
+   * Quien pulsa «Abrir terminal» en un workspace ya eligió máquina y sesión; obligarle a pulsar
+   * «Conectar» otra vez es repetir la misma respuesta. Sólo pasa una vez y sólo si el enlace
+   * traía el host: entrar a /terminal a pelo sigue sin abrir nada por su cuenta.
+   */
+  useEffect(() => {
+    if (autoOpened.current || attached || !query.get('host')) return;
+    autoOpened.current = true;
+    void open();
+  }, [query, attached]);
 
   useEffect(() => {
     if (!attached || !holder.current) return undefined;
@@ -108,12 +135,33 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   async function open(): Promise<void> {
     setError(null);
     try {
-      const opened = await post<{ name: string; host: string; created: boolean }>('/api/terminal/open', {
-        host, provider, sessionId: sessionId || null,
-      });
+      const opened = await openTerminal.mutateAsync({ host, provider, sessionId: sessionId || null });
       setAttached({ name: opened.name, host: opened.host });
     } catch (caught) {
       setError(caught);
+    }
+  }
+
+  /**
+   * Destruir la sesión.
+   *
+   * La regla del producto es que salir no mata nada; por eso matar tiene que ser un acto
+   * explícito, con nombre y confirmación. Si la que muere es la que estás mirando, se suelta el
+   * socket y se vuelve a la lista: quedarse pintando una terminal que ya no existe es peor que
+   * no enseñar nada.
+   */
+  async function killSession(target: { host: string; name: string }): Promise<void> {
+    setError(null);
+    try {
+      await destroy.mutateAsync(target);
+      if (attached && attached.name === target.name && attached.host === target.host) {
+        socket.current?.close();
+        setAttached(null);
+      }
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setKilling(null);
     }
   }
 
@@ -123,17 +171,25 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   };
 
   return (
-    <div className="page wide">
-      <div className="card">
+    <div className="page">
+      <Card>
         <div className="row">
+          <span className="row tight faint" style={{ flex: '0 0 auto' }}>
+            <Glyph icon={STATUS_ICON.host} size={16} />
+          </span>
           <label className="row small">
-            <span className="muted">Host</span>
+            <span className="muted">Máquina</span>
             <select className="select control-md" value={host} onChange={(event) => setHost(event.target.value)}>
-              {(hosts.data?.hosts ?? []).map((candidate) => (
-                <option key={candidate.host} value={candidate.host} disabled={!candidate.tmux}>
-                  {candidate.host}{candidate.tmux ? '' : ' (sin tmux)'}
-                </option>
-              ))}
+              {(hosts.data?.hosts ?? []).map((candidate) => {
+                const unknown = candidate.stale === true;
+                return (
+                  <option key={candidate.host} value={candidate.host}
+                    disabled={!unknown && !candidate.tmux}>
+                    {candidate.host}
+                    {unknown ? '' : candidate.tmux ? '' : ' (sin tmux)'}
+                  </option>
+                );
+              })}
             </select>
           </label>
           <label className="row small">
@@ -156,13 +212,26 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
             </span>
           ) : null}
           {attached ? <span className="small muted mono">{attached.name}</span> : null}
+          {attached ? (
+            <button type="button" className="btn small danger"
+              onClick={() => setKilling(attached)}
+              title="Destruye la sesión en la máquina: lo que esté corriendo dentro se para">
+              <Glyph icon={ACTION_ICON.stop} />
+              Cerrar la terminal
+            </button>
+          ) : null}
         </div>
         <ErrorNote error={error} />
-        {sessionId ? <p className="small muted" style={{ marginBottom: 0 }}>Sesión {sessionId}</p> : null}
-      </div>
+        {sessionId ? (
+          <p className="small muted" style={{ margin: '10px 0 0' }}>
+            Sesión <span className="mono">{sessionId}</span>
+            {origin ? ' · vienes de un workspace, y volver no la cierra.' : ''}
+          </p>
+        ) : null}
+      </Card>
 
       {attached ? (
-        <div className="card">
+        <Card>
           <div className="terminal-host" ref={holder} />
           <div className="mobile-keys">
             {MOBILE_KEYS.map((key) => (
@@ -171,34 +240,63 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
               </button>
             ))}
           </div>
-          <p className="small muted" style={{ marginBottom: 0 }}>
+          <p className="small muted" style={{ margin: '10px 0 0' }}>
             Salir de esta pantalla no cierra la sesión: sigue viva en {attached.host}.
           </p>
-        </div>
+        </Card>
       ) : (
-        <div className="card">
-          <h2>Sesiones en {host || 'este host'}</h2>
+        <Card title={`Sesiones abiertas en ${host || 'esta máquina'}`} icon={NAV_ICON.terminal}
+          count={sessions.data?.sessions.length ?? 0}>
           <div className="list">
+            {/*
+              * Dos acciones distintas en la misma fila: entrar y destruir. Por eso la fila no es
+              * un botón —un botón dentro de otro no es HTML válido ni se puede tabular—, sino una
+              * fila con dos botones de verdad.
+              */}
             {(sessions.data?.sessions ?? []).map((session) => (
-              <button key={session.name} type="button" className="list-item"
-                onClick={() => setAttached({ name: session.name, host: session.host })}>
-                <span className="row">
+              <div key={session.name} className="list-item">
+                <button type="button" className="list-open"
+                  onClick={() => setAttached({ name: session.name, host: session.host })}>
                   <span className={`badge ${session.kind === 'run' ? 'running' : 'neutral'}`}>
                     <Glyph icon={session.kind === 'run' ? RUN_STATUS_ICON.running : NAV_ICON.terminal} size={13} />
                     {session.kind === 'run' ? 'trabajo' : 'interactiva'}
                   </span>
-                  <span className="mono small">{session.name}</span>
+                  <span className="mono small truncate">{session.name}</span>
                   {session.attached ? <span className="badge warn">alguien mirando</span> : null}
+                </button>
+                <span className="row tight nowrap">
+                  <span className="tiny faint">creada {relativeTime(session.createdAt)}</span>
+                  <button type="button" className="btn small danger icon"
+                    aria-label={`Cerrar la terminal ${session.name}`}
+                    title="Destruye esta sesión en la máquina"
+                    onClick={() => setKilling({ host: session.host, name: session.name })}>
+                    <Glyph icon={ACTION_ICON.stop} />
+                  </button>
                 </span>
-                <span className="small muted">creada {relativeTime(session.createdAt)}</span>
-              </button>
+              </div>
             ))}
             {(sessions.data?.sessions.length ?? 0) === 0 ? (
               <p className="muted small" style={{ margin: 0 }}>Ninguna sesión abierta aquí todavía.</p>
             ) : null}
           </div>
-        </div>
+        </Card>
       )}
+
+      <ConfirmDialog
+        open={killing !== null}
+        title="Cerrar la terminal en la máquina"
+        description={killing ? (
+          <>
+            Se destruye la sesión <span className="mono">{killing.name}</span> en{' '}
+            <span className="mono">{killing.host}</span>. Lo que esté corriendo dentro se para y no
+            se puede recuperar. Si sólo quieres irte, cierra esta pantalla: la sesión sigue viva.
+          </>
+        ) : null}
+        confirmLabel="Cerrar la terminal"
+        pending={destroy.isPending}
+        onConfirm={() => { if (killing) void killSession(killing); }}
+        onClose={() => setKilling(null)}
+      />
     </div>
   );
 }

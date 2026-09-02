@@ -47,6 +47,25 @@ describe('título automático', () => {
     expect(titleFromPrompt('[jarvis] contexto interno')).toBe('trabajo sin título');
   });
 
+  /**
+   * La misma regla, por la otra puerta: el explorador manda el título del índice cada vez que se
+   * pulsa una sesión, así que reabrir no puede deshacer lo que alguien escribió.
+   */
+  it('reabrir la sesión desde el explorador no pisa el título de la persona', () => {
+    const workspace = open('sid-reopen', 'timeout del pool de conexiones');
+    services.titles.setByUser(workspace.id, 'el lío del pool');
+
+    const reopened = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-reopen' },
+        cwd: '/srv/app', title: 'timeout del pool de conexiones' },
+      user,
+    ).workspace;
+
+    expect(reopened.title).toBe('el lío del pool');
+    // Lo demás sí se refresca: el índice sabe mejor dónde trabaja esa sesión.
+    expect(reopened.cwd).toBe('/srv/app');
+  });
+
   it('un título escrito por una persona gana y no se vuelve a tocar', async () => {
     const workspace = open('sid-2');
     services.titles.setByUser(workspace.id, 'el lío del pool');

@@ -1,20 +1,43 @@
 /**
- * Run center: todo el trabajo, esté donde esté.
+ * Trabajo: todo lo que se ha mandado, esté donde esté.
  *
- * Separa «esperando a alguien» de «todavía trabajando»: no es lo mismo un run que sigue su curso
- * que uno parado esperando una decisión humana.
+ * Separa «esperando a alguien» de «todavía trabajando»: no es lo mismo un trabajo que sigue su
+ * curso que uno parado esperando una decisión humana, y mezclarlos hace que el segundo pase
+ * desapercibido, que es justo el que hay que mirar.
+ *
+ * La lista es una tabla porque aquí se compara —qué agente, qué máquina, cuánto tardó—, y el
+ * detalle vive al lado para no perder de vista el resto mientras se lee uno.
  */
 import type { JSX } from 'react';
 import { useState } from 'react';
-import { useCancelRun, useRetryRun, useRun, useRuns } from '../api/queries.js';
+import type { Run } from '@jarvis/contracts';
+import { useCancelRun, useMetrics, useRetryRun, useRun, useRuns } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
-import { ErrorNote, Empty, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
-import { EVENT_KIND, PERMISSION } from '../ui/labels.js';
-import { ACTION_ICON, Glyph, PERMISSION_ICON } from '../ui/icons.jsx';
+import { Empty, ErrorNote, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
+import { Sparkbars } from '../ui/charts.jsx';
+import { PERMISSION, RUN_STATUS } from '../ui/labels.js';
+import {
+  ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, STATUS_ICON,
+} from '../ui/icons.jsx';
+import { usePageMeta } from '../ui/page-meta.jsx';
+import { Card, DataRow, Stat, Tabs, formatDuration } from '../ui/primitives.jsx';
+import { EventTimeline } from '../ui/event-log.jsx';
+
+type Filter = 'activos' | 'atencion' | 'terminados' | 'todos';
+
+const ACTIVE = ['queued', 'preparing', 'running', 'cancelling'];
+const ATTENTION = ['waiting', 'failed', 'timed_out'];
+
+const duration = (run: Run): number | null =>
+  run.startedAt && run.finishedAt ? Date.parse(run.finishedAt) - Date.parse(run.startedAt) : null;
 
 export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Element {
+  usePageMeta({ title: 'Trabajo', subtitle: 'Lo que se ha mandado a los agentes y cómo acabó' });
+
   const runs = useRuns();
+  const metrics = useMetrics(24);
   const [selected, setSelected] = useState<string | null>(runId);
+  const [filter, setFilter] = useState<Filter>('todos');
   const current = selected ?? runId;
   const detail = useRun(current);
   const stream = useRunStream(current);
@@ -22,128 +45,198 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
   const retry = useRetryRun();
 
   const all = runs.data?.runs ?? [];
-  const active = all.filter((run) => ['queued', 'preparing', 'running', 'cancelling'].includes(run.status));
-  const waiting = all.filter((run) => run.status === 'waiting');
-  const done = all.filter((run) => ['completed', 'failed', 'cancelled', 'timed_out'].includes(run.status));
+  const active = all.filter((run) => ACTIVE.includes(run.status));
+  const attention = all.filter((run) => ATTENTION.includes(run.status));
+
+  const visible = filter === 'activos' ? active
+    : filter === 'atencion' ? attention
+      : filter === 'terminados' ? all.filter((run) => ['completed', 'cancelled'].includes(run.status))
+        : all;
+
+  const run = detail.data?.run;
 
   return (
-    <div className="page wide">
-      <div className="grid-2">
-        <div>
-          <div className="card">
-            <h2>Activos</h2>
-            {runs.isLoading ? <Loading rows={2} /> : null}
-            {active.length === 0 && !runs.isLoading ? <p className="muted small" style={{ margin: 0 }}>Nada en marcha.</p> : null}
-            <div className="list">
-              {active.map((run) => (
-                <button key={run.id} type="button" className="list-item" aria-current={current === run.id}
-                  onClick={() => setSelected(run.id)}>
-                  <span className="row">
-                    <RunStatusBadge status={run.status} />
-                    <span className="small muted mono">{run.id.slice(0, 8)}</span>
-                    <span className="small muted">{run.provider} · {run.executionHost}</span>
-                  </span>
-                  <span className="small muted">{relativeTime(run.startedAt ?? run.createdAt)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {waiting.length > 0 ? (
-            <div className="card">
-              <h2>Esperando intervención</h2>
-              <div className="list">
-                {waiting.map((run) => (
-                  <button key={run.id} type="button" className="list-item" onClick={() => setSelected(run.id)}>
-                    <span className="row"><RunStatusBadge status={run.status} /><span className="small">{run.id.slice(0, 8)}</span></span>
-                  </button>
-                ))}
-              </div>
-            </div>
+    <div className="page">
+      {/* Cuánto trabajo hay y en qué forma llega: el contexto antes de bajar a una fila. */}
+      <div className="grid cols-4">
+        <Card>
+          <Stat value={active.length} label="en marcha"
+            hint={active.length ? 'se están ejecutando ahora' : 'nada corriendo'} />
+        </Card>
+        <Card>
+          <Stat value={attention.length} label="requieren que mires"
+            hint={attention.length ? 'parados, fallados o sin tiempo' : 'ninguno pendiente'} />
+        </Card>
+        <Card>
+          <Stat
+            value={metrics.data ? formatDuration(metrics.data.runs.medianDurationMs) : '—'}
+            label="duración típica"
+            hint="mediana de las últimas 24 h"
+          />
+        </Card>
+        <Card>
+          <Stat value={metrics.data?.runs.total ?? all.length} label="trabajos en 24 h"
+            {...(metrics.data ? { delta: metrics.data.runs.deltaPercent } : {})} />
+          {metrics.data ? (
+            <Sparkbars
+              label="Trabajos por intervalo en las últimas 24 horas"
+              points={metrics.data.runs.buckets.map((bucket) => ({
+                at: bucket.at, value: bucket.runs, failed: bucket.failed,
+              }))}
+            />
           ) : null}
+        </Card>
+      </div>
 
-          <div className="card">
-            <h2>Recientes</h2>
-            {done.length === 0 && !runs.isLoading ? (
-              <Empty title="Sin historial todavía" hint="Los runs terminados aparecen aquí con su evidencia." />
-            ) : null}
-            <div className="list">
-              {done.slice(0, 30).map((run) => (
-                <button key={run.id} type="button" className="list-item" aria-current={current === run.id}
-                  onClick={() => setSelected(run.id)}>
-                  <span className="row">
-                    <RunStatusBadge status={run.status} />
-                    <span className="small muted mono">{run.id.slice(0, 8)}</span>
-                    <span className="small muted">{run.provider} · {run.executionHost}</span>
-                  </span>
-                  <span className="small muted">
-                    {relativeTime(run.finishedAt ?? run.createdAt)}
-                    {run.errorMessage ? ` · ${run.errorMessage.slice(0, 60)}` : ''}
-                  </span>
-                </button>
-              ))}
-            </div>
+      <div className="grid main-side">
+        <Card className="flush">
+          <div style={{ padding: '12px 14px 0' }}>
+            <Tabs
+              label="Qué trabajos se enseñan"
+              active={filter}
+              onChange={(id) => setFilter(id as Filter)}
+              tabs={[
+                { id: 'todos', label: 'Todos', icon: NAV_ICON.runs, count: all.length },
+                { id: 'activos', label: 'En marcha', icon: STATUS_ICON.activity, count: active.length },
+                { id: 'atencion', label: 'Requieren atención', icon: ACTION_ICON.error, count: attention.length },
+                { id: 'terminados', label: 'Terminados', icon: ACTION_ICON.approve },
+              ]}
+            />
           </div>
-        </div>
 
-        <div>
-          <div className="card">
-            <h2>Detalle</h2>
-            {!current ? <p className="muted small" style={{ margin: 0 }}>Elige un run.</p> : null}
-            {detail.data ? (
-              <div className="stack">
-                <div className="row">
-                  <RunStatusBadge status={detail.data.run.status} />
-                  <span className="small muted mono">{detail.data.run.id}</span>
-                </div>
-                <dl className="small" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 10px', margin: 0 }}>
-                  <dt className="muted">Ejecuta en</dt><dd style={{ margin: 0 }} className="mono">{detail.data.run.executionHost}</dd>
-                  <dt className="muted">Trabaja sobre</dt><dd style={{ margin: 0 }} className="mono">{detail.data.run.workHost}</dd>
-                  <dt className="muted">Cómo</dt><dd style={{ margin: 0 }}>
-                    {detail.data.run.strategy === 'A'
-                      ? 'desde el bastión, por ssh'
-                      : 'en la propia máquina'}
-                    {detail.data.run.strategyReason ? ` · ${detail.data.run.strategyReason}` : ''}
-                  </dd>
-                  <dt className="muted">Podía</dt>
-                  <dd className="row" style={{ margin: 0, gap: 6 }}>
-                    <Glyph icon={PERMISSION_ICON[detail.data.run.permissionProfile]} />
-                    {PERMISSION[detail.data.run.permissionProfile].name}
-                  </dd>
-                  <dt className="muted">Creado</dt><dd style={{ margin: 0 }}>{new Date(detail.data.run.createdAt).toLocaleString()}</dd>
-                  {detail.data.run.finishedAt ? (<><dt className="muted">Terminado</dt><dd style={{ margin: 0 }}>{new Date(detail.data.run.finishedAt).toLocaleString()}</dd></>) : null}
-                  {detail.data.run.errorCode ? (<><dt className="muted">Error</dt><dd style={{ margin: 0 }}>{detail.data.run.errorCode}</dd></>) : null}
-                </dl>
-                <div className="row">
-                  <Link to={`/w/${detail.data.run.workspaceId}`} className="btn small">
-                    <Glyph icon={ACTION_ICON.open} />
-                    Ir al workspace
-                  </Link>
-                  {['queued', 'preparing', 'running', 'waiting'].includes(detail.data.run.status) ? (
-                    <button type="button" className="btn small danger" onClick={() => cancel.mutate(detail.data.run.id)}>
-                      <Glyph icon={ACTION_ICON.stop} />
-                      Parar
-                    </button>
-                  ) : (
-                    <button type="button" className="btn small" onClick={() => retry.mutate(detail.data.run.id)}>
-                      <Glyph icon={ACTION_ICON.retry} />
-                      Reintentar
-                    </button>
-                  )}
-                </div>
-                <ErrorNote error={cancel.error ?? retry.error} />
-                <div className="timeline">
-                  {stream.events.map((event) => (
-                    <div key={event.seq} className="event">
-                      <div className="kind">#{event.seq} · {EVENT_KIND[event.type] ?? event.type}</div>
-                      <pre>{JSON.stringify(event.payload).slice(0, 500)}</pre>
-                    </div>
+          {runs.isLoading ? <div style={{ padding: 14 }}><Loading rows={4} /></div> : null}
+
+          {!runs.isLoading && visible.length === 0 ? (
+            <Empty title="Nada por aquí"
+              hint={filter === 'todos'
+                ? 'Cuando mandes trabajo desde un workspace aparecerá aquí con su evidencia.'
+                : 'Prueba con otra pestaña: hay trabajos, pero no de este tipo.'} />
+          ) : (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Trabajo</th>
+                    <th>Agente y máquina</th>
+                    <th>Permiso</th>
+                    <th>Duración</th>
+                    <th>Cuándo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.slice(0, 60).map((item) => (
+                    <tr key={item.id} aria-selected={current === item.id} tabIndex={0}
+                      onClick={() => setSelected(item.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelected(item.id);
+                        }
+                      }}>
+                      <td>
+                        <div className="lead">
+                          <span className={`lead-mark ${ATTENTION.includes(item.status) ? 'danger' : ACTIVE.includes(item.status) ? 'accent' : ''}`}>
+                            <Glyph icon={PROVIDER_ICON[item.provider] ?? NAV_ICON.runs} size={15} />
+                          </span>
+                          <span className="cell-main">
+                            <RunStatusBadge status={item.status} />
+                            <span className="tiny faint mono truncate">{item.id.slice(0, 12)}</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td data-secondary="true">
+                        <span className="small">{item.provider} · {item.executionHost}</span>
+                        {item.strategy === 'A' ? (
+                          <span className="tiny faint"> → {item.workHost}</span>
+                        ) : null}
+                      </td>
+                      <td className="optional">
+                        <span className={`badge ${PERMISSION[item.permissionProfile].tone}`}>
+                          <Glyph icon={PERMISSION_ICON[item.permissionProfile]} size={13} />
+                          {PERMISSION[item.permissionProfile].name}
+                        </span>
+                      </td>
+                      <td className="optional">
+                        <span className="small muted">{formatDuration(duration(item))}</span>
+                      </td>
+                      <td data-secondary="true">
+                        <span className="small muted">{relativeTime(item.finishedAt ?? item.startedAt ?? item.createdAt)}</span>
+                      </td>
+                    </tr>
                   ))}
-                </div>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        <Card title={run ? 'Detalle del trabajo' : 'Nada seleccionado'} icon={ACTION_ICON.session}>
+          {!run ? (
+            <p className="small muted" style={{ margin: 0 }}>
+              Elige un trabajo de la lista para ver dónde corrió, con qué permiso y qué dijo.
+            </p>
+          ) : (
+            <div className="stack">
+              <div className="row">
+                <RunStatusBadge status={run.status} />
+                <span className="tiny faint mono truncate">{run.id}</span>
               </div>
-            ) : null}
-          </div>
-        </div>
+              <p className="tiny faint" style={{ margin: 0 }}>{RUN_STATUS[run.status].help}</p>
+
+              <div className="row">
+                <Link to={`/w/${run.workspaceId}`} className="btn small">
+                  <Glyph icon={ACTION_ICON.open} />
+                  Ir al workspace
+                </Link>
+                {['queued', 'preparing', 'running', 'waiting'].includes(run.status) ? (
+                  <button type="button" className="btn small danger" onClick={() => cancel.mutate(run.id)}>
+                    <Glyph icon={ACTION_ICON.stop} />
+                    Parar
+                  </button>
+                ) : (
+                  <button type="button" className="btn small" onClick={() => retry.mutate(run.id)}>
+                    <Glyph icon={ACTION_ICON.retry} />
+                    Reintentar
+                  </button>
+                )}
+              </div>
+              <ErrorNote error={cancel.error ?? retry.error} />
+
+              <div className="stack" style={{ gap: 7 }}>
+                <DataRow label="Ejecuta en"><span className="mono">{run.executionHost}</span></DataRow>
+                <DataRow label="Trabaja sobre"><span className="mono">{run.workHost}</span></DataRow>
+                <DataRow label="Cómo">
+                  {run.strategy === 'A' ? 'desde el bastión, por ssh' : 'en la propia máquina'}
+                </DataRow>
+                <DataRow label="Podía">
+                  <span className={`badge ${PERMISSION[run.permissionProfile].tone}`}>
+                    <Glyph icon={PERMISSION_ICON[run.permissionProfile]} size={13} />
+                    {PERMISSION[run.permissionProfile].name}
+                  </span>
+                </DataRow>
+                <DataRow label="Empezó">{relativeTime(run.startedAt ?? run.createdAt)}</DataRow>
+                <DataRow label="Duró">{formatDuration(duration(run))}</DataRow>
+                {run.errorCode ? (
+                  <DataRow label="Error">
+                    <span className="badge danger">{run.errorCode}</span>
+                  </DataRow>
+                ) : null}
+              </div>
+
+              {run.strategyReason ? (
+                <p className="tiny faint" style={{ margin: 0 }}>{run.strategyReason}</p>
+              ) : null}
+
+              <div>
+                <p className="small muted" style={{ margin: '0 0 8px' }}>
+                  Eventos {stream.connected ? '· en directo' : stream.ended ? '· cerrado' : '· reconectando…'}
+                </p>
+                <EventTimeline events={stream.events} limit={40}
+                  empty="Sin eventos guardados para este trabajo." />
+              </div>
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );

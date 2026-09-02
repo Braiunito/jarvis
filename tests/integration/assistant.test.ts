@@ -108,6 +108,29 @@ describe('M4 · un objetivo se convierte en pasos', () => {
     expect(new Set(finished.steps.map((step) => step.idempotencyKey)).size).toBe(finished.steps.length);
   });
 
+  /**
+   * `advance` se llama desde el supervisor, desde crear el plan y desde resolver una aprobación, y
+   * dentro espera al modelo. Si dos turnos entran a la vez ven el mismo historial y proponen el
+   * mismo paso dos veces: el plan acaba con un paso que nadie pidió.
+   */
+  it('dos avances simultáneos son un solo turno', async () => {
+    const workspaceId = await openWorkspace(harness.app, 'sid-turnos');
+    const user = { userId: 'u-test', username: 'tester' };
+    const plan = harness.services.plans.create({
+      workspaceId, objective: 'averigua por que el pool se queda sin conexiones', user,
+    });
+
+    await Promise.all([
+      harness.services.plans.advance(plan.id, user),
+      harness.services.plans.advance(plan.id, user),
+      harness.services.plans.advance(plan.id, user),
+    ]);
+
+    const steps = harness.services.plans.steps(plan.id);
+    expect(steps.filter((step) => step.ordinal === 0)).toHaveLength(1);
+    expect(new Set(steps.map((step) => step.idempotencyKey)).size).toBe(steps.length);
+  });
+
   it('el plan sobrevive a un reinicio del core y continúa donde estaba', async () => {
     const workspaceId = await openWorkspace(harness.app, 'sid-restart');
     const { plan } = (await harness.app.inject({
@@ -134,6 +157,84 @@ describe('M4 · un objetivo se convierte en pasos', () => {
     // El primer paso es el mismo run: no se relanzó nada al arrancar de nuevo.
     expect(after.steps[0]?.runId).toBe(firstRunId);
     expect(after.steps.filter((step) => step.kind === 'run')).toHaveLength(2);
+  });
+});
+
+/**
+ * M4-04/05/06/11: el coordinador no es sólo un generador de texto.
+ *
+ * Mira el contexto con las herramientas del core, deja ofrecida una terminal en vez de abrirla, y
+ * cierra citando la evidencia por id en lugar de copiar la salida de los runs.
+ */
+describe('M4 · el Assistant usa las herramientas del core', () => {
+  it('consulta, ofrece terminal y cierra con evidencia enlazada', async () => {
+    const workspaceId = await openWorkspace(harness.app, 'sid-tools');
+    const { plan } = (await harness.app.inject({
+      method: 'POST', url: '/api/plans',
+      payload: { workspaceId, objective: '@@tools revisa el pool de conexiones' },
+    })).json<{ plan: Plan }>();
+
+    const finished = await waitFor(
+      () => planOf(harness.app, plan.id),
+      (value) => value.plan.status === 'completed',
+      { what: 'que el plan termine', timeoutMs: 60_000 },
+    );
+
+    const synthesis = finished.steps.at(-1) as PlanStep;
+    expect(synthesis.kind).toBe('synthesis');
+    const output = synthesis.output as {
+      summary: string;
+      evidence: Array<{ runId: string; status: string; summary: string | null }>;
+      terminalOffer?: { host: string; provider: string; sessionId: string; permissionProfile: string };
+    };
+
+    // La evidencia son referencias a los trabajos, no sus buffers.
+    const runIds = finished.steps.filter((step) => step.runId).map((step) => step.runId);
+    expect(output.evidence.map((item) => item.runId)).toEqual(runIds);
+    expect(output.evidence.every((item) => item.status === 'completed')).toBe(true);
+
+    // La terminal quedó ofrecida sobre esta sesión; abrirla es cosa de la persona.
+    expect(output.terminalOffer).toMatchObject({
+      host: 'bastion', provider: 'claude', sessionId: 'sid-tools', permissionProfile: 'safe',
+    });
+    const terminals = await harness.services.terminal.list('bastion');
+    expect(terminals.some((session) => session.name.includes('sid-tools'))).toBe(false);
+  });
+});
+
+/**
+ * M4-10: una respuesta humana reanuda **el paso** que la esperaba.
+ *
+ * El fallo que esto cubre no era visible desde fuera: el plan preguntaba, la persona contestaba y
+ * el contexto del modelo seguía diciendo que no había respuesta pendiente. El plan continuaba,
+ * pero a ciegas.
+ */
+describe('M4 · waiting_input', () => {
+  it('lo que contesta la persona llega al siguiente paso', async () => {
+    const workspaceId = await openWorkspace(harness.app, 'sid-input');
+    const { plan } = (await harness.app.inject({
+      method: 'POST', url: '/api/plans',
+      payload: { workspaceId, objective: '@@ask arregla el pool' },
+    })).json<{ plan: Plan }>();
+
+    const asking = await waitFor(() => planOf(harness.app, plan.id),
+      (value) => value.plan.status === 'waiting_input', { what: 'que pregunte' });
+    const question = asking.steps.find((step) => step.kind === 'input');
+    expect((question?.input as { question: string }).question).toContain('staging');
+
+    const answered = await harness.app.inject({
+      method: 'POST', url: `/api/plans/${plan.id}/input`, payload: { answer: 'staging' },
+    });
+    expect(answered.statusCode).toBe(200);
+
+    const finished = await waitFor(() => planOf(harness.app, plan.id),
+      (value) => value.plan.status === 'completed', { what: 'que termine', timeoutMs: 60_000 });
+
+    const afterAnswer = finished.steps.find((step) => step.kind === 'run');
+    expect(afterAnswer?.title).toBe('Trabajar en staging');
+    // Y la respuesta queda en el historial del plan, no sólo en el turno que la usó.
+    const inputStep = finished.steps.find((step) => step.kind === 'input');
+    expect((inputStep?.output as { answer: string }).answer).toBe('staging');
   });
 });
 

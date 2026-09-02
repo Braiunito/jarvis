@@ -23,6 +23,15 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Assistant durable** (M4): un objetivo se convierte en pasos que viven en SQLite. El modelo
   propone y el core ejecuta, así que un plan sobrevive a un reinicio. Las aprobaciones son de un
   solo uso, caducan y su digest las ata a la acción concreta que se autorizó.
+- **El Assistant, con herramientas de verdad** (M4-04/05/06/11): el coordinador ya no decide a
+  ciegas. Dentro de su turno busca sesiones en la flota, lee el transcript de la que trabaja,
+  pregunta por la salud de cada salto, mira los trabajos del workspace y para uno que va mal. Esas
+  herramientas llaman a los mismos casos de uso que la API —así que lo que hace el Assistant se
+  audita igual que lo que hace una persona— y sólo alcanzan el workspace de su plan. Lo que
+  devuelven va acotado, y lo dice. La síntesis cita los trabajos por su identificador en vez de
+  copiar su salida, y puede dejar **ofrecida** una terminal viva, que abre la persona y nunca el
+  modelo. El presupuesto de consultas por turno lo aplica el servidor: un turno acaba siempre en un
+  paso que se puede guardar, nunca en un bucle de preguntas.
 - **Importación desde LiteChat** (M5): idempotente por instalación y conversación, con procedencia
   visible. Un export que traiga claves de proveedor se rechaza entero en vez de limpiarse por
   detrás.
@@ -31,6 +40,30 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Consola** (web): React sin stores globales. El destino y el permiso se ven antes de enviar, el
   borrador sobrevive a navegar y a fallar, y lo que escribió el agente remoto nunca se confunde con
   lo que hizo Jarvis.
+- **La consola, ordenada por flujos** (UX-04): carril de secciones en el orden en que se trabaja
+  —retomar, vigilar, intervenir, diagnosticar—, cabecera con migas y buscador (Ctrl+K), y barra de
+  estado con entorno, máquinas, tiempo en pie y versiones. En el teléfono el carril baja y se
+  queda en iconos. La portada abre por «continuar donde lo dejaste» y enseña números de verdad,
+  calculados en el servidor (`/api/metrics`), no una cuenta de la última página cargada.
+- **La terminal se abre desde donde hace falta**: pulsar «Abrir terminal» en un workspace lleva la
+  máquina y la sesión ya elegidas y conecta sola —esa decisión ya la tomaste—, con un enlace de
+  vuelta al workspace del que se vino.
+- **Los eventos del agente se leen** (UX-08): cada evento es una tarjeta con su color y su forma.
+  Lo que se sabe contar se cuenta en una línea; lo que es un objeto plano se enseña como chips de
+  campo y valor; el JSON crudo queda a un clic, plegable y con botón de copiar. Antes la línea de
+  tiempo era un volcado.
+- **Cerrar una terminal desde la interfaz**: junto a «Reconectar», y en cada fila de la lista de
+  sesiones. Destruir sigue siendo explícito —salir de la pantalla no mata nada— así que lo pide
+  con un diálogo que nombra la sesión y la máquina antes de tocarlas.
+- **El Assistant, completo en la interfaz** (UX-03): cuando el plan pregunta, hay dónde contestar;
+  cada paso enlaza con el trabajo que lanzó; la síntesis enlaza con los trabajos que la sostienen;
+  y si un plan pide permiso mientras estás en otra pantalla, la cabecera lo dice.
+
+- **Cuenta y cuota, en la cabecera del workspace**: se enseña lo que **queda** de cada ventana
+  —«sesión 55% · semana 88%»—, no lo gastado, con la ventana siempre pegada al número, aviso en
+  rojo por debajo del 15% y el detalle completo al pasar por encima: correo, plan, en qué máquina
+  se ejecutaría y cuándo se reinicia cada ventana. Se refresca al volver a la pestaña sin gastar
+  cuota, porque el TTL vive en el servidor. OpenCode no publica cuota y por eso ni se le pregunta.
 
 ### Corregido durante la migración
 
@@ -45,7 +78,28 @@ Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer
 - el gateway consumía el cuerpo de las peticiones antes de reenviarlas y el core se quedaba
   esperando bytes que nadie iba a mandar;
 - un fallo anterior al primer evento (un `cwd` que no existe, un binario que falta) se reportaba
-  como «salió con código 2»; ahora el core adjunta la cola de `stderr` y dice qué pasó.
+  como «salió con código 2»; ahora el core adjunta la cola de `stderr` y dice qué pasó;
+- lo que contestaba una persona a una pregunta del Assistant no llegaba al modelo: el plan
+  continuaba, pero sin haber leído la respuesta. Ahora viaja en el contexto del paso siguiente y
+  queda en el historial del plan;
+- abrir una terminal no refrescaba la lista de sesiones: la pantalla decía «ninguna sesión abierta»
+  con la sesión ya creada al otro lado;
+- el selector de máquina marcaba «(sin tmux)» y deshabilitaba hosts que sólo estaban **sin
+  comprobar**, cuando conectarse funcionaba;
+- dos avances simultáneos de un plan proponían el mismo paso dos veces —el plan acababa con un
+  paso que nadie pidió y una llamada al modelo de más—; ahora los turnos de un plan se serializan
+  y la base lo sostiene con un índice único por posición;
+- **volver a abrir una sesión desde el explorador deshacía el nombre puesto a mano.** El explorador
+  manda el título del índice en cada apertura y la reapertura no miraba de dónde venía el título:
+  la misma regresión del stack viejo, entrando por otra puerta. La ruta de trabajo sí se sigue
+  refrescando al reabrir, que es lo que se quiere;
+- la cabecera decía «40 mensajes» de una sesión de trescientos: contaba los de la página traída,
+  no los de la sesión. Ahora enseña el total que conoce el índice y dice cuándo se están viendo
+  sólo los últimos;
+- un sondeo de cuenta que no traía ni cuenta ni cuotas se guardaba como snapshot bueno y dejaba un
+  hueco silencioso durante cinco minutos. Ahora eso es un error con su motivo, y el sondeo a medias
+  de un Claude recién instalado —el que enseña la bienvenida antes de `/usage`— se reintenta una
+  vez saltándose el TTL, como hacía el stack anterior.
 
 ### Decidido
 

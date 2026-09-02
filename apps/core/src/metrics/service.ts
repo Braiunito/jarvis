@@ -1,0 +1,148 @@
+/**
+ * Métricas del panel.
+ *
+ * Se calculan con SQL sobre lo que ya está confirmado, no contando a ojo en el navegador: el
+ * cliente sólo tiene los últimos cincuenta runs y de ahí no sale un «12% menos que la semana
+ * pasada» que se pueda creer.
+ *
+ * Nada de esto sale de la máquina: son agregados locales para pintar una pantalla.
+ */
+import type { Database as Db } from 'better-sqlite3';
+import type { Provider, RunStatus } from '@jarvis/contracts';
+import type { Clock } from '../platform/clock.js';
+
+export interface ActivityBucket {
+  /** Comienzo del intervalo, en ISO. */
+  at: string;
+  runs: number;
+  failed: number;
+}
+
+export interface MetricsSnapshot {
+  window: { hours: number; from: string; to: string };
+  runs: {
+    total: number;
+    /** Mismo periodo inmediatamente anterior, para poder decir si sube o baja. */
+    previousTotal: number;
+    deltaPercent: number | null;
+    active: number;
+    needsAttention: number;
+    byProvider: Array<{ provider: Provider; runs: number; percent: number }>;
+    byStatus: Array<{ status: RunStatus; runs: number }>;
+    totalDurationMs: number;
+    medianDurationMs: number | null;
+    buckets: ActivityBucket[];
+  };
+  workspaces: { total: number; openedInWindow: number };
+  plans: { active: number; waitingApproval: number };
+}
+
+const ACTIVE_STATUSES = ['queued', 'preparing', 'running', 'waiting', 'cancelling'];
+const ATTENTION_STATUSES = ['failed', 'timed_out', 'waiting'];
+
+export class MetricsService {
+  readonly #db: Db;
+  readonly #clock: Clock;
+
+  constructor({ db, clock }: { db: Db; clock: Clock }) {
+    this.#db = db;
+    this.#clock = clock;
+  }
+
+  snapshot({ hours = 24, buckets = 24 }: { hours?: number; buckets?: number } = {}): MetricsSnapshot {
+    const now = this.#clock.nowMs();
+    const from = new Date(now - hours * 3600_000).toISOString();
+    const previousFrom = new Date(now - 2 * hours * 3600_000).toISOString();
+    const to = new Date(now).toISOString();
+
+    const count = (sql: string, ...params: unknown[]): number =>
+      (this.#db.prepare(sql).get(...params) as { n: number }).n;
+
+    const total = count('SELECT COUNT(*) AS n FROM runs WHERE created_at >= ?', from);
+    const previousTotal = count(
+      'SELECT COUNT(*) AS n FROM runs WHERE created_at >= ? AND created_at < ?', previousFrom, from,
+    );
+
+    const byProviderRows = this.#db.prepare(
+      'SELECT provider, COUNT(*) AS n FROM runs WHERE created_at >= ? GROUP BY provider ORDER BY n DESC',
+    ).all(from) as Array<{ provider: Provider; n: number }>;
+
+    const byStatusRows = this.#db.prepare(
+      'SELECT status, COUNT(*) AS n FROM runs WHERE created_at >= ? GROUP BY status',
+    ).all(from) as Array<{ status: RunStatus; n: number }>;
+
+    // Duración de lo que ya terminó: un run en marcha todavía no tiene una duración que contar.
+    const durations = (this.#db.prepare(`
+      SELECT (julianday(finished_at) - julianday(COALESCE(started_at, created_at))) * 86400000 AS ms
+      FROM runs
+      WHERE created_at >= ? AND finished_at IS NOT NULL
+      ORDER BY ms
+    `).all(from) as Array<{ ms: number }>).map((row) => Math.max(0, Math.round(row.ms)));
+
+    const totalDurationMs = durations.reduce((sum, ms) => sum + ms, 0);
+    const medianDurationMs = durations.length
+      ? durations[Math.floor(durations.length / 2)] ?? null
+      : null;
+
+    return {
+      window: { hours, from, to },
+      runs: {
+        total,
+        previousTotal,
+        // Sin nada con qué comparar no se inventa un porcentaje: se dice que no se sabe.
+        deltaPercent: previousTotal === 0
+          ? (total === 0 ? 0 : null)
+          : Math.round(((total - previousTotal) / previousTotal) * 100),
+        active: count(
+          `SELECT COUNT(*) AS n FROM runs WHERE status IN (${ACTIVE_STATUSES.map(() => '?').join(',')})`,
+          ...ACTIVE_STATUSES,
+        ),
+        needsAttention: count(
+          `SELECT COUNT(*) AS n FROM runs WHERE status IN (${ATTENTION_STATUSES.map(() => '?').join(',')})`
+          + ' AND created_at >= ?',
+          ...ATTENTION_STATUSES, previousFrom,
+        ),
+        byProvider: byProviderRows.map((row) => ({
+          provider: row.provider,
+          runs: row.n,
+          percent: total ? Math.round((row.n / total) * 100) : 0,
+        })),
+        byStatus: byStatusRows.map((row) => ({ status: row.status, runs: row.n })),
+        totalDurationMs,
+        medianDurationMs,
+        buckets: this.#buckets({ now, hours, buckets }),
+      },
+      workspaces: {
+        total: count('SELECT COUNT(*) AS n FROM workspaces'),
+        openedInWindow: count('SELECT COUNT(*) AS n FROM workspaces WHERE last_opened_at >= ?', from),
+      },
+      plans: {
+        active: count("SELECT COUNT(*) AS n FROM plans WHERE status NOT IN ('completed','failed','cancelled')"),
+        waitingApproval: count("SELECT COUNT(*) AS n FROM approvals WHERE status = 'pending'"),
+      },
+    };
+  }
+
+  /** El histograma de actividad: un intervalo por barra, incluidos los vacíos. */
+  #buckets({ now, hours, buckets }: { now: number; hours: number; buckets: number }): ActivityBucket[] {
+    const spanMs = (hours * 3600_000) / buckets;
+    const rows = this.#db.prepare(`
+      SELECT created_at, status FROM runs WHERE created_at >= ?
+    `).all(new Date(now - hours * 3600_000).toISOString()) as Array<{ created_at: string; status: string }>;
+
+    const series: ActivityBucket[] = [];
+    for (let index = 0; index < buckets; index += 1) {
+      const start = now - (buckets - index) * spanMs;
+      series.push({ at: new Date(start).toISOString(), runs: 0, failed: 0 });
+    }
+    for (const row of rows) {
+      const offset = Date.parse(row.created_at) - (now - hours * 3600_000);
+      const index = Math.min(buckets - 1, Math.max(0, Math.floor(offset / spanMs)));
+      const bucket = series[index];
+      if (!bucket) continue;
+      bucket.runs += 1;
+      if (row.status === 'failed' || row.status === 'timed_out') bucket.failed += 1;
+    }
+    return series;
+  }
+}

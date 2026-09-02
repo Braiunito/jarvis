@@ -84,14 +84,17 @@ export class FakeSessionIndex {
     return { rows: this.hostRows, stale: false, error: null };
   }
 
-  async transcript(ref: { host: string; provider: string; sessionId: string }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean }> {
+  async transcript(ref: { host: string; provider: string; sessionId: string }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null }> {
     this.#maybeFail();
+    const row = this.rows.find((candidate) => candidate.session_id === ref.sessionId);
     return {
       messages: this.transcripts.get(ref.sessionId) ?? [
         { role: 'user', at: '2026-08-30T10:00:00.000Z', text: 'el pool se queda sin conexiones' },
         { role: 'assistant', at: '2026-08-30T10:00:20.000Z', text: 'miro el log de la aplicación' },
       ],
       truncated: false,
+      // Los que tiene la sesión según el índice, que no son los que caben en una página.
+      messageCount: row ? (row.user_messages ?? 0) + (row.assistant_messages ?? 0) : null,
     };
   }
 
