@@ -1,5 +1,5 @@
 /**
- * Mirar hacia atrás en una terminal viva, contra tmux de verdad.
+ * Mirar y encajar en una terminal viva, contra tmux de verdad.
  *
  * El histórico de una sesión enganchada no está en el navegador: `tmux attach` pinta sobre la
  * pantalla alternativa, así que xterm no acumula nada y no hay scrollback local que mover. Lo que
@@ -7,7 +7,7 @@
  * servidor tmux propio y le pregunta a tmux dónde ha quedado la vista, en vez de comparar
  * cadenas: una cadena que parece correcta y que ningún tmux acepta se ve igual en un diff.
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -91,5 +91,66 @@ describe('subir y bajar por una sesión viva', () => {
 describe('lo que no es nuestro no se toca', () => {
   it('una sesión sin el prefijo de Jarvis se rechaza antes de construir el comando', () => {
     expect(() => scrollCommand({ name: 'la-tmux-de-otro', action: 'up' })).toThrow();
+  });
+});
+
+/**
+ * Redimensionar un cliente enganchado.
+ *
+ * Esto estuvo roto desde el principio sin que se notara: el core pedía el cambio con
+ * `tmux refresh-client -C`, que **sólo vale para clientes de modo control** y contra un attach
+ * normal responde «not a control client». Como el tamaño inicial lo fija el `stty` de antes del
+ * attach, casi nadie lo veía; salió al estrenar la pantalla completa, donde el hueco se duplica de
+ * golpe y tmux seguía pintando al tamaño de antes.
+ *
+ * Aquí hay un cliente de verdad —`script` da el pty que hace falta— y se comprueba lo que tmux
+ * dice de él, que es lo único que importa.
+ */
+describe('encajar el tamaño de quien mira', () => {
+  const SESION = `jarvis-resize-${process.pid}`;
+  let attachado: ReturnType<typeof spawn> | null = null;
+
+  const clienteTty = (): string =>
+    sh(`tmux list-clients -t '=${SESION}:' -F '#{client_tty}' 2>/dev/null | head -1`);
+  const tamano = (): string =>
+    sh(`tmux list-clients -t '=${SESION}:' -F '#{client_width}x#{client_height}' 2>/dev/null | head -1`);
+
+  beforeAll(async () => {
+    sh(`tmux new-session -d -s ${SESION} -x 80 -y 24 'sleep 120'`);
+    // Un cliente con pseudo-terminal de verdad: sin pty no hay tamaño que cambiar.
+    attachado = spawn('script', ['-q', '-c', `tmux attach -t '=${SESION}:'`, '/dev/null'], {
+      env: { ...process.env, TMUX_TMPDIR: tmuxDir, TERM: 'xterm-256color' },
+      stdio: 'ignore',
+      detached: true,
+    });
+    for (let intento = 0; intento < 40 && !clienteTty(); intento += 1) {
+      await new Promise((listo) => setTimeout(listo, 100));
+    }
+  });
+
+  afterAll(() => {
+    attachado?.kill('SIGKILL');
+    try { sh(`tmux kill-session -t '=${SESION}'`); } catch { /* ya no estaba */ }
+  });
+
+  it('hay un cliente enganchado con su tty', () => {
+    expect(clienteTty()).toMatch(/^\/dev\//);
+  });
+
+  it('`refresh-client -C` no sirve para esto, y por eso no se usa', () => {
+    const tty = clienteTty();
+    const salida = sh(`tmux refresh-client -t '${tty}' -C 170x40 2>&1 || true`);
+    expect(salida).toContain('not a control client');
+  });
+
+  it('cambiar el tamaño del pty sí llega: el cliente y la ventana le siguen', async () => {
+    const tty = clienteTty();
+    const antes = tamano();
+    sh(`stty -F '${tty}' rows 40 cols 170`);
+    for (let intento = 0; intento < 30 && tamano() === antes; intento += 1) {
+      await new Promise((listo) => setTimeout(listo, 100));
+    }
+    expect(tamano()).toBe('170x40');
+    expect(sh(`tmux display-message -p -t '=${SESION}:' '#{window_width}'`)).toBe('170');
   });
 });
