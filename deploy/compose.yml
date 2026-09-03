@@ -109,7 +109,23 @@ services:
       JARVIS_SWEEP_INTERVAL_MS: ${JARVIS_SWEEP_INTERVAL_MS:-21600000}
       JARVIS_SPOOL_RETENTION_DAYS: ${JARVIS_SPOOL_RETENTION_DAYS:-7}
       JARVIS_TITLE_PER_MINUTE: ${JARVIS_TITLE_PER_MINUTE:-8}
-      SSH_AUTH_SOCK: ${SSH_AUTH_SOCK:-}
+      # Dónde recuerda el core las claves de host que ya ha visto (M32).
+      #
+      # Por defecto esto vivía en `/tmp`, que en un contenedor se vacía en cada arranque: con
+      # `StrictHostKeyChecking=accept-new`, un fichero vacío significa aceptar a ciegas la primera
+      # clave que responda por cada host, otra vez, en cada reinicio. Un TOFU que se repite no es
+      # TOFU: es una ventana de suplantación cada vez que se despliega.
+      #
+      # Va al volumen de datos y no al `~/.ssh` montado porque ése es de sólo lectura a propósito
+      # —lleva la clave de la flota— y ssh, al no poder anotar allí, avisa por stderr en cada
+      # llamada; ese aviso terminaba dentro de la salida del agente. Este directorio es del usuario
+      # del contenedor y persiste, que es justo lo que hacía falta.
+      JARVIS_KNOWN_HOSTS_FILE: ${JARVIS_KNOWN_HOSTS_FILE:-/var/lib/jarvis-core/known_hosts}
+      # SSH_AUTH_SOCK no se pasa (M33): se pasaba la variable pero el socket del agente no se
+      # monta, así que apuntaba a algo que dentro del contenedor no existe. Una variable inerte no
+      # es inofensiva, es un rastro falso para quien depure autenticación de ssh. La clave viaja
+      # montada en `/home/node/.ssh`, que es como se autentica esto. Si algún día se quiere agente
+      # de verdad, hay que montar el socket **además** de pasar la variable.
     volumes:
       - jarvis-core-data:/var/lib/jarvis-core
       # La clave de la flota, de sólo lectura y sólo aquí.

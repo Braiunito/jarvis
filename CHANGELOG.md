@@ -205,6 +205,17 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 
 Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer el código:
 
+- **Cinco puertas entornadas en el gateway y en el despliegue**, de la auditoría del 2026-09-02. El
+  WebSocket de la terminal no miraba de dónde venía la petición, así que otro servicio en el mismo
+  host podía abrir una terminal interactiva con las credenciales de la víctima —`SameSite=Strict`
+  no cubre eso, porque las cookies no aíslan puertos—. Pedir challenges de passkey era gratis y
+  sin techo: sólo se penalizaban los fallos, no la emisión. La lista de sesiones cerradas fallaba
+  **abierta**: si el fichero no se podía leer se sustituía por uno vacío, y todo lo que alguien
+  había cerrado volvía a valer; y `logout` respondía que sí aunque no hubiera podido revocar nada.
+  Las claves de host se recordaban en `/tmp` del contenedor, que se vacía en cada arranque, así
+  que cada despliegue volvía a aceptar a ciegas la primera clave que respondiera. Y se pasaba un
+  `SSH_AUTH_SOCK` cuyo socket no estaba montado: un rastro falso para quien depure ssh;
+
 - **`bin/jarvis backup` no había funcionado nunca contra el stack desplegado**, que es el único
   sitio donde hace falta. La imagen del core no llevaba `scripts/` dentro, así que fallaba con
   `MODULE_NOT_FOUND` y remataba con un consejo imposible de seguir: ejecutar el script «desde el
