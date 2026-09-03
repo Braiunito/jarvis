@@ -17,10 +17,12 @@
  */
 import type { JSX } from 'react';
 import {
-  Activity, Ban, Bot, Boxes, Cable, ChevronLeft, ChevronRight, Check, CircleAlert, CircleCheck,
+  Activity, Ban, Bot, Boxes, Cable, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
+  ChevronsDown, Check, CircleAlert, CircleCheck,
   CircleDot, CircleHelp, CircleSlash, CircleStop, CircleX, Clock, Copy, CornerDownLeft, Database,
   Download, ExternalLink, Eye, FileText, Filter, FolderOpen, Gauge, Hexagon, HeartPulse, History,
-  Hourglass, House, Inbox, ListChecks, LoaderCircle, LogOut, MessageSquare, Paperclip, Pencil,
+  Hourglass, House, Inbox, ListChecks, LoaderCircle, LogOut, Maximize2, MessageSquare,
+  Minimize2, Paperclip, Pencil,
   Plus, RotateCcw, Search, SendHorizontal, Server, Settings2, ShieldCheck, ShieldOff, Sparkles,
   SlidersHorizontal, SquareTerminal, Timer, TimerOff, TriangleAlert, Wrench, X, Zap, Braces,
   Code, type LucideIcon,
@@ -166,4 +168,9 @@ export const ACTION_ICON = {
   message: MessageSquare,
   rename: Pencil,
   expandJson: Code,
+  fullscreen: Maximize2,
+  exitFullscreen: Minimize2,
+  scrollUp: ChevronUp,
+  scrollDown: ChevronDown,
+  scrollEnd: ChevronsDown,
 } as const;

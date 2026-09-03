@@ -12,7 +12,10 @@
  *          terminal o se envuelve en algo ilegible o directamente no se dibuja.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { remotePathExport, shellQuote, sshArgv, type SshConfig } from '@jarvis/agent-adapters';
+import {
+  remotePathExport, scrollCommand, shellQuote, sshArgv,
+  type ScrollAction, type SshConfig,
+} from '@jarvis/agent-adapters';
 import { JarvisError } from '@jarvis/contracts';
 
 const NAME_PATTERN = /^jarvis-[A-Za-z0-9_.-]+$/;
@@ -86,6 +89,31 @@ export function resizePty({ host, clientTty, cols, rows, config }: {
     command: `tmux refresh-client -t ${shellQuote(clientTty)} -C ${width}x${height}`,
     config,
   });
+  const [bin, ...args] = argv;
+  return new Promise((resolve) => {
+    const child = spawn(bin as string, args, { stdio: 'ignore' });
+    child.on('close', (code) => resolve(code === 0));
+    child.on('error', () => resolve(false));
+  });
+}
+
+/**
+ * Mueve la vista de una sesión viva hacia atrás o hacia delante.
+ *
+ * Va por una conexión ssh aparte, como el redimensionado: el TTY del attach es para las teclas de
+ * quien mira, y meter por ahí comandos de tmux significaría adivinar su prefijo.
+ */
+export function scrollPty({ host, name, action, config }: {
+  host: string; name: string; action: ScrollAction; config: SshConfig;
+}): Promise<boolean> {
+  let command: string;
+  try {
+    command = scrollCommand({ name, action });
+  } catch {
+    // Un nombre que no es nuestro no se toca, y tampoco se convierte en un error del socket.
+    return Promise.resolve(false);
+  }
+  const argv = sshArgv({ host, command, config });
   const [bin, ...args] = argv;
   return new Promise((resolve) => {
     const child = spawn(bin as string, args, { stdio: 'ignore' });

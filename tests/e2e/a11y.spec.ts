@@ -300,3 +300,95 @@ test.describe('tema oscuro', () => {
     expect(describeViolations((await analyze(page)).violations)).toEqual([]);
   });
 });
+
+/**
+ * Una terminal en un teléfono cabe en muy poco, y lo que se fue por arriba no está en el
+ * navegador.
+ *
+ * Estos dos tests cubren lo que se pidió mirando una sesión viva desde el móvil: poder darle toda
+ * la pantalla, y poder subir a leer lo que acaba de pasar sin escribir nada dentro.
+ */
+async function conectarTerminal(page: Page): Promise<void> {
+  await login(page);
+  await nav(page, 'Terminal').click();
+  await page.getByRole('button', { name: 'Conectar', exact: true }).click();
+  await expect(page.getByText('conectada', { exact: true })).toBeVisible({ timeout: 30_000 });
+}
+
+test('la terminal se puede ver a pantalla completa, y se puede volver', async ({ page }) => {
+  await conectarTerminal(page);
+
+  const antes = await page.locator('.terminal-host').boundingBox();
+  expect(antes).not.toBeNull();
+
+  await page.getByRole('button', { name: 'Ver la terminal a pantalla completa' }).click();
+
+  // El resto de la consola se aparta: si la cabecera sigue ahí, no es pantalla completa.
+  await expect(page.locator('.topbar')).toBeHidden();
+  await expect(page.locator('.terminal-setup')).toBeHidden();
+
+  // Y la terminal ocupa lo que se ha liberado, que es el motivo de todo esto.
+  const durante = await page.locator('.terminal-host').boundingBox();
+  expect(durante).not.toBeNull();
+  expect(durante!.height).toBeGreaterThan(antes!.height);
+
+  const ventana = page.viewportSize();
+  expect(durante!.height).toBeGreaterThan((ventana?.height ?? 0) * 0.6);
+
+  // Salir tiene que estar siempre a la vista: nadie puede quedarse atrapado en este modo.
+  const salir = page.getByRole('button', { name: 'Salir de pantalla completa' });
+  await expect(salir).toBeVisible();
+  const caja = await salir.boundingBox();
+  expect(caja!.y).toBeGreaterThanOrEqual(0);
+  expect(caja!.y + caja!.height).toBeLessThanOrEqual(ventana?.height ?? 0);
+
+  await salir.click();
+  await expect(page.locator('.topbar')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ver la terminal a pantalla completa' })).toBeVisible();
+
+  // La sesión no se ha tocado por cambiar de vista.
+  await expect(page.getByText('conectada', { exact: true })).toBeVisible();
+});
+
+test('se puede subir y bajar por el historial sin teclear dentro', async ({ page }) => {
+  const enviados: string[] = [];
+  page.on('websocket', (socket) => {
+    socket.on('framesent', (frame) => {
+      if (typeof frame.payload === 'string') enviados.push(frame.payload);
+    });
+  });
+
+  await conectarTerminal(page);
+
+  /*
+   * Se descarta lo que se envió al conectar.
+   *
+   * Un emulador de terminal **contesta** a lo que el programa remoto le pregunta: qué es
+   * (`0;276;0c`, Device Attributes) y de qué color tiene el fondo y la tinta (`gb:ffff/…`). Esos
+   * frames salen por el socket sin que nadie toque el teclado, así que contarlos como pulsaciones
+   * haría fallar a un test que en realidad está comprobando otra cosa.
+   */
+  await page.waitForTimeout(500);
+  enviados.length = 0;
+
+  await page.getByRole('button', { name: 'Subir en el historial de la sesión' }).click();
+  await page.getByRole('button', { name: 'Bajar en el historial de la sesión' }).click();
+  await page.getByRole('button', { name: 'Volver al final de la sesión' }).click();
+  await page.waitForTimeout(300);
+
+  const controles = enviados.filter((payload) => payload.includes('"type":"scroll"'));
+  expect(controles).toEqual([
+    '{"type":"scroll","action":"up"}',
+    '{"type":"scroll","action":"down"}',
+    '{"type":"scroll","action":"end"}',
+  ]);
+
+  /*
+   * Y lo importante: mirar no es teclear. Desde que se pulsan los botones no puede salir un solo
+   * byte hacia el TTY, o el agente del otro lado se comería pulsaciones que nadie escribió.
+   */
+  const teclas = enviados.filter((payload) => !payload.startsWith('{'));
+  expect(teclas).toEqual([]);
+
+  await expect(page.getByText('conectada', { exact: true })).toBeVisible();
+});

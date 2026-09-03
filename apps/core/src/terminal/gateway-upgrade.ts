@@ -10,7 +10,7 @@ import type { Duplex } from 'node:stream';
 import { detachClientCommand, sshExec, type SshConfig } from '@jarvis/agent-adapters';
 import { verifyIdentityHeader, internalSecret, IDENTITY_HEADER } from '../auth-boundary/identity.js';
 import type { AuditLog } from '../platform/audit.js';
-import { attachPty, findClientTty, resizePty } from './pty.js';
+import { attachPty, findClientTty, resizePty, scrollPty } from './pty.js';
 import { accept, rejectUpgrade, type WebSocketConnection } from './websocket.js';
 
 /**
@@ -108,11 +108,27 @@ export function handleTerminalUpgrade(
       // reconocemos se escribe tal cual: mejor teclear de más que tragarse una pulsación.
       if (!isBinary && text.startsWith('{')) {
         try {
-          const control = JSON.parse(text) as { type?: string; cols?: number; rows?: number };
+          const control = JSON.parse(text) as {
+            type?: string; cols?: number; rows?: number; action?: string;
+          };
           if (control.type === 'resize') {
             void resizePty({
               host, clientTty, cols: control.cols ?? 120, rows: control.rows ?? 32, config: deps.sshConfig,
             });
+            return;
+          }
+          /**
+           * Mirar hacia atrás sin escribir nada.
+           *
+           * En un teléfono no hay rueda de ratón ni teclas de página, y el histórico no está en
+           * el navegador: `tmux attach` pinta sobre la pantalla alternativa, así que xterm no
+           * guarda nada que enseñar. Quien mira necesita poder subir, y hacerlo sin teclear.
+           */
+          if (control.type === 'scroll') {
+            const action = control.action === 'up' || control.action === 'down' || control.action === 'end'
+              ? control.action
+              : null;
+            if (action) void scrollPty({ host, name, action, config: deps.sshConfig });
             return;
           }
           if (control.type === 'ping') {

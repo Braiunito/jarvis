@@ -94,6 +94,36 @@ export function parseSessionList(stdout: string): ParsedTmuxSession[] {
     }));
 }
 
+/**
+ * Mirar hacia atrás en una sesión viva.
+ *
+ * El histórico de una terminal enganchada **no está en el navegador**: `tmux attach` pinta sobre
+ * la pantalla alternativa, así que xterm no acumula nada y el scrollback local no tiene qué
+ * enseñar. Lo que hay que mover es el modo copia de tmux, que es quien guarda las líneas que se
+ * fueron por arriba.
+ *
+ * Se manda como comando de tmux y no como teclas por el TTY a propósito: por teclas habría que
+ * emitir el prefijo (`Ctrl-B`) y dar por hecho que nadie lo ha cambiado en su `.tmux.conf`; si
+ * alguien lo cambió, esas pulsaciones acabarían escritas dentro del agente. Esto funciona igual
+ * con cualquier configuración.
+ *
+ * `copy-mode` es idempotente —entrar dos veces no hace nada— y por eso se manda siempre antes:
+ * `send-keys -X` sobre un panel que no está en modo copia falla.
+ */
+export type ScrollAction = 'up' | 'down' | 'end';
+
+export function scrollCommand({ name, action }: { name: string; action: ScrollAction }): string {
+  assertOurs(name);
+  const target = shellQuote(paneTarget(name));
+  if (action === 'end') {
+    // Volver al presente. Si no estaba en modo copia no hay nada que cancelar, y eso no es un
+    // fallo: el botón de «ir al final» tiene que poder pulsarse siempre.
+    return `tmux send-keys -X -t ${target} cancel 2>/dev/null || true`;
+  }
+  const key = action === 'up' ? 'page-up' : 'page-down';
+  return `tmux copy-mode -t ${target} 2>/dev/null; tmux send-keys -X -t ${target} ${key}`;
+}
+
 export function capturePaneCommand({ name, lines = 200, escapes = false }: { name: string; lines?: number; escapes?: boolean }): string {
   assertOurs(name);
   const flags = ['capture-pane', '-p', '-t', paneTarget(name), '-S', `-${Math.max(1, Math.min(lines, 5000))}`];

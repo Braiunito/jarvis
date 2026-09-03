@@ -52,7 +52,17 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
 
   const holder = useRef<HTMLDivElement | null>(null);
   const term = useRef<Terminal | null>(null);
+  const fitter = useRef<FitAddon | null>(null);
   const socket = useRef<WebSocket | null>(null);
+  /**
+   * Pantalla completa, resuelta en CSS y no sólo con la API del navegador.
+   *
+   * `requestFullscreen` no existe para elementos en Safari de iPhone —sólo para vídeo—, que es
+   * justo el sitio donde una terminal de 24 líneas entre una cabecera y una barra de estado se
+   * queda sin espacio. Así que el modo lo hace la hoja de estilos, y la API nativa se pide
+   * *además* cuando está: donde funciona, quita también la barra del navegador.
+   */
+  const [immersive, setImmersive] = useState(false);
   const autoOpened = useRef(false);
   const destroy = useDestroyTerminal();
   const openTerminal = useOpenTerminal();
@@ -135,6 +145,7 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
     terminal.open(holder.current);
     fit.fit();
     term.current = terminal;
+    fitter.current = fit;
 
     const url = new URL('/events/terminal', window.location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -177,6 +188,7 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
       ws.close();
       terminal.dispose();
       term.current = null;
+      fitter.current = null;
       socket.current = null;
     };
   }, [attached]);
@@ -227,6 +239,72 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
     socket.current?.send(bytes);
     term.current?.focus();
   };
+
+  /**
+   * Mirar hacia atrás sin escribir nada.
+   *
+   * El histórico **no está aquí**: `tmux attach` pinta sobre la pantalla alternativa, así que
+   * xterm no guarda ninguna línea que se haya ido por arriba y arrastrar el dedo no tiene nada
+   * que mover. Quien las guarda es tmux, y esto le pide que mueva su vista. Por eso son botones
+   * y no un gesto: el gesto ya existe y no puede funcionar.
+   */
+  const sendScroll = (action: 'up' | 'down' | 'end'): void => {
+    if (socket.current?.readyState !== WebSocket.OPEN) return;
+    socket.current.send(JSON.stringify({ type: 'scroll', action }));
+  };
+
+  /** Reajusta la rejilla al hueco de ahora y se lo dice a tmux, que si no sigue pintando al viejo. */
+  const refit = (): void => {
+    const terminal = term.current;
+    if (!terminal || !fitter.current) return;
+    fitter.current.fit();
+    if (socket.current?.readyState === WebSocket.OPEN) {
+      socket.current.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+    }
+  };
+
+  /**
+   * Entrar y salir de pantalla completa.
+   *
+   * El estado manda sobre la clase CSS; la API nativa es un extra que puede no estar y puede
+   * fallar —Safari la rechaza fuera de un gesto, y en un iframe hace falta permiso—, y ninguna de
+   * esas dos cosas puede dejar al usuario atrapado en un modo del que no sabe salir.
+   */
+  function toggleImmersive(): void {
+    const next = !immersive;
+    setImmersive(next);
+    const root = document.querySelector('.shell');
+    try {
+      if (next) void (root as HTMLElement | null)?.requestFullscreen?.();
+      else if (document.fullscreenElement) void document.exitFullscreen();
+    } catch {
+      // El modo propio ya está puesto: que la API no quiera no cambia nada de lo que se ve.
+    }
+  }
+
+  useEffect(() => {
+    const shell = document.querySelector('.shell');
+    shell?.classList.toggle('terminal-immersive', immersive);
+    /*
+     * El hueco cambia de tamaño sin que la ventana cambie, así que el `resize` de siempre no se
+     * dispara y nadie avisaría a tmux. Se espera un fotograma para medir después del reflow.
+     */
+    const frame = requestAnimationFrame(() => refit());
+    /*
+     * Salir con Escape se descartó a propósito: Escape es una tecla de trabajo dentro de una
+     * terminal —vim, los menús de los agentes— y robársela para cerrar una vista sería quitarle
+     * al usuario algo que necesita más. Se sale por el botón, que en este modo siempre se ve.
+     */
+    const onFullscreenChange = (): void => {
+      if (!document.fullscreenElement) setImmersive(false);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      shell?.classList.remove('terminal-immersive');
+    };
+  }, [immersive]);
 
   return (
     <div className="page">
@@ -298,7 +376,40 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
       </Card>
 
       {attached ? (
-        <Card>
+        <Card className="terminal-live">
+          {/*
+            * Los controles van **encima** de la terminal y no debajo de las teclas: con el teclado
+            * virtual abierto, todo lo que esté por debajo del TTY acaba fuera de la pantalla, que
+            * es exactamente cuando hace falta poder subir a mirar lo que acaba de pasar.
+            */}
+          <div className="terminal-actions">
+            <span className="row tight">
+              <span className="tiny faint nowrap">Historial</span>
+              <button type="button" className="btn small" aria-label="Subir en el historial de la sesión"
+                title="Sube una pantalla en lo que ya pasó" onClick={() => sendScroll('up')}>
+                <Glyph icon={ACTION_ICON.scrollUp} />
+                Subir
+              </button>
+              <button type="button" className="btn small" aria-label="Bajar en el historial de la sesión"
+                title="Baja una pantalla" onClick={() => sendScroll('down')}>
+                <Glyph icon={ACTION_ICON.scrollDown} />
+                Bajar
+              </button>
+              <button type="button" className="btn small" aria-label="Volver al final de la sesión"
+                title="Vuelve a lo que está pasando ahora" onClick={() => sendScroll('end')}>
+                <Glyph icon={ACTION_ICON.scrollEnd} />
+                Al final
+              </button>
+            </span>
+            <button type="button" className={`btn small${immersive ? ' primary' : ''}`}
+              aria-pressed={immersive}
+              aria-label={immersive ? 'Salir de pantalla completa' : 'Ver la terminal a pantalla completa'}
+              title="La terminal ocupa toda la pantalla; el resto de la consola se aparta"
+              onClick={() => toggleImmersive()}>
+              <Glyph icon={immersive ? ACTION_ICON.exitFullscreen : ACTION_ICON.fullscreen} />
+              {immersive ? 'Salir' : 'Pantalla completa'}
+            </button>
+          </div>
           <div className="terminal-host" ref={holder} />
           <div className="mobile-keys">
             {MOBILE_KEYS.map((key) => (
@@ -307,9 +418,11 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
               </button>
             ))}
           </div>
-          <p className="small muted" style={{ margin: '10px 0 0' }}>
-            Salir de esta pantalla no cierra la sesión: sigue viva en {attached.host}.
-          </p>
+          {immersive ? null : (
+            <p className="small muted" style={{ margin: '10px 0 0' }}>
+              Salir de esta pantalla no cierra la sesión: sigue viva en {attached.host}.
+            </p>
+          )}
         </Card>
       ) : (
         <Card title={`Sesiones abiertas en ${host || 'esta máquina'}`} icon={NAV_ICON.terminal}

@@ -1348,6 +1348,60 @@ a:hover { text-decoration: underline; }
   max-height: max(100px, calc(var(--viewport, 100dvh) - 120px));
 }
 
+/*
+ * La fila de controles de la terminal: historial y pantalla completa.
+ *
+ * Va pegada arriba y no se envuelve en móvil salvo que no quepa: son botones que se buscan
+ * mirando, no leyendo.
+ */
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.terminal-actions .btn { min-height: var(--touch); }
+
+/*
+ * Pantalla completa.
+ *
+ * No depende de la API del navegador: en Safari de iPhone no existe para elementos, y ése es
+ * justo el caso que esto viene a arreglar. Se aparta todo lo demás y la tarjeta de la terminal
+ * pasa a ocupar la ventana entera; donde la API sí está, se pide además y desaparece también la
+ * barra del navegador.
+ *
+ * `--viewport` lo publica la pantalla desde `visualViewport`, así que con el teclado abierto el
+ * alto sigue siendo el que de verdad se ve y no el de la ventana.
+ */
+.terminal-immersive .rail,
+.terminal-immersive .topbar,
+.terminal-immersive .statusbar,
+.terminal-immersive .terminal-setup { display: none; }
+.terminal-immersive .workarea { padding: 0; }
+.terminal-immersive .page { padding: 0; gap: 0; }
+
+.terminal-immersive .terminal-live {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  height: var(--viewport, 100dvh);
+  background: var(--bg, #05070c);
+}
+.terminal-immersive .terminal-live .terminal-host {
+  flex: 1 1 auto;
+  /* Sin esto, un hijo flex no baja de su contenido y la terminal desborda por abajo. */
+  min-height: 0;
+  max-height: none;
+}
+
 /* ------------------------------------------------------- paleta de comandos */
 
 .palette-backdrop {

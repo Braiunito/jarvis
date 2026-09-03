@@ -5,12 +5,43 @@
  * Es el mismo `dev-local` pero con su propio estado, su propio puerto y una cuenta ya creada, de
  * forma que la suite no dependa de lo que haya quedado de una sesión anterior.
  */
-import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * El front se construye si el bundle está viejo, y se dice.
+ *
+ * Esto sirve `apps/web/dist`, que no lo genera nadie por el camino: `tsc -b` compila el core y el
+ * gateway, pero el navegador se lleva lo que dejó el último `vite build`. Sin esta comprobación,
+ * una pantalla recién cambiada se prueba contra el bundle anterior y la suite falla diciendo que
+ * no encuentra un botón que sí está en el código — o, peor, pasa en verde sin haber probado el
+ * cambio. Cuesta cinco segundos y ahorra media hora de buscar en el sitio equivocado.
+ */
+function masReciente(dir) {
+  let ultimo = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    const full = join(dir, entry.name);
+    ultimo = Math.max(ultimo, entry.isDirectory() ? masReciente(full) : statSync(full).mtimeMs);
+  }
+  return ultimo;
+}
+
+const bundle = join(root, 'apps/web/dist');
+const fuentes = join(root, 'apps/web/src');
+const bundleAl = existsSync(bundle) ? masReciente(bundle) : 0;
+if (existsSync(fuentes) && masReciente(fuentes) > bundleAl) {
+  console.log('[e2e] el front está más nuevo que su bundle: construyendo apps/web…');
+  const built = spawnSync('npm', ['run', '-w', '@jarvis/web', 'build'], { cwd: root, stdio: 'inherit' });
+  if (built.status !== 0) {
+    console.error('[e2e] no se pudo construir el front; las pruebas medirían el bundle anterior');
+    process.exit(1);
+  }
+}
 const state = join(root, '.e2e');
 rmSync(state, { recursive: true, force: true });
 mkdirSync(state, { recursive: true });

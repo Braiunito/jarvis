@@ -178,6 +178,15 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   trabajo o abrir una terminal viva. La conversación se estrena desde la consola en vez de tener
   que ir a la máquina a crearla y esperar a que el índice la vea.
 
+- **La terminal viva, usable desde el teléfono**: un botón le da toda la pantalla —se apartan
+  cabecera, barra lateral y selectores— y otros tres permiten subir, bajar y volver al final del
+  historial. Lo segundo hacía falta porque **el historial no está en el navegador**: una sesión
+  enganchada se pinta sobre la pantalla alternativa, así que arrastrar el dedo no tiene nada que
+  mover; quien guarda las líneas que se fueron por arriba es tmux, y ahora se le puede pedir que
+  las enseñe sin escribir nada dentro de la sesión. La pantalla completa no depende de la API del
+  navegador, que en el iPhone no existe para elementos: se pide además cuando está, pero el modo
+  lo hace la hoja de estilos y por eso funciona en cualquier teléfono.
+
 - **El historial deja de crecer para siempre**: lo que pesa de un trabajo viejo no es su historia
   —quién lo lanzó, dónde y cómo acabó— sino las salidas de herramienta y los volcados crudos. A
   los 7 días se sustituyen por su huella y un resumen de una línea; a los 30 queda el esqueleto
