@@ -79,10 +79,20 @@ if (only !== 'auth' && existsSync(coreDb)) {
 // --- almacén de autenticación ---------------------------------------------
 // Estos ficheros no se regeneran: perder session.key echa a todo el mundo, y perder users.json
 // se lleva las passkeys por delante.
+/**
+ * `internal.key` sólo existe si la instalación guarda ahí la identidad interna.
+ *
+ * Cuando va por `JARVIS_INTERNAL_SECRET` —como en el despliegue con Docker— ese fichero no se
+ * crea nunca, y avisar de su ausencia en cada copia es enseñar un aviso que siempre está y que
+ * por eso deja de leerse. Un aviso que no significa nada gasta la atención que hará falta el día
+ * que aparezca uno de verdad.
+ */
+const opcionales = new Set(process.env.JARVIS_INTERNAL_SECRET ? ['internal.key'] : []);
+
 for (const name of only === 'core' ? [] : ['users.json', 'session.key', 'internal.key', 'revoked-sessions.json', 'audit.log']) {
   const source = join(authDir, name);
   if (!existsSync(source)) {
-    manifest.warnings.push(`no existe ${source}`);
+    if (!opcionales.has(name)) manifest.warnings.push(`no existe ${source}`);
     continue;
   }
   const target = join(outDir, name);

@@ -47,6 +47,24 @@ rmSync(state, { recursive: true, force: true });
 mkdirSync(state, { recursive: true });
 for (const demo of ['app', 'deploy', 'edge']) mkdirSync(join('/tmp/jarvis-demo', demo), { recursive: true });
 
+/**
+ * Y lo mismo con el core y el gateway, que tampoco los construye nadie por el camino.
+ *
+ * Sin esto, un árbol recién clonado —o un worktree— arranca, no encuentra `dist/main.js` y muere
+ * con un `MODULE_NOT_FOUND` enterrado en la salida del servidor; lo que se ve arriba es un
+ * «Timed out waiting 60000ms» que no señala a nada. Pasó comprobando esto mismo.
+ */
+for (const entrada of ['apps/core/dist/main.js', 'apps/gateway/dist/src/main.js']) {
+  if (existsSync(join(root, entrada))) continue;
+  console.log(`[e2e] falta ${entrada}: compilando el proyecto…`);
+  const built = spawnSync('npm', ['run', 'typecheck'], { cwd: root, stdio: 'inherit' });
+  if (built.status !== 0) {
+    console.error('[e2e] no se pudo compilar; las pruebas no tendrían contra qué correr');
+    process.exit(1);
+  }
+  break;
+}
+
 const PASSWORD = 'e2e-password-de-pruebas';
 const shared = {
   ...process.env,

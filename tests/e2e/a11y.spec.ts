@@ -335,6 +335,24 @@ test('la terminal se puede ver a pantalla completa, y se puede volver', async ({
   const ventana = page.viewportSize();
   expect(durante!.height).toBeGreaterThan((ventana?.height ?? 0) * 0.6);
 
+  /*
+   * Y la rejilla se estira con él.
+   *
+   * Que el hueco crezca no basta: si xterm no se reajusta, el resultado es una terminal enorme
+   * con el contenido apelotonado arriba y medio panel negro debajo —y tmux, al otro lado,
+   * pintando todavía al tamaño viejo, con su barra de estado a media pantalla—. Eso es lo que se
+   * vio en el primer despliegue, y esta comprobación es la que faltaba.
+   */
+  await expect.poll(async () => {
+    const filas = await page.locator('.terminal-host .xterm-screen').evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    const hueco = await page.locator('.terminal-host').evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    return filas / hueco;
+  }, { timeout: 10_000 }).toBeGreaterThan(0.85);
+
   // Salir tiene que estar siempre a la vista: nadie puede quedarse atrapado en este modo.
   const salir = page.getByRole('button', { name: 'Salir de pantalla completa' });
   await expect(salir).toBeVisible();

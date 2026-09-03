@@ -74,8 +74,17 @@ export function attachPty({ host, name, cols = 120, rows = 32, config }: AttachO
 /**
  * Le dice a tmux que el cliente ahora tiene otro tamaño.
  *
- * El tamaño se fija al crear el TTY, así que una ventana de navegador que cambia tiene que
- * avisar por fuera. `refresh-client -C` se dirige al cliente por su propio tty.
+ * Se hace cambiando el tamaño del pseudo-terminal, no pidiéndoselo a tmux. La diferencia no es de
+ * estilo: `tmux refresh-client -C` **sólo vale para clientes de modo control** (`tmux -C`), y
+ * contra un attach normal responde «not a control client» y no cambia nada. Estuvo así desde el
+ * principio, sin que se notara, porque el tamaño inicial lo fija el `stty` de antes del attach y
+ * casi nadie cambiaba la ventana después; se vio al estrenar la pantalla completa, donde el hueco
+ * se duplica de golpe y tmux seguía pintando 137x25 en una pantalla de 170x40.
+ *
+ * `stty -F <tty>` cambia el tamaño del pty en el kernel, que manda `SIGWINCH` a quien esté
+ * dentro. Es lo que ocurre de verdad cuando alguien estira la ventana de su terminal, y es lo
+ * único que tmux escucha aquí. Comprobado contra el bastión: con `refresh-client` el cliente se
+ * quedaba en 137x25; con `stty` pasa a 170x40 y la ventana le sigue.
  */
 export function resizePty({ host, clientTty, cols, rows, config }: {
   host: string; clientTty: string | null; cols: number; rows: number; config: SshConfig;
@@ -86,7 +95,7 @@ export function resizePty({ host, clientTty, cols, rows, config }: {
 
   const argv = sshArgv({
     host,
-    command: `tmux refresh-client -t ${shellQuote(clientTty)} -C ${width}x${height}`,
+    command: `stty -F ${shellQuote(clientTty)} rows ${height} cols ${width}`,
     config,
   });
   const [bin, ...args] = argv;

@@ -218,6 +218,16 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 
 Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer el código:
 
+- **Redimensionar una terminal viva no redimensionaba nada**, y llevaba así desde el principio. El
+  core se lo pedía a tmux con `refresh-client -C`, que **sólo vale para clientes de modo control**:
+  contra un attach normal responde «not a control client» y no cambia nada. No se notaba porque el
+  tamaño inicial lo fija el `stty` de antes del attach y pocos cambiaban la ventana después. Salió
+  al estrenar la pantalla completa, donde el hueco se duplica de golpe: el navegador estiraba su
+  rejilla y tmux seguía pintando 137×25 en una pantalla de 170×40, con su barra de estado a media
+  altura y el texto cortado antes del borde. Ahora se cambia el tamaño del pseudo-terminal con
+  `stty`, que es lo que de verdad ocurre cuando alguien estira una terminal y lo único que tmux
+  escucha aquí. Comprobado contra el bastión y contra tmux de verdad en las pruebas;
+
 - **Cinco puertas entornadas en el gateway y en el despliegue**, de la auditoría del 2026-09-02. El
   WebSocket de la terminal no miraba de dónde venía la petición, así que otro servicio en el mismo
   host podía abrir una terminal interactiva con las credenciales de la víctima —`SameSite=Strict`

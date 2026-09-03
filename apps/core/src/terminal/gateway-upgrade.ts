@@ -112,9 +112,25 @@ export function handleTerminalUpgrade(
             type?: string; cols?: number; rows?: number; action?: string;
           };
           if (control.type === 'resize') {
-            void resizePty({
-              host, clientTty, cols: control.cols ?? 120, rows: control.rows ?? 32, config: deps.sshConfig,
-            });
+            const cols = control.cols ?? 120;
+            const rows = control.rows ?? 32;
+            /**
+             * Si al conectar no se supo qué tty le dio tmux al cliente, se vuelve a preguntar.
+             *
+             * Antes se resolvía una sola vez y, si esa consulta llegaba tarde o fallaba, este
+             * cliente se quedaba sin poder redimensionar **para siempre**: el navegador estiraba
+             * su rejilla y tmux seguía pintando al tamaño viejo, con la barra de estado a media
+             * pantalla. Se ve mucho al entrar a pantalla completa, que es cuando el hueco cambia
+             * de golpe y sin que cambie la ventana.
+             */
+            if (clientTty) {
+              void resizePty({ host, clientTty, cols, rows, config: deps.sshConfig });
+            } else {
+              void findClientTty({ host, name, config: deps.sshConfig }).then((tty) => {
+                clientTty = tty;
+                if (tty) void resizePty({ host, clientTty: tty, cols, rows, config: deps.sshConfig });
+              });
+            }
             return;
           }
           /**

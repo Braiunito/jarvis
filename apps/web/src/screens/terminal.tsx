@@ -182,7 +182,26 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
     };
     window.addEventListener('resize', onResize);
 
+    /**
+     * El hueco puede cambiar sin que cambie la ventana.
+     *
+     * Entrar a pantalla completa, abrirse el teclado o girar el teléfono redimensionan el sitio
+     * donde vive la terminal sin disparar el `resize` de `window`, así que xterm se estiraba y
+     * **tmux seguía pintando al tamaño de antes**: la barra de estado a media altura y el texto
+     * cortado a la mitad del ancho. Observar el hueco cubre los tres casos a la vez, y también
+     * los que no se nos hayan ocurrido.
+     */
+    let pendiente: ReturnType<typeof setTimeout> | null = null;
+    const observer = new ResizeObserver(() => {
+      // Un cambio de tamaño llega en ráfaga; sólo interesa el tamaño en el que se queda.
+      if (pendiente) clearTimeout(pendiente);
+      pendiente = setTimeout(onResize, 80);
+    });
+    if (holder.current) observer.observe(holder.current);
+
     return () => {
+      if (pendiente) clearTimeout(pendiente);
+      observer.disconnect();
       window.removeEventListener('resize', onResize);
       typing.dispose();
       ws.close();
