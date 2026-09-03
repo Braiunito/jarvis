@@ -28,3 +28,8 @@ Thumbs.db
 
 # Secretos de despliegue: lo mismo que `secrets/`, pero donde de verdad viven.
 deploy/secrets/
+
+# Las copias de seguridad, que `bin/jarvis backup` deja aquí dentro por comodidad. Llevan
+# `session.key`, `internal.key` y `users.json` con las passkeys: un `git add -A` distraído las
+# publicaría. El aviso no basta, porque quien se distrae no lo lee.
+backups/
