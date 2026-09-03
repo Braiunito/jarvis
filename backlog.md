@@ -682,7 +682,7 @@ para cuando se decida abrirlos. No se borran ni se resumen; simplemente no se ha
 |---|---|---|---|
 | Core, adaptadores, Assistant | `litechat-ea` | A1, A2 (+A2b), A3, A6, A7, A8, A9, N01, N04–N09, N12 | M1–M24, N14–N19 |
 | Despliegue, gateway, seguridad | `jarvis-69` | N10, N11, N13 | M31, M32, M33 |
-| Consola web | esta sesión | A4 (mitad de interfaz), ~~A5~~, ~~N03~~ | M25–M30, N20 |
+| Consola web | esta sesión | ~~A4~~, ~~A5~~, ~~N03~~ — **hecho** | M25–M30, N20 |
 
 Dos avisos sobre lo que queda fuera, porque no todo lo «medio» pesa igual:
 
@@ -778,6 +778,24 @@ despliegue, después del modelo del titulador y del proveedor del Assistant.
 **N02 no es un bug, es una decisión de producto**: hoy cualquier cuenta autenticada puede verlo y
 tocarlo todo. Con una sola persona no se nota; en cuanto haya dos, hay que decidir si un workspace
 tiene dueño. Eso lo decide el usuario, no nosotros.
+
+### [x] A4 · La terminal se abría en el home, así que no reanudaba nada
+
+Hecho el 2026-09-02, a medias con el core. `claude --resume <id>` sólo ve las conversaciones del
+directorio desde el que se lanza, y la tmux se abría en `$HOME`: la promesa de «la terminal se abre
+con la máquina y la sesión ya elegidas» no se cumplía para casi ninguna sesión real. Además el
+permiso nunca viajaba: siempre sólo lectura, sin decirlo.
+
+**El `cwd` no se manda desde el navegador y no es por elegancia.** Es la parte más delicada de
+abrir una terminal: si llega mal, alguien empieza a editar los ficheros equivocados creyendo que
+está donde debe, y en una terminal viva eso no queda en ninguna evidencia que mirar después. Se
+manda `workspaceId` y lo resuelve el core, que además lo deduce si no lo sabía.
+
+`from` sigue siendo un enlace de vuelta y nada más. Un parámetro con dos significados se paga seis
+meses después, cuando alguien cambia uno de los usos sin saber del otro.
+
+Y el permiso se elige en la propia pantalla: era el único sitio del producto donde no se podía, y
+es donde más fácil es olvidarlo.
 
 ### [x] A5 · Los adjuntos: la interfaz los prometía y no se podía subir ninguno
 

@@ -98,7 +98,7 @@ function ResumeCard({ workspace, lastRun }: { workspace: Workspace; lastRun: Run
                 <Glyph icon={ACTION_ICON.open} />
                 Abrir workspace
               </Link>
-              <Link to={`/terminal?host=${encodeURIComponent(workspace.ref.host)}&provider=${workspace.ref.provider}&sessionId=${encodeURIComponent(workspace.ref.sessionId)}`}
+              <Link to={`/terminal?host=${encodeURIComponent(workspace.ref.host)}&provider=${workspace.ref.provider}&sessionId=${encodeURIComponent(workspace.ref.sessionId)}&from=${encodeURIComponent(workspace.id)}`}
                 className="btn">
                 <Glyph icon={NAV_ICON.terminal} />
                 Abrir terminal

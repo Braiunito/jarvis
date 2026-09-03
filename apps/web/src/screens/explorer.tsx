@@ -442,7 +442,8 @@ export function ExplorerScreen(): JSX.Element {
                   {open.isPending ? 'Abriendo…' : selected.workspaceId ? 'Ir al workspace' : 'Abrir workspace'}
                 </button>
                 <Link className="btn"
-                  to={`/terminal?host=${encodeURIComponent(selected.ref.host)}&provider=${selected.ref.provider}&sessionId=${encodeURIComponent(selected.ref.sessionId)}`}>
+                  to={`/terminal?host=${encodeURIComponent(selected.ref.host)}&provider=${selected.ref.provider}&sessionId=${encodeURIComponent(selected.ref.sessionId)}`
+                    + (selected.workspaceId ? `&from=${encodeURIComponent(selected.workspaceId)}` : '')}>
                   <Glyph icon={NAV_ICON.terminal} />
                   Terminal
                 </Link>

@@ -64,6 +64,13 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **La terminal se abre donde vive la sesión**: se abría en el home, así que el agente no
+  encontraba la conversación y «continuar aquí» no continuaba nada. Ahora la carpeta la resuelve el
+  servidor a partir del workspace —y la deduce si no la sabía—, en vez de viajar en el enlace: si
+  llegara mal, alguien editaría los ficheros equivocados creyendo que está donde debe, y en una
+  terminal viva eso no lo ve nadie hasta que es tarde. De paso, el permiso del agente se elige en
+  la propia pantalla: era el único sitio donde no se podía y siempre iba en sólo lectura sin
+  decirlo.
 - **Ya se pueden adjuntar ficheros**: la pantalla los prometía —«los ficheros que le subiste»— y no
   había forma de subir ninguno. Se adjuntan desde el compositor, se ve cuáles van con el próximo
   envío y se puede dejar alguno fuera sin borrarlo de la máquina.

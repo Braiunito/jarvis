@@ -483,9 +483,27 @@ export function useOpenTerminal() {
   const client = useQueryClient();
   return useMutation({
     retry: 0,
-    mutationFn: (input: { host: string; provider: string; sessionId?: string | null }) =>
+    mutationFn: (input: {
+      host: string;
+      provider: string;
+      sessionId?: string | null;
+      /**
+       * De dónde sacar la carpeta.
+       *
+       * El `cwd` no viaja desde el navegador a propósito: es la parte más delicada de abrir una
+       * terminal. Si llegara mal, alguien se pone a editar los ficheros equivocados creyendo que
+       * está donde debe —y en una terminal viva eso no lo ve nadie hasta que es tarde—. Se manda
+       * el workspace y lo resuelve el core, que es quien sabe.
+       */
+      workspaceId?: string | null;
+      permissionProfile?: string;
+    }) =>
       post<{ name: string; host: string; created: boolean }>('/api/terminal/open', {
-        host: input.host, provider: input.provider, sessionId: input.sessionId ?? null,
+        host: input.host,
+        provider: input.provider,
+        sessionId: input.sessionId ?? null,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        ...(input.permissionProfile ? { permissionProfile: input.permissionProfile } : {}),
       }),
     onSuccess: (_data, variables) => {
       void client.invalidateQueries({ queryKey: keys.terminals(variables.host) });

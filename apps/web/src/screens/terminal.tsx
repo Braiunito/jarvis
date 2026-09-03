@@ -9,11 +9,12 @@ import { useEffect, useRef, useState } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import type { Provider } from '@jarvis/contracts';
+import type { PermissionProfile, Provider } from '@jarvis/contracts';
 import { useDestroyTerminal, useHosts, useOpenTerminal, useTerminals } from '../api/queries.js';
 import { Empty, ErrorNote, relativeTime } from '../ui/bits.jsx';
 import { announce, useAnnounceOnChange } from '../ui/announce.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, RUN_STATUS_ICON, STATUS_ICON } from '../ui/icons.jsx';
+import { PERMISSION } from '../ui/labels.js';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { Card, ConfirmDialog } from '../ui/primitives.jsx';
 
@@ -37,6 +38,14 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   // De dónde se vino: si fue de un workspace, hay que poder volver sin buscarlo otra vez.
   const [origin] = useState(query.get('from') ?? '');
   const [attached, setAttached] = useState<{ name: string; host: string } | null>(null);
+  /**
+   * Qué puede hacer el agente dentro de esta terminal.
+   *
+   * Se elegía en todas partes menos aquí, donde siempre iba en sólo lectura sin decirlo. Una
+   * terminal viva es el sitio donde más fácil es olvidarlo, porque no deja evidencia que mirar
+   * después.
+   */
+  const [profile, setProfile] = useState<PermissionProfile>('safe');
   const [error, setError] = useState<unknown>(null);
   const [connected, setConnected] = useState(false);
   const sessions = useTerminals(host || null);
@@ -175,7 +184,15 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   async function open(): Promise<void> {
     setError(null);
     try {
-      const opened = await openTerminal.mutateAsync({ host, provider, sessionId: sessionId || null });
+      const opened = await openTerminal.mutateAsync({
+        host,
+        provider,
+        sessionId: sessionId || null,
+        // Si se vino de un workspace, el core resuelve desde ahí la carpeta —y la deduce si no la
+        // sabía—. Sin esto, `claude --resume` se abre en el home y no encuentra la conversación.
+        workspaceId: origin || null,
+        permissionProfile: profile,
+      });
       setAttached({ name: opened.name, host: opened.host });
     } catch (caught) {
       setError(caught);
@@ -240,6 +257,15 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
               <option value="claude">claude</option>
               <option value="codex">codex</option>
               <option value="opencode">opencode</option>
+            </select>
+          </label>
+          <label className="row small">
+            <span className="muted">Puede</span>
+            <select className="select control-md" value={profile} disabled={Boolean(attached)}
+              onChange={(event) => setProfile(event.target.value as PermissionProfile)}>
+              {(['safe', 'auto', 'yolo'] as const).map((value) => (
+                <option key={value} value={value}>{PERMISSION[value].name}</option>
+              ))}
             </select>
           </label>
           <button type="button" className="btn primary" onClick={() => void open()} disabled={!host}>
