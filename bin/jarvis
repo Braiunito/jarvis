@@ -104,9 +104,15 @@ case "${1:-}" in
     echo "copia en $dest"
     ls -l "$dest"
     echo
+    # Una copia que nunca se ha restaurado es una hipótesis. Estos pasos se ejecutan aquí mismo,
+    # sin Node en el bastión, y sin pasear las claves del gateway por el core: se prueba con la
+    # mitad de la base, que es la que puede estar corrupta sin que se note.
     echo "para comprobarla de verdad, restáurala en un destino vacío:"
-    echo "  docker exec -i $core_id node /app/scripts/restore.mjs --from=- < /dev/null  # (dentro del core)"
-    echo "  o, desde un sitio con Node: node scripts/restore.mjs --from=$dest --core-db=/tmp/prueba/core.db --auth-dir=/tmp/prueba"
+    echo "  rm -rf /tmp/solo-core && mkdir /tmp/solo-core"
+    echo "  cp $dest/core.db $dest/manifest-core.json /tmp/solo-core/"
+    echo "  docker cp /tmp/solo-core $core_id:/tmp/solo-core"
+    echo "  docker exec $core_id node /app/scripts/restore.mjs --from=/tmp/solo-core --core-db=/tmp/prueba/core.db --auth-dir=/tmp/prueba"
+    echo "  docker exec $core_id rm -rf /tmp/solo-core /tmp/prueba && rm -rf /tmp/solo-core"
     ;;
   users)
     shift
