@@ -117,6 +117,31 @@ body {
 button, input, textarea, select { font: inherit; color: inherit; }
 
 /*
+ * Un botón no es texto que se copie.
+ *
+ * En un teléfono, mantener el dedo sobre algo con texto seleccionable levanta el menú del sistema
+ * —seleccionar, copiar, buscar— y se lleva por delante el gesto que se estaba haciendo. Se nota
+ * en cuanto un botón hace algo mientras se mantiene pulsado, como subir por el historial de una
+ * terminal: la mitad de las veces acabas con «Subir» seleccionado en azul en vez de subiendo.
+ *
+ * `touch-action: manipulation` va en el mismo sitio y por lo mismo: quita el doble toque para
+ * ampliar sobre los controles, que además es lo que causa el medio segundo de espera antes de que
+ * un botón responda.
+ *
+ * Sólo controles. El texto de la aplicación —lo que dice un agente, un identificador de sesión,
+ * la salida de un trabajo— se sigue pudiendo seleccionar y copiar, que para eso está.
+ */
+button,
+.btn,
+[role="button"],
+.list-open {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+/*
  * El foco se ve siempre, y se ve igual.
  *
  * Antes cada componente traía su regla y algunos se quedaban sin ninguna —las filas de la lista,
@@ -1345,7 +1370,13 @@ a:hover { text-decoration: underline; }
 .keyboard-open .page { padding: 8px; gap: 8px; }
 .keyboard-open .terminal-host {
   min-height: 100px;
-  max-height: max(100px, calc(var(--viewport, 100dvh) - 120px));
+  /*
+   * Lo que se descuenta es todo lo que comparte hueco con la terminal cuando el teclado está
+   * abierto: la fila de historial y pantalla completa arriba, y las teclas que el teléfono no
+   * tiene abajo. Al añadir la primera, las teclas se salieron de lo visible —que es justo lo que
+   * este bloque existe para evitar— y lo cazó la prueba del teclado virtual.
+   */
+  max-height: max(100px, calc(var(--viewport, 100dvh) - 195px));
 }
 
 /*

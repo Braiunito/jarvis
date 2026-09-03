@@ -500,3 +500,54 @@ test('mantener pulsado sigue desplazando, y soltar lo para', async ({ page }) =>
   // Nada de esto ha escrito en la sesión.
   expect(enviados.filter((payload) => !payload.startsWith('{'))).toEqual([]);
 });
+
+/**
+ * Un botón no se selecciona.
+ *
+ * En un teléfono, mantener el dedo sobre algo con texto seleccionable levanta el menú del sistema
+ * y se come el gesto: se nota en cuanto un botón hace algo mientras se mantiene pulsado, como
+ * subir por el historial de una terminal. Se recorren las pantallas de verdad porque esto se
+ * rompe añadiendo un control nuevo con una clase que nadie se acordó de cubrir.
+ */
+test('ningún control deja seleccionar su texto', async ({ page }) => {
+  await login(page);
+
+  for (const screen of ['Inicio', 'Sesiones', 'Terminal'] as const) {
+    await nav(page, screen).click();
+    await page.waitForTimeout(600);
+
+    const seleccionables = await page.evaluate(() => {
+      const controles = [...document.querySelectorAll<HTMLElement>('button, .btn, [role="button"], .list-open')];
+      return controles
+        .filter((element) => element.offsetParent !== null)
+        .filter((element) => {
+          const estilo = getComputedStyle(element);
+          return estilo.userSelect !== 'none' && estilo.webkitUserSelect !== 'none';
+        })
+        .map((element) => element.textContent?.trim().slice(0, 30) || element.className);
+    });
+    expect(seleccionables, `controles seleccionables en ${screen}`).toEqual([]);
+  }
+
+  // Y lo contrario: el texto de la aplicación se sigue pudiendo copiar, que para eso está.
+  const textoNormal = await page.evaluate(() => {
+    const parrafo = document.querySelector('p, .small, .muted');
+    return parrafo ? getComputedStyle(parrafo).userSelect : 'none';
+  });
+  expect(textoNormal).not.toBe('none');
+});
+
+/**
+ * Ningún test puede dejar una sesión mirando al pasado.
+ *
+ * Desplazarse hacia atrás mete a tmux en su modo copia, y ahí las teclas dejan de llegar a la
+ * shell. La sesión sobrevive al test —esa es la gracia de una terminal viva—, así que el
+ * siguiente se reengancha a ella, teclea y no ve su propio eco. Costó un rato entender por qué un
+ * test que pasa suelto falla en la suite.
+ */
+test.afterEach(async ({ page }) => {
+  const alFinal = page.getByRole('button', { name: 'Volver al final de la sesión' });
+  if (!await alFinal.isVisible().catch(() => false)) return;
+  await alFinal.click().catch(() => undefined);
+  await page.waitForTimeout(300);
+});
