@@ -29,20 +29,64 @@ interface ChallengeEntry {
   purpose: 'assertion' | 'attestation';
   userId: string | null;
   expiresAt: number;
+  /** Quién lo pidió: es lo que permite acotar la emisión sin castigar a los demás (N10). */
+  ip: string;
 }
 
 // Los challenges viven en memoria, son de un solo uso y caducan. Uno reutilizable haría
 // reproducible cualquier ceremonia grabada.
 const challenges = new Map<string, ChallengeEntry>();
 
-function issueChallenge(purpose: ChallengeEntry['purpose'], userId: string | null): { id: string; challenge: string } {
+function sweepExpired(now: number): void {
+  for (const [id, entry] of challenges) if (entry.expiresAt < now) challenges.delete(id);
+}
+
+/**
+ * Emite un challenge, o dice que no hay sitio.
+ *
+ * Antes esto no podía fallar, y ahí estaba el problema: cada petición anónima con éxito dejaba
+ * una entrada viva cinco minutos y el limitador de login no la contaba, porque sólo cuenta
+ * fallos. Emitir salía gratis y guardarlo lo pagaba el servidor.
+ *
+ * Ahora hay dos topes. Por IP se conservan los últimos y se tiran los más viejos: quien reintenta
+ * de verdad usa el nuevo, y quien se dedica a pedirlos no acumula nada. El global es la red de
+ * seguridad para muchas IPs a la vez —una botnet, o un proxy mal configurado que las colapsa en
+ * una sola— y ahí ya no se tira nada de nadie: se responde que no y se dice cuándo volver.
+ */
+function issueChallenge(
+  purpose: ChallengeEntry['purpose'], userId: string | null, ip: string,
+): { id: string; challenge: string } | null {
+  const now = Date.now();
+  if (challenges.size >= config.challengeMaxTotal) {
+    sweepExpired(now);
+    if (challenges.size >= config.challengeMaxTotal) {
+      audit('auth.challenge.capacity', { ip, live: challenges.size });
+      return null;
+    }
+  }
+
+  // El mapa está acotado por el tope global, así que recorrerlo es barato y evita llevar un
+  // índice por IP que habría que mantener sincronizado en cada borrado.
+  const mine = [...challenges].filter(([, entry]) => entry.ip === ip);
+  const excess = mine.length - config.challengeMaxPerIp + 1;
+  if (excess > 0) {
+    mine.sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+    for (const [id] of mine.slice(0, excess)) challenges.delete(id);
+  }
+
   const id = randomUUID();
   const challenge = newChallenge();
   challenges.set(id, {
-    challenge, purpose, userId,
-    expiresAt: Date.now() + config.challengeTtlSeconds * 1000,
+    challenge, purpose, userId, ip,
+    expiresAt: now + config.challengeTtlSeconds * 1000,
   });
   return { id, challenge };
+}
+
+/** Sin sitio para otro challenge: se dice con el mismo contrato que el resto de límites. */
+function noCapacity(reply: FastifyReply): FastifyReply {
+  return reply.code(429).header('Retry-After', String(config.challengeTtlSeconds))
+    .send({ error: 'too many challenges in flight; retry shortly' });
 }
 
 function consumeChallenge(id: string | undefined, purpose: ChallengeEntry['purpose']): ChallengeEntry | null {
@@ -54,10 +98,7 @@ function consumeChallenge(id: string | undefined, purpose: ChallengeEntry['purpo
   return entry;
 }
 
-const sweeper = setInterval(() => {
-  const now = Date.now();
-  for (const [id, entry] of challenges) if (entry.expiresAt < now) challenges.delete(id);
-}, 60_000);
+const sweeper = setInterval(() => sweepExpired(Date.now()), 60_000);
 sweeper.unref();
 
 /**
@@ -179,9 +220,19 @@ export function registerAuthRoutes(app: FastifyInstance, currentUser: (req: Fast
     const claims = currentUser(request);
     // Se revoca también en el servidor: borrar la cookie sólo se lo pide a este navegador.
     const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
-    if (token) session.revoke(token);
-    if (claims) audit('logout', { username: claims.username });
-    return reply.header('Set-Cookie', session.clearCookie()).send({ ok: true });
+    const revoked = token ? session.revoke(token) : true;
+    if (claims) audit(revoked ? 'logout' : 'logout.not_revoked', { username: claims.username });
+    // La cookie se borra igual —no dejarla sería peor—, pero no se dice que la sesión quedó
+    // cerrada si el servidor no ha podido anotarlo: quien se va tiene que saber que ese token
+    // sigue sirviendo hasta que caduque, para poder hacer algo al respecto.
+    const response = reply.header('Set-Cookie', session.clearCookie());
+    if (!revoked) {
+      return response.code(500).send({
+        ok: false,
+        error: 'the session could not be revoked on the server; the token stays valid until it expires',
+      });
+    }
+    return response.send({ ok: true });
   });
 
   app.post('/auth/password/verify', async (request, reply) => {
@@ -230,7 +281,9 @@ export function registerAuthRoutes(app: FastifyInstance, currentUser: (req: Fast
      * público y cualquier cosa que varíe con el nombre es un oráculo de enumeración — uno que
      * además repartiría ids de credencial, que siguen a una persona entre servicios.
      */
-    const { id, challenge } = issueChallenge('assertion', user?.userId ?? null);
+    const issued = issueChallenge('assertion', user?.userId ?? null, ip);
+    if (!issued) return noCapacity(reply);
+    const { id, challenge } = issued;
     return reply.send({
       challengeId: id,
       publicKey: {
@@ -356,7 +409,9 @@ export function registerAuthRoutes(app: FastifyInstance, currentUser: (req: Fast
       return reply.code(401).send({ error: 'invalid or expired enrollment code' });
     }
 
-    const { id, challenge } = issueChallenge('attestation', user.userId);
+    const issued = issueChallenge('attestation', user.userId, ip);
+    if (!issued) return noCapacity(reply);
+    const { id, challenge } = issued;
     return reply.send({
       challengeId: id,
       publicKey: {
@@ -426,6 +481,9 @@ export function registerAuthRoutes(app: FastifyInstance, currentUser: (req: Fast
     return reply.send({ ok: true, username: user.username, credentialId: stored.credentialId });
   });
 }
+
+/** Cuántos challenges hay vivos. Sólo para pruebas: el tope de N10 no se ve de otra forma. */
+export function liveChallengesForTests(): number { return challenges.size; }
 
 export function resetChallengesForTests(): void {
   challenges.clear();

@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { config } from './config.js';
+import { audit } from './lib/audit.js';
 import { parseCookies, session, SESSION_COOKIE } from './lib/session.js';
 import { users } from './lib/store.js';
 import { proxyToCore, proxyUpgradeToCore } from './proxy.js';
@@ -115,6 +116,28 @@ export function buildGateway(options: { logger?: boolean } = {}): FastifyInstanc
     // Nada aquí puede lanzar: una excepción en un handler de socket es una excepción no capturada,
     // y eso termina el proceso para todo el mundo.
     try {
+      /**
+       * El origen se comprueba antes que nada, incluso antes de mirar la cookie (N13).
+       *
+       * `SameSite=Strict` no sustituye a esto: las cookies no distinguen puertos ni subdominios
+       * del mismo site, así que otro servicio en el mismo host puede abrir un WebSocket con las
+       * credenciales de la víctima y quedarse con una terminal interactiva. Eso es CSWSH, y
+       * contra una terminal es lo más caro que se puede perder aquí.
+       *
+       * Un navegador siempre manda `Origin` en un upgrade, así que exigirlo no le cierra la
+       * puerta a nadie legítimo desde la web. Un cliente que no es navegador tampoco lo manda
+       * nunca, y para ése está `JARVIS_REQUIRE_WS_ORIGIN=false`: lo que no puede pasar es que la
+       * ausencia valga por defecto, porque entonces basta con no mandarlo.
+       */
+      const origin = req.headers.origin;
+      const originAllowed = origin
+        ? config.origins.includes(origin)
+        : !config.requireWebSocketOrigin;
+      if (!originAllowed) {
+        audit('terminal.upgrade.origin_rejected', { origin: origin ?? null });
+        socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+        return;
+      }
       const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
       const claims = token ? session.read(token) : null;
       const user = claims ? users.findByUserId(claims.sub) : null;

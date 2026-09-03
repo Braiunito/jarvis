@@ -84,6 +84,25 @@ export const config = {
   rpId,
   rpName: env['JARVIS_RP_NAME'] || 'Jarvis Bastion',
   origins: origins.length ? origins : derivedOrigins(),
+  /**
+   * Exigir `Origin` en el upgrade del WebSocket (N13). Cierto por defecto: la política es web.
+   *
+   * Se apaga sólo si de verdad hay que dejar entrar clientes que no son navegadores, que nunca
+   * mandan la cabecera. Un navegador la manda siempre, así que apagarlo no arregla ningún
+   * problema de la consola: sólo abre la puerta a que alguien la omita.
+   */
+  requireWebSocketOrigin: bool(env['JARVIS_REQUIRE_WS_ORIGIN'], true),
+
+  /**
+   * Cuántos challenges pueden estar vivos a la vez (N10).
+   *
+   * Emitir uno es gratis para quien lo pide y cuesta memoria a quien lo guarda, y hasta ahora no
+   * había tope: bastaba pedirlos más deprisa de lo que el barrido por minuto los quitaba. El
+   * límite por IP es alto para lo que hace una persona —un reintento, otro navegador, una pestaña
+   * olvidada— y ridículo para quien quiera llenar la memoria.
+   */
+  challengeMaxPerIp: Number(env['JARVIS_CHALLENGE_MAX_PER_IP'] || 5),
+  challengeMaxTotal: Number(env['JARVIS_CHALLENGE_MAX_TOTAL'] || 10_000),
 
   // Cadena de pasos de autenticación. Añadir un factor es añadir un paso, jamás reescribir el
   // flujo (decisión D8).

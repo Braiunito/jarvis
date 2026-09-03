@@ -62,33 +62,72 @@ function verify(token: string | undefined, audience: string): Claims | null {
 const REVOKED_FILE = (): string => join(config.dataDir, 'revoked-sessions.json');
 let revoked: Map<string, number> | null = null;
 
+/**
+ * Momento a partir del cual una sesión es de fiar.
+ *
+ * Todo token emitido antes queda inválido, aunque su `jti` no esté en la lista. Es lo que permite
+ * fallar cerrado cuando la lista deja de ser legible: si no se sabe qué se revocó, lo honesto es
+ * no dar por buena ninguna sesión anterior a ese descubrimiento. Volver a entrar arregla la
+ * situación en un gesto; dar por válido un token que alguien cerró no se arregla de ninguna forma.
+ */
+let revokedBefore = 0;
+
+interface RevokedFile {
+  revokedBefore?: number;
+  jti?: Record<string, number>;
+}
+
 function loadRevoked(): Map<string, number> {
   if (revoked) return revoked;
   revoked = new Map();
+  if (!existsSync(REVOKED_FILE())) return revoked;
   try {
-    if (existsSync(REVOKED_FILE())) {
-      for (const [jti, exp] of Object.entries(JSON.parse(readFileSync(REVOKED_FILE(), 'utf8')) as Record<string, number>)) {
-        revoked.set(jti, exp);
-      }
+    const raw = JSON.parse(readFileSync(REVOKED_FILE(), 'utf8')) as RevokedFile | Record<string, number>;
+    // El formato antiguo era un objeto plano `jti -> exp`; se sigue leyendo.
+    const entries = 'jti' in raw && typeof raw.jti === 'object'
+      ? (raw as RevokedFile).jti ?? {}
+      : raw as Record<string, number>;
+    for (const [jti, exp] of Object.entries(entries)) {
+      if (typeof exp === 'number') revoked.set(jti, exp);
     }
-  } catch {
-    // Una lista corrupta no puede dejar a todo el mundo fuera: se empieza limpia.
+    const marker = (raw as RevokedFile).revokedBefore;
+    if (typeof marker === 'number') revokedBefore = Math.max(revokedBefore, marker);
+  } catch (error) {
+    /**
+     * Una lista ilegible no puede empezar limpia: eso resucita todas las sesiones cerradas.
+     *
+     * Se invalida lo anterior con la marca, se aparta el fichero roto en vez de sobrescribirlo
+     * —si alguien lo corrompió a propósito, es lo primero que querrá mirar quien investigue— y se
+     * dice en voz alta. Quien estuviera dentro vuelve a entrar; quien tuviera un token robado y
+     * revocado no.
+     */
     revoked = new Map();
+    revokedBefore = Math.floor(Date.now() / 1000);
+    console.error('[session] la lista de revocación no se puede leer, se invalidan las sesiones '
+      + `anteriores a ${new Date(revokedBefore * 1000).toISOString()}:`, (error as Error).message);
+    try {
+      renameSync(REVOKED_FILE(), `${REVOKED_FILE()}.corrupt-${revokedBefore}`);
+    } catch { /* si tampoco se puede apartar, la marca en memoria sigue protegiendo */ }
+    persistRevoked();
   }
   return revoked;
 }
 
-function persistRevoked(): void {
+/** Escribe la lista. Devuelve si se pudo dejar en disco, que es lo único que sobrevive al proceso. */
+function persistRevoked(): boolean {
   const now = Math.floor(Date.now() / 1000);
-  const current = loadRevoked();
+  const current = revoked ?? new Map<string, number>();
   for (const [jti, exp] of current) if (exp < now) current.delete(jti);
   try {
     ensureDataDir();
     const tmp = `${REVOKED_FILE()}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(Object.fromEntries(current)), { mode: 0o600 });
+    const payload: RevokedFile = { revokedBefore, jti: Object.fromEntries(current) };
+    writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 });
     renameSync(tmp, REVOKED_FILE());
+    return true;
   } catch (error) {
     console.error('[session] could not persist the revocation list:', (error as Error).message);
+    return false;
   }
 }
 
@@ -103,16 +142,27 @@ export const session = {
   read(token: string | undefined): Claims | null {
     const claims = verify(token, 'session');
     if (!claims) return null;
-    if (claims.jti && loadRevoked().has(claims.jti)) return null;
+    const list = loadRevoked();
+    if (claims.jti && list.has(claims.jti)) return null;
+    // Emitida antes de que la lista dejara de ser fiable: no vale, aunque su jti no conste. La
+    // comparación incluye el segundo exacto del descubrimiento a propósito: `iat` va en segundos,
+    // y dejar pasar ese segundo es dejar pasar justo los tokens de alrededor del problema.
+    if (revokedBefore && claims.iat <= revokedBefore) return null;
     return claims;
   },
 
+  /**
+   * Cierra una sesión en el servidor. Devuelve `false` si no puede garantizarlo.
+   *
+   * Que la escritura falle y logout conteste que sí es la peor combinación posible: la persona se
+   * va convencida de haber cerrado, y el token sigue sirviendo hasta que caduque. Quien llama
+   * tiene que poder decirlo.
+   */
   revoke(token: string | undefined): boolean {
     const claims = verify(token, 'session');
     if (!claims?.jti) return false;
     loadRevoked().set(claims.jti, claims.exp);
-    persistRevoked();
-    return true;
+    return persistRevoked();
   },
 
   cookie(token: string): string {
@@ -130,7 +180,7 @@ export const session = {
     return attributes.join('; ');
   },
 
-  resetRevokedForTests(): void { revoked = null; },
+  resetRevokedForTests(): void { revoked = null; revokedBefore = 0; },
 };
 
 export const pending = {
