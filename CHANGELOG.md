@@ -267,6 +267,15 @@ Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer
   porque sólo se respondía a la primera;
 - al agotarse el plazo de un trabajo, la petición de parada se construía con la carpeta equivocada
   y no llegaba a salir: el trabajo sólo moría en la escalada, cinco segundos después;
+- **dos trabajos podían escribir a la vez en la misma conversación** —dos envíos seguidos, o un
+  plan y una persona—, con el historial de la máquina entrelazado y ficheros editados en conflicto;
+  ahora el turno es por conversación y el segundo espera, sin que nadie tenga que volver a pulsar;
+- mandar el mismo trabajo dos veces con la misma clave podía crear dos trabajos, y veinte a la vez
+  creaban veinte;
+- el cliente podía decidir si una sesión se estrenaba o se reanudaba, cuando eso depende de lo que
+  el servidor tiene guardado;
+- el Assistant podía **parar el trabajo que había lanzado una persona**, sin pedir permiso y sólo
+  con lo que hubiera leído por ahí; ahora sólo para lo suyo y para el resto pide aprobación;
 - lo que contestaba una persona a una pregunta del Assistant no llegaba al modelo: el plan
   continuaba, pero sin haber leído la respuesta. Ahora viaja en el contexto del paso siguiente y
   queda en el historial del plan;

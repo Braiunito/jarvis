@@ -340,6 +340,104 @@ describe('TEC-11 · una sesión cuyo directorio nadie sabía', () => {
  * cayó—, la conversación no llegó a existir en la máquina y el workspace decía que sí: **todos**
  * los trabajos siguientes salían a reanudar algo que no está, y fallaban para siempre.
  */
+/**
+ * N05 y N06: lo que el cliente no puede decidir.
+ *
+ * Los dos van juntos porque son la misma idea vista dos veces: un invariante que depende de que
+ * quien llama se porte bien no es un invariante, es una convención.
+ */
+/**
+ * N04: dos agentes no pueden reanudar la misma conversación a la vez.
+ *
+ * El límite global de concurrencia vigila **cuántos** trabajos hay, no sobre qué, así que dos
+ * envíos seguidos —o un plan y una persona— podían acabar con dos `--resume` simultáneos sobre el
+ * mismo historial. El daño no se ve en Jarvis: se ve en la máquina, con el transcript entrelazado
+ * y ficheros editados en conflicto.
+ */
+describe('N04 · un turno por conversación', () => {
+  it('el segundo trabajo del mismo workspace espera su turno, y arranca al terminar el primero', async () => {
+    const workspaceId = await openWorkspace(harness.app, 'sid-turno');
+    const primero = (await createRun(harness.app, workspaceId, '@@slow:6 el primero')).json<{ run: Run }>().run;
+    const segundo = (await createRun(harness.app, workspaceId, 'el segundo')).json<{ run: Run }>().run;
+
+    await waitFor(() => runOf(harness.app, primero.id), (value) => value.status === 'running', {
+      what: 'que arranque el primero', timeoutMs: 20_000,
+    });
+    // Mientras el primero tiene el turno, el segundo no ha tocado la máquina.
+    expect((await runOf(harness.app, segundo.id)).status).toBe('queued');
+
+    await waitFor(() => runOf(harness.app, primero.id), (value) => value.status === 'completed', {
+      what: 'que termine el primero', timeoutMs: 30_000,
+    });
+    // Y en cuanto se libera, la cola avanza sola: nadie tiene que volver a pulsar.
+    const arrancado = await waitFor(() => runOf(harness.app, segundo.id),
+      (value) => value.status !== 'queued', { what: 'que arranque el segundo', timeoutMs: 30_000 });
+    expect(['preparing', 'running', 'completed']).toContain(arrancado.status);
+  });
+
+  it('dos conversaciones distintas sí avanzan a la vez', async () => {
+    const uno = await openWorkspace(harness.app, 'sid-par-1');
+    const otro = await openWorkspace(harness.app, 'sid-par-2');
+    const a = (await createRun(harness.app, uno, '@@slow:4 uno')).json<{ run: Run }>().run;
+    const b = (await createRun(harness.app, otro, '@@slow:4 otro')).json<{ run: Run }>().run;
+
+    await waitFor(() => runOf(harness.app, a.id), (value) => value.status === 'running', {
+      what: 'que arranque el de la primera sesión', timeoutMs: 20_000,
+    });
+    const segundo = await waitFor(() => runOf(harness.app, b.id), (value) => value.status !== 'queued', {
+      what: 'que arranque el de la otra sesión', timeoutMs: 20_000,
+    });
+    // El turno es por conversación: entre sesiones distintas no hay nada que serializar.
+    expect(['preparing', 'running', 'completed']).toContain(segundo.status);
+  });
+});
+
+describe('N05/N06 · el servidor decide, aunque el cliente insista', () => {
+  it('veinte peticiones idénticas a la vez crean un solo trabajo', async () => {
+    const workspaceId = await openWorkspace(harness.app, 'sid-idem');
+    const peticiones = Array.from({ length: 20 }, () => createRun(
+      harness.app, workspaceId, 'esto se manda una sola vez', { idempotencyKey: 'k-concurrente' },
+    ));
+    const respuestas = await Promise.all(peticiones);
+
+    // 202 el que lo crea, 200 los que reciben el que ya existía: los dos son respuestas correctas.
+    for (const respuesta of respuestas) expect([200, 202]).toContain(respuesta.statusCode);
+    expect(respuestas.filter((r) => r.statusCode === 202)).toHaveLength(1);
+    const ids = new Set(respuestas.map((r) => r.json<{ run: Run }>().run.id));
+    // Uno solo: antes cada petición que llegaba antes de guardarse la clave creaba el suyo.
+    expect(ids.size).toBe(1);
+
+    const listados = (await harness.app.inject({ method: 'GET', url: `/api/runs?workspaceId=${workspaceId}` }))
+      .json<{ runs: Run[] }>().runs;
+    expect(listados.filter((run) => run.promptPreview?.includes('una sola vez'))).toHaveLength(1);
+  });
+
+  it('la misma clave con otra petición se rechaza en vez de sobrescribir la primera', async () => {
+    const workspaceId = await openWorkspace(harness.app, 'sid-idem2');
+    const primera = await createRun(harness.app, workspaceId, 'lo primero', { idempotencyKey: 'k-distinta' });
+    expect(primera.statusCode).toBe(202);
+
+    const segunda = await createRun(harness.app, workspaceId, 'otra cosa', { idempotencyKey: 'k-distinta' });
+    expect(segunda.statusCode).toBe(409);
+    expect(segunda.json<{ error: { code: string } }>().error.code).toBe('IDEMPOTENCY_CONFLICT');
+
+    // Y la respuesta de la primera sigue siendo la suya, no la de la segunda.
+    const repetida = await createRun(harness.app, workspaceId, 'lo primero', { idempotencyKey: 'k-distinta' });
+    expect(repetida.json<{ run: Run }>().run.id).toBe(primera.json<{ run: Run }>().run.id);
+  });
+
+  it('un cliente no puede forzar que una conversación existente se estrene de cero', async () => {
+    const workspaceId = await openWorkspace(harness.app, 'sid-nomiente');
+    // Este workspace viene del índice: su conversación ya existe y sólo se puede continuar.
+    const created = await createRun(harness.app, workspaceId, 'sigue', { startsSession: true });
+    expect(created.statusCode).toBe(202);
+
+    const run = created.json<{ run: Run }>().run;
+    // Lo que decide es el estado guardado, no lo que llegue en el cuerpo.
+    expect(run.startsSession).toBe(false);
+  });
+});
+
 describe('A6 · estrenar una sesión que no llegó a arrancar', () => {
   it('un primer trabajo que muere antes del agente deja la sesión sin estrenar', async () => {
     const nueva = (await harness.app.inject({

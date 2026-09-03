@@ -584,6 +584,68 @@ describe('M4 · el Assistant ve los ficheros, no sólo el texto', () => {
 });
 
 /**
+ * N09: el coordinador no para el trabajo de una persona.
+ *
+ * Podía cancelar cualquier trabajo activo del workspace, incluido el que alguien lanzó a mano. Y lo
+ * que el coordinador lee —transcripts, salidas, ficheros— es contenido ajeno: una línea inyectada
+ * ahí bastaba para que parase trabajo caro o irrepetible. Que quedara auditado no evitaba el
+ * efecto, sólo lo dejaba escrito después.
+ */
+describe('M4 · qué trabajo puede parar el Assistant', () => {
+  const conRuns = (workspace: Workspace, ownRunIds: string[]) => new CoreAssistantToolbox({
+    plan: planOn(workspace),
+    workspace,
+    sessions: services.sessions,
+    health: services.health,
+    runs: services.runs,
+    audit: services.audit,
+    user,
+    ownRunIds,
+  });
+
+  it('el trabajo que lanzó una persona no lo puede parar: tiene que pedirlo', async () => {
+    const workspace = openWorkspace();
+    const manual = newRunId();
+    services.runRepository.insert({
+      id: manual, workspaceId: workspace.id, createdBy: 'braian', provider: 'claude',
+      sessionId: 'sid-1', prompt: 'lo lanzó una persona', workHost: 'bastion',
+      executionHost: 'bastion', strategy: 'bastion', strategyReason: null, cwd: null,
+      permissionProfile: 'safe', model: null, attempt: 1, parentRunId: null,
+      remoteName: `jarvis-run-${manual}`, remoteSpoolDir: `/tmp/x/${manual}`,
+      createdAt: NOW, deadlineAt: null,
+    });
+
+    // El plan no lo lanzó, así que no es suyo.
+    const outcome = await conRuns(workspace, []).invoke('cancel_run', { runId: manual }) as {
+      content: { error: { code: string; hint?: string } };
+    };
+    expect(outcome.content.error.code).toBe('FORBIDDEN');
+    expect(outcome.content.error.hint).toContain('request_approval');
+    // Y sigue como estaba: la herramienta no lo tocó.
+    expect(services.runs.require(manual).status).toBe('queued');
+  });
+
+  it('el que lanzó el propio plan sí lo puede parar', async () => {
+    const workspace = openWorkspace();
+    const propio = newRunId();
+    services.runRepository.insert({
+      id: propio, workspaceId: workspace.id, createdBy: 'braian', provider: 'claude',
+      sessionId: 'sid-1', prompt: 'lo lanzó el plan', workHost: 'bastion',
+      executionHost: 'bastion', strategy: 'bastion', strategyReason: null, cwd: null,
+      permissionProfile: 'safe', model: null, attempt: 1, parentRunId: null,
+      remoteName: `jarvis-run-${propio}`, remoteSpoolDir: `/tmp/x/${propio}`,
+      createdAt: NOW, deadlineAt: null,
+    });
+
+    const outcome = await conRuns(workspace, [propio]).invoke('cancel_run', { runId: propio }) as {
+      content: { ok?: boolean };
+    };
+    expect(outcome.content.ok).toBe(true);
+    expect(services.runs.require(propio).status).toBe('cancelling');
+  });
+});
+
+/**
  * A7: Claude puede pedir varias herramientas en un mismo mensaje.
  *
  * La Messages API exige un `tool_result` por cada `tool_use_id` y responde 400 si falta uno, así

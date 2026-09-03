@@ -811,6 +811,56 @@ El identificador va en el cuerpo y no se reutiliza el `from` del enlace, que es 
 atrás (lo señaló `litechat-de`): un parámetro con dos significados se paga cuando alguien cambia
 uno de los dos usos sin saber del otro.
 
+### [x] N04 · Dos trabajos podían reanudar la misma conversación a la vez
+
+Hecho 2026-09-02 · `apps/core/src/runs/{repository,supervisor}.ts`
+
+La única admisión era el contador global de activos, que vigila **cuántos** trabajos hay y no sobre
+qué. Dos envíos seguidos, dos planes, o un plan y una persona, podían acabar con dos `--resume`
+simultáneos sobre el mismo historial: transcript entrelazado, contexto divergente y ficheros
+editados en conflicto. El daño no se ve en Jarvis — se ve en la máquina, después.
+
+Ahora el turno es por conversación. El segundo espera en `queued`, que es un estado que la consola
+ya sabe enseñar, y arranca solo al liberarse. Encolar es mejor que rechazar: quien manda dos cosas
+seguidas quiere las dos, en orden, no una y un error. Entre sesiones distintas no hay nada que
+serializar y siguen avanzando en paralelo.
+
+### [x] N05 · La idempotencia no era atómica y duplicaba trabajos
+
+Hecho 2026-09-02 · `apps/core/src/runs/{service,repository}.ts`
+
+Se comprobaba la clave al principio, se hacían varias esperas, se insertaba el run y sólo entonces
+se guardaba la clave. Veinte peticiones idénticas a la vez creaban **veinte trabajos** — está en la
+prueba, y con el código anterior sale exactamente ese número. Un corte entre insertar el run y
+guardar la clave hacía lo mismo al reintentar.
+
+Y el `ON CONFLICT DO UPDATE` era peor que el hueco: dejaba la fila apuntando al primer run pero con
+la respuesta del segundo, o sea una respuesta coherente sobre un trabajo equivocado. Ahora la
+reserva va en la misma transacción que crea el run, la gana uno solo, y quien pierde devuelve el
+trabajo del ganador.
+
+### [x] N06 · El cliente podía forzar si una sesión se estrenaba o se reanudaba
+
+Hecho 2026-09-02 · `packages/contracts/src/runs.ts`, `apps/core/src/runs/service.ts`
+
+`startsSession` estaba publicado en el contrato HTTP, así que un cliente podía obligar a reanudar
+una conversación que aún no existe o a estrenar encima de una que sí. El código afirmaba en un
+comentario que «lo decide el core», y no era verdad. Fuera del contrato: **un invariante que
+depende de que quien llama se porte bien no es un invariante, es una convención**.
+
+### [x] N09 · El Assistant podía parar trabajo humano sin pedir permiso
+
+Hecho 2026-09-02 · `apps/core/src/assistant/toolbox.ts`, `plans/service.ts`
+
+`cancel_run` alcanzaba cualquier trabajo activo del workspace, incluido el que lanzó una persona a
+mano. Y lo que el coordinador lee —transcripts, salidas de agente, ficheros adjuntos— es contenido
+ajeno: una línea inyectada ahí bastaba para que parase trabajo caro o irrepetible. Que quedara
+auditado no evitaba el efecto, sólo lo dejaba escrito después.
+
+Ahora sólo puede parar lo que lanzó **su propio plan**. Para lo demás, `request_approval` y que
+decida quien lo lanzó. Va junto con lo de TEC-06: el modelo lee mucho más que antes, así que lo que
+puede hacer con lo que lee tiene que estar más acotado, no menos.
+
 ### [x] N01 · El corte por consumidor lento tumbaba el core entero
 
 Hecho 2026-09-02 · `apps/core/src/runs/sse.ts`

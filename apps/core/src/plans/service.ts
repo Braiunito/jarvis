@@ -386,6 +386,8 @@ export class PlanService {
     // otro workspace ni actúa como otra persona.
     const toolbox = new CoreAssistantToolbox({
       plan, workspace, sessions, health, runs, audit, user,
+      // Lo que este plan ha lanzado, que es lo único que puede parar por su cuenta.
+      ownRunIds: steps.map((step) => step.runId).filter((id): id is string => Boolean(id)),
       ...(this.#deps.attachments ? { attachments: this.#deps.attachments } : {}),
       ...(this.#deps.evidence ? { evidence: this.#deps.evidence } : {}),
       maxObservations: this.#maxToolCalls,

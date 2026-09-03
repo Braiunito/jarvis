@@ -83,6 +83,13 @@ export interface CoreToolboxDeps {
   evidence?: EvidenceService;
   limits?: Partial<ToolboxLimits>;
   /**
+   * Los trabajos que ha lanzado este plan.
+   *
+   * Es lo que separa «parar lo mío» de «parar lo de otro»: sin esta lista, el coordinador podía
+   * cancelar cualquier trabajo del workspace, incluido el que lanzó una persona hace media hora.
+   */
+  ownRunIds?: readonly string[];
+  /**
    * Cuántas lecturas admite el turno. El tope lo pone el core, no la lista de herramientas que se
    * le ofrece al modelo: un modelo puede llamar a lo que no se le ofreció, y entonces el único
    * freno de verdad es este.
@@ -186,8 +193,9 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
   },
   {
     name: 'cancel_run',
-    description: 'Para un trabajo de este workspace que sigue en marcha. Úsalo cuando quedó '
-      + 'claro que va por mal camino; el motivo queda en la auditoría.',
+    description: 'Para un trabajo **que lanzaste tú en este plan** y que va por mal camino; el '
+      + 'motivo queda en la auditoría. Los trabajos que lanzó una persona no los puedes parar: '
+      + 'pídelo con request_approval y que lo decida ella.',
     inputSchema: {
       type: 'object',
       properties: { runId: { type: 'string' }, reason: { type: 'string' } },
@@ -531,11 +539,25 @@ export class CoreAssistantToolbox implements AssistantToolbox {
 
   // ---- efectos cortos -----------------------------------------------------
 
+  /**
+   * Parar un trabajo, y sólo uno propio.
+   *
+   * El coordinador podía cancelar **cualquier** trabajo activo del workspace, incluido el que
+   * lanzó una persona a mano hace media hora. Y lo que el coordinador lee —transcripts, salidas de
+   * agente, ficheros— es contenido ajeno: una línea inyectada ahí bastaba para que parase trabajo
+   * caro o irrepetible. Que quedara auditado no lo evitaba; sólo dejaba constancia después.
+   *
+   * Lo que lanzó una persona se para pidiéndoselo a ella, que para eso existe `request_approval`.
+   */
   async #cancelRun(input: Record<string, unknown>): Promise<ToolOutcome> {
     const runId = asString(input['runId']);
     if (!runId) return toolError('BAD_INPUT', 'falta runId');
     const run = this.#ownRun(runId);
     if (!run) return toolError('NOT_FOUND', `el trabajo ${runId} no es de este workspace`);
+    if (!(this.#deps.ownRunIds ?? []).includes(runId)) {
+      return toolError('FORBIDDEN', `el trabajo ${runId} no lo lanzaste tú en este plan`,
+        'para pararlo, pídelo con request_approval explicando por qué; quien lo lanzó decide');
+    }
     const cancelled = await this.#deps.runs.cancel(runId, this.#deps.user, `plan:${this.#deps.plan.id}`);
     this.#deps.audit.record({
       actorUser: this.#deps.user.username,

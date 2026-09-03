@@ -171,8 +171,15 @@ export const CreateRunRequest = Type.Object({
   preferredStrategy: Type.Optional(Type.Union([Type.Literal('auto'), Type.Literal('A'), Type.Literal('B')])),
   model: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   attachmentIds: Type.Optional(Type.Array(Type.String())),
-  /** Estrena la conversación en vez de continuarla: el agente arranca sin reanudar nada. */
-  startsSession: Type.Optional(Type.Boolean()),
+  /*
+   * Aquí **no** hay `startsSession`, y su ausencia es la garantía.
+   *
+   * Si un trabajo estrena la conversación o la continúa lo decide el servidor mirando lo que tiene
+   * guardado, y no quien llama. Publicarlo dejaba que un cliente forzara reanudar una sesión que
+   * todavía no existe —o estrenar encima de una que sí— y convertía un invariante en una
+   * convención: sólo se cumplía mientras todas las interfaces se portaran bien y estuvieran al
+   * día. Un invariante que depende de la buena fe del cliente no es un invariante.
+   */
   /** Para que un doble toque en el móvil no cree dos runs. */
   idempotencyKey: Type.Optional(Type.String({ maxLength: 128 })),
 });

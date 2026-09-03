@@ -255,7 +255,7 @@ export class RunService {
      * reanudan. Que la interfaz tuviera que acordarse de mandar la bandera era pedirle que
      * recordara un estado que el servidor ya conoce.
      */
-    const startsSession = request.startsSession ?? workspace.sessionLaunched === false;
+    const startsSession = workspace.sessionLaunched === false;
     /**
      * Una sesión que ya existe pero cuyo directorio no sabemos.
      *
@@ -298,12 +298,30 @@ export class RunService {
     });
 
     /**
-     * Crear el run y reclamar sus adjuntos es una sola escritura.
+     * Reservar la clave, crear el run y reclamar sus adjuntos: una sola escritura.
      *
      * Si el adjunto es de otra persona o de otro host, no queda un run huérfano esperando a que
      * el supervisor lo prepare: la transacción entera se deshace y no ha existido nunca.
+     *
+     * Y la clave de idempotencia entra **aquí dentro** y no al final. Antes se comprobaba al
+     * principio, se hacían varias esperas, se insertaba el run y sólo entonces se guardaba la
+     * clave: dos peticiones simultáneas con la misma clave veían las dos «no existe» y creaban dos
+     * trabajos. Un corte entre insertar el run y guardar la clave hacía lo mismo al reintentar.
+     * Con la reserva dentro, la gana uno solo y el otro devuelve el trabajo del ganador, que es lo
+     * que la idempotencia promete: la misma petición, el mismo resultado, una vez.
      */
+    let lost: { requestHash: string; resourceId: string | null; responseJson: string | null } | null = null;
     repository.db.transaction(() => {
+      if (request.idempotencyKey) {
+        const claim = repository.claimIdempotent('createRun', request.idempotencyKey, hash,
+          { type: 'run', id: runId }, JSON.stringify(target), at,
+          new Date(clock.nowMs() + 24 * 3600 * 1000).toISOString());
+        if (!claim.won) {
+          lost = claim.existing;
+          // Nada de lo de abajo llega a escribirse: se sale de la transacción sin dejar rastro.
+          return;
+        }
+      }
       insertRun();
       /*
        * Aquí **no** se marca la sesión como estrenada, aunque este trabajo vaya a estrenarla.
@@ -319,6 +337,27 @@ export class RunService {
         this.#deps.attachments.claim(attachmentIds, { user, runId, executionHost: target.executionHost });
       }
     })();
+
+    /**
+     * Otro ganó la carrera: se devuelve **su** trabajo, no uno nuevo.
+     *
+     * Si la petición no era la misma, es un error del cliente y se dice: reutilizar una clave para
+     * otra cosa es justo lo que la idempotencia tiene que impedir.
+     */
+    if (lost) {
+      const perdida = lost as { requestHash: string; resourceId: string | null; responseJson: string | null };
+      if (perdida.requestHash !== hash) {
+        throw new JarvisError('IDEMPOTENCY_CONFLICT',
+          'that idempotency key was already used with a different request');
+      }
+      const ganador = perdida.resourceId ? repository.find(perdida.resourceId) : null;
+      if (ganador) {
+        return { run: ganador, target: JSON.parse(perdida.responseJson ?? '{}') as TargetPlan, replayed: true };
+      }
+      // La clave existe pero su run no: la fila está a medias y reintentar tampoco arreglaría nada.
+      throw new JarvisError('CONFLICT',
+        'esa clave de idempotencia está reservada por una petición que no llegó a terminar');
+    }
 
     repository.appendBatch(runId, [{
       type: 'run.target',
@@ -343,12 +382,6 @@ export class RunService {
         attachments: attachmentIds.length,
       },
     });
-
-    if (request.idempotencyKey) {
-      repository.saveIdempotent('createRun', request.idempotencyKey, hash,
-        { type: 'run', id: runId }, JSON.stringify(target), at,
-        new Date(clock.nowMs() + 24 * 3600 * 1000).toISOString());
-    }
 
     const run = repository.find(runId) as Run;
     this.#deps.bus.notify(runId);

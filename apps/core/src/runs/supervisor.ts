@@ -195,6 +195,21 @@ export class RunSupervisor {
       this.#inFlight.add(run.id);
       try {
         if (run.status === 'queued') {
+          /**
+           * Un turno por conversación.
+           *
+           * Dos agentes reanudando la misma sesión a la vez no es «más rápido»: es historial
+           * remoto corrupto, contexto divergente y ficheros editados en conflicto, con una
+           * respuesta que no corresponde al orden que se ve en Jarvis. El límite global de
+           * concurrencia no lo impedía —vigila cuántos trabajos hay, no sobre qué—, así que dos
+           * envíos, dos planes, o un plan y una persona podían pisarse sin que nada avisara.
+           *
+           * Espera en `queued`, que es un estado que la consola ya sabe enseñar, y arranca sola en
+           * cuanto la anterior termina. Encolar es mejor que rechazar: quien manda dos cosas
+           * seguidas quiere las dos, en orden, no una y un error.
+           */
+          const enTurno = this.#deps.repository.activeInWorkspace(run.workspaceId, run.id);
+          if (enTurno) return;
           await this.#deps.runs.prepare(run.id);
           return;
         }

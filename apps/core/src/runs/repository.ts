@@ -196,6 +196,25 @@ export class RunRepository {
     ).get() as { n: number }).n;
   }
 
+  /**
+   * El trabajo que tiene ahora mismo el turno en esta conversación, si hay alguno.
+   *
+   * Dos agentes reanudando la misma sesión a la vez no es lentitud: es historial remoto corrupto,
+   * contexto divergente y ficheros editados en conflicto, con una respuesta que ni siquiera
+   * corresponde al orden que se ve en Jarvis. El turno es por conversación, no global.
+   *
+   * `queued` no cuenta: un trabajo en cola todavía no ha tocado nada. Se ordena por creación para
+   * que la cola sea la que se ve, primero el que llegó primero.
+   */
+  activeInWorkspace(workspaceId: string, exceptRunId?: string): { id: string; status: string } | null {
+    const row = this.#db.prepare(
+      "SELECT id, status FROM runs WHERE workspace_id = ? AND id <> ?"
+      + " AND status IN ('preparing','running','waiting','cancelling')"
+      + ' ORDER BY created_at LIMIT 1',
+    ).get(workspaceId, exceptRunId ?? '') as { id: string; status: string } | undefined;
+    return row ?? null;
+  }
+
   events(runId: string, { afterSeq = -1, limit = 5000 }: { afterSeq?: number; limit?: number } = {}): RunEvent[] {
     const rows = this.#db.prepare(
       'SELECT run_id, seq, at, type, payload_json, compacted FROM run_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?',
@@ -302,11 +321,32 @@ export class RunRepository {
     return { requestHash: row.request_hash, resourceId: row.resource_id, responseJson: row.response_json };
   }
 
-  saveIdempotent(scope: string, key: string, requestHash: string, resource: { type: string; id: string }, responseJson: string, createdAt: string, expiresAt: string): void {
-    this.#db.prepare(`INSERT INTO idempotency_keys
+  /**
+   * Reserva la clave, y sólo la gana uno.
+   *
+   * `DO NOTHING` en vez de `DO UPDATE` porque una clave ya resuelta apunta a un recurso que existe:
+   * pisar su `response_json` con el de otra ejecución dejaba la fila diciendo «este run» y
+   * devolviendo el destino de otro, que es la peor combinación posible — una respuesta coherente
+   * sobre un trabajo equivocado.
+   *
+   * Quien pierde recibe la fila que ganó y devuelve ese recurso, que es exactamente lo que la
+   * idempotencia promete: la misma petición, el mismo resultado, una sola vez.
+   */
+  claimIdempotent(
+    scope: string,
+    key: string,
+    requestHash: string,
+    resource: { type: string; id: string },
+    responseJson: string,
+    createdAt: string,
+    expiresAt: string,
+  ): { won: boolean; existing: { requestHash: string; resourceId: string | null; responseJson: string | null } | null } {
+    const result = this.#db.prepare(`INSERT INTO idempotency_keys
       (scope, key, request_hash, resource_type, resource_id, response_json, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (scope, key) DO UPDATE SET response_json = excluded.response_json`)
+      ON CONFLICT (scope, key) DO NOTHING`)
       .run(scope, key, requestHash, resource.type, resource.id, responseJson, createdAt, expiresAt);
+    if (result.changes > 0) return { won: true, existing: null };
+    return { won: false, existing: this.findIdempotent(scope, key) };
   }
 }
