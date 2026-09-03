@@ -36,13 +36,32 @@ export function streamRunEvents(
   reply.raw.flushHeaders?.();
 
   let closed = false;
+  /**
+   * Escribe, y si el cliente no está leyendo lo suelta.
+   *
+   * El aviso de corte se escribe **directo al socket**, sin volver a pasar por aquí. Pasar por aquí
+   * era una recursión sin fondo: el buffer sigue por encima del umbral —cada intento añade otro
+   * chunk—, así que la comprobación vuelve a dar verdadero y nunca se llegaba a `close()`. Acababa
+   * en `RangeError: Maximum call stack size exceeded` dentro de un callback del bus de eventos, o
+   * sea tumbando **el core entero** en vez de la única conexión que se quería proteger.
+   *
+   * Y los fallos de escritura se capturan: un socket que se cae a mitad lanza de forma síncrona, y
+   * esa excepción sube por el mismo sitio.
+   */
   const write = (chunk: string): void => {
     if (closed) return;
-    reply.raw.write(chunk);
+    try {
+      reply.raw.write(chunk);
+    } catch {
+      close();
+      return;
+    }
     // `writableLength` es lo que el socket todavía no ha podido enviar: si crece, el cliente no
     // está leyendo y lo correcto es soltarlo, no acumular su historia en memoria.
     if (reply.raw.writableLength > MAX_PENDING_BYTES) {
-      write(`event: jarvis.dropped\ndata: {"reason":"slow consumer"}\n\n`);
+      try {
+        reply.raw.write('event: jarvis.dropped\ndata: {"reason":"slow consumer"}\n\n');
+      } catch { /* el socket ya no está: cerrar es lo único que queda */ }
       close();
     }
   };
@@ -71,7 +90,9 @@ export function streamRunEvents(
     closed = true;
     clearInterval(keepalive);
     unsubscribe();
-    reply.raw.end();
+    try {
+      reply.raw.end();
+    } catch { /* cerrar algo ya cerrado no es un error que deba subir a un callback */ }
   }
 
   request.raw.on('close', close);

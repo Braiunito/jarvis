@@ -326,7 +326,18 @@ export class RunSupervisor {
         payload: { message: 'the run exceeded its time budget and is being stopped', code: 'TIMEOUT' },
       }]);
       runs.transition(run.id, 'cancelling', { reason: 'timeout' });
-      await this.#deps.runner.cancel({ host: run.executionHost, runId: run.id }).catch(() => undefined);
+      // Por el servicio, que sabe con qué raíz de spool se creó este run. Y si no se puede
+      // señalar, se anota: un fallo tragado aquí se ve luego como «tardó cinco segundos más de la
+      // cuenta y murió a lo bruto», que no lleva a nadie hasta la causa.
+      await runs.signalStop(run.id).catch((error: unknown) => {
+        repository.appendBatch(run.id, [{
+          type: 'agent.error', at: clock.nowIso(),
+          payload: {
+            message: `could not signal the runner after the deadline: ${(error as Error).message}`,
+            code: 'HOST_UNREACHABLE',
+          },
+        }]);
+      });
       repository.db.prepare("UPDATE runs SET error_code = 'TIMEOUT' WHERE id = ?").run(run.id);
       return;
     }

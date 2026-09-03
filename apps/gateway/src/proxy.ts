@@ -40,6 +40,28 @@ function buildHeaders(req: IncomingMessage, target: URL, user: ProxyUser, reques
   return headers;
 }
 
+/**
+ * El plazo del core, aplicado donde tiene sentido.
+ *
+ * `JARVIS_CORE_TIMEOUT_MS` estaba en la configuración y no lo usaba nadie: un core que acepta la
+ * conexión y luego calla dejaba la petición abierta para siempre, consumiendo sockets y con la
+ * consola en «cargando» sin nada que la saque de ahí. Un fallo silencioso es peor que uno ruidoso
+ * porque nadie lo diagnostica.
+ *
+ * El plazo cubre **hasta que llegan las cabeceras**, no la respuesta entera: un stream de eventos
+ * dura horas por diseño y cortarlo a los treinta segundos rompería justo lo que sostiene la
+ * pantalla de un trabajo. Después de las cabeceras se aplica un plazo de inactividad, salvo a los
+ * `text/event-stream`, cuyo latido es contrato del core y no cosa del proxy.
+ */
+function timeoutError(): Error {
+  return Object.assign(new Error(`the core did not answer in ${config.coreTimeoutMs}ms`), {
+    jarvisTimeout: true,
+  });
+}
+
+const wasTimeout = (error: Error): boolean =>
+  (error as Error & { jarvisTimeout?: boolean }).jarvisTimeout === true;
+
 export function proxyToCore(
   req: IncomingMessage,
   res: ServerResponse,
@@ -57,6 +79,7 @@ export function proxyToCore(
     path: `${path}${query}`,
     headers: buildHeaders(req, target, user, requestId),
   }, (upstreamRes) => {
+    clearTimeout(headerTimer);
     const outHeaders: Record<string, string | string[]> = {};
     for (const [name, value] of Object.entries(upstreamRes.headers)) {
       if (HOP_BY_HOP.has(name.toLowerCase()) || value === undefined) continue;
@@ -72,16 +95,29 @@ export function proxyToCore(
     // Sólo después de writeHead: vaciar antes fija un 200 por defecto y las cabeceras reales se
     // rechazan, lo que mata el stream justo al empezar.
     if (isEventStream) res.flushHeaders?.();
+    // Ya hay cabeceras: lo que queda es cuerpo. A un stream de eventos no se le pone plazo —su
+    // latido lo decide el core—; a todo lo demás, inactividad.
+    if (!isEventStream) {
+      upstream.setTimeout(config.coreTimeoutMs, () => upstream.destroy(timeoutError()));
+    }
     upstreamRes.pipe(res);
   });
 
+  const headerTimer = setTimeout(() => upstream.destroy(timeoutError()), config.coreTimeoutMs);
+
   upstream.on('error', (error) => {
+    clearTimeout(headerTimer);
     if (!res.headersSent) {
-      res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+      // Se distingue «no llegué» de «llegué y no contestó»: la primera se reintenta sola, la
+      // segunda quiere decir que el core está vivo y atascado, y eso se mira en Salud.
+      const timedOut = wasTimeout(error);
+      res.writeHead(timedOut ? 504 : 502, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({
         error: {
-          code: 'UPSTREAM_UNAVAILABLE',
-          message: `the core is unreachable: ${error.message}`,
+          code: timedOut ? 'CORE_TIMEOUT' : 'UPSTREAM_UNAVAILABLE',
+          message: timedOut
+            ? `the core accepted the request and did not answer in ${config.coreTimeoutMs}ms`
+            : `the core is unreachable: ${error.message}`,
           retryable: true,
           requestId,
         },
@@ -92,7 +128,7 @@ export function proxyToCore(
   });
 
   // Si el cliente cuelga a mitad de un stream, se tira la petición upstream en vez de filtrarla.
-  res.on('close', () => { upstream.destroy(); });
+  res.on('close', () => { clearTimeout(headerTimer); upstream.destroy(); });
 
   req.pipe(upstream);
 }
@@ -134,7 +170,20 @@ export function proxyUpgradeToCore(
     headers,
   });
 
+  /*
+   * El handshake también tiene plazo, y sólo el handshake.
+   *
+   * Una terminal viva puede estar horas sin decir nada —nadie teclea— así que el plazo se levanta
+   * en cuanto el core acepta el upgrade. Lo que no puede quedarse abierto para siempre es el
+   * intento de abrirla.
+   */
+  const handshakeTimer = setTimeout(() => {
+    upstream.destroy(timeoutError());
+    clientSocket.end('HTTP/1.1 504 Gateway Timeout\r\n\r\n');
+  }, config.coreTimeoutMs);
+
   upstream.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
+    clearTimeout(handshakeTimer);
     const lines = [`HTTP/1.1 ${upstreamRes.statusCode} ${upstreamRes.statusMessage}`];
     for (const [name, value] of Object.entries(upstreamRes.headers)) {
       lines.push(`${name}: ${String(value)}`);
@@ -159,12 +208,16 @@ export function proxyUpgradeToCore(
   });
 
   upstream.on('response', (upstreamRes) => {
+    clearTimeout(handshakeTimer);
     // El core se negó a hacer upgrade: se pasa la negativa en vez de dejar al cliente colgado.
     clientSocket.end(`HTTP/1.1 ${upstreamRes.statusCode} ${upstreamRes.statusMessage}\r\n\r\n`);
   });
-  upstream.on('error', () => {
-    clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+  upstream.on('error', (error) => {
+    clearTimeout(handshakeTimer);
+    // Si el plazo ya contestó 504, no se escribe encima.
+    if (!wasTimeout(error)) clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
   });
+  clientSocket.on('close', () => clearTimeout(handshakeTimer));
 
   if (head?.length) upstream.write(head);
   upstream.end();

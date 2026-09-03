@@ -73,6 +73,8 @@ function boundedTail(value: string, maxBytes: number): { text: string; truncated
 
 export class RunService {
   readonly #deps: RunServiceDeps;
+  /** Runs cuya sesión ya se dio por estrenada: evita repetir la escritura en cada sondeo. */
+  readonly #launched = new Set<string>();
 
   /**
    * Qué hacer cuando un run llega a estado terminal.
@@ -303,8 +305,16 @@ export class RunService {
      */
     repository.db.transaction(() => {
       insertRun();
-      // A partir de aquí la conversación existe al otro lado: el siguiente trabajo la continúa.
-      if (startsSession) workspaces.markSessionLaunched?.(workspace.id);
+      /*
+       * Aquí **no** se marca la sesión como estrenada, aunque este trabajo vaya a estrenarla.
+       *
+       * Crear un run es decir que se va a intentar, no que haya ocurrido. Si este primer trabajo
+       * muere antes de arrancar el agente —host caído, sin tmux, el `cwd` no existe, el perfil
+       * prohibido—, la conversación no llegó a existir en la máquina y el workspace estaría
+       * mintiendo: todos los trabajos siguientes saldrían con `--resume` contra algo que no está y
+       * fallarían para siempre. Con Codex y OpenCode es peor, porque su identificador provisional
+       * ya no se adopta nunca. Se marca cuando el agente habla, en `ingest`.
+       */
       if (attachmentIds.length && this.#deps.attachments) {
         this.#deps.attachments.claim(attachmentIds, { user, runId, executionHost: target.executionHost });
       }
@@ -556,13 +566,33 @@ export class RunService {
         if ('sessionId' in event && event.sessionId && run.startsSession) {
           this.#deps.workspaces.adoptSession?.(run.workspaceId, event.sessionId);
         }
+        /*
+         * El agente ha hablado: la conversación existe ya en la máquina y el siguiente trabajo
+         * tiene que continuarla, no estrenarla otra vez. Vale cualquier evento suyo y no sólo el
+         * de arranque, porque no todos los CLI emiten uno y quedarse esperándolo dejaría al
+         * workspace estrenando en bucle.
+         */
+        if (run.startsSession && !this.#launched.has(run.id)) {
+          this.#launched.add(run.id);
+          this.#deps.workspaces.markSessionLaunched?.(run.workspaceId);
+        }
         // La cuota que el agente cuenta de paso: vale más que un sondeo, porque es de ahora mismo.
         if (event.type === 'raw') this.#noteQuota(run, event.payload);
         if (event.type === 'result') {
           resultOk = event.ok;
+          /**
+           * El resumen sale del texto del propio resultado; si no lo trae, del último que dijo el
+           * agente.
+           *
+           * Y ese «último» se busca **en el trabajo entero**, no en esta lectura. Con sondeos de
+           * menos de un segundo, el texto y el cierre del turno llegan casi siempre en trozos
+           * distintos —Codex cierra con métricas y sin respuesta—, así que mirar sólo lo que hay
+           * en memoria dejaba el resultado en blanco justo en el caso normal: tarjeta vacía,
+           * titulador sin material y síntesis sin nada que citar.
+           */
           resultSummary = typeof event.text === 'string' && event.text.trim()
             ? event.text.slice(0, 4000)
-            : lastText;
+            : lastText ?? this.#deps.repository.lastAgentText(runId)?.slice(0, 4000) ?? null;
           /**
            * «No conversation found with session ID» no significa lo que parece.
            *
@@ -705,6 +735,24 @@ export class RunService {
       this.#deps.bus.notify(runId);
     }
     return this.require(runId);
+  }
+
+  /**
+   * La señal amable pedida por el propio sistema, no por una persona: es lo que manda el
+   * supervisor cuando se agota el plazo.
+   *
+   * Existe para que la raíz del spool salga **del run**, como en los otros dos caminos de
+   * cancelación. Llamando al runner directamente, esa raíz venía de la configuración de hoy —que
+   * puede ser `~/.local/state/…` sin expandir—, `spoolLayout` lanzaba «must be an absolute path» y
+   * un `.catch` se lo tragaba: la señal amable no salía nunca y el trabajo sólo moría cinco
+   * segundos después, a lo bruto, en la escalada.
+   */
+  async signalStop(runId: string): Promise<void> {
+    const run = this.require(runId);
+    const spoolRoot = this.#spoolRootOf(run);
+    await this.#deps.runner.cancel({
+      host: run.executionHost, runId, ...(spoolRoot ? { spoolRoot } : {}),
+    });
   }
 
   /** Segundo intento, más duro, cuando el agente ignoró la señal amable. */

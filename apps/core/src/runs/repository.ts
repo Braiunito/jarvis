@@ -211,6 +211,29 @@ export class RunRepository {
   }
 
   /**
+   * Lo último que dijo el agente en este run, mirando **todo** el trabajo y no una lectura suelta.
+   *
+   * Sirve de resumen cuando el evento final no repite la respuesta —Codex cierra el turno con
+   * métricas y sin texto—. Buscarlo en memoria no valía: el texto y el cierre llegan casi siempre
+   * en sondeos distintos, con lo que el resultado se guardaba vacío justo en el caso frecuente.
+   *
+   * Se salta los eventos compactados: de esos ya no queda texto, sólo su huella (ADR-007).
+   */
+  lastAgentText(runId: string): string | null {
+    const row = this.#db.prepare(
+      "SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'agent.text' AND compacted = 0"
+      + ' ORDER BY seq DESC LIMIT 1',
+    ).get(runId) as { payload_json: string } | undefined;
+    if (!row) return null;
+    try {
+      const payload = JSON.parse(row.payload_json) as { text?: unknown };
+      return typeof payload.text === 'string' && payload.text.trim() ? payload.text : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Confirma un lote: eventos, cursor y estado en una sola transacción.
    *
    * Si el proceso muere antes del commit se releen bytes; si muere después, el cursor persistido

@@ -5,7 +5,8 @@
  * propósito: validar, llamar a un caso de uso, serializar.
  */
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
-import { JarvisError, type UserIdentity } from '@jarvis/contracts';
+import type { UserIdentity } from '@jarvis/contracts';
+import { toJarvisError } from './platform/errors.js';
 import { IDENTITY_HEADER, internalSecret, REQUEST_ID_HEADER, verifyIdentityHeader } from './auth-boundary/identity.js';
 import { newRequestId } from './platform/ids.js';
 import { registerFleetRoutes } from './fleet/routes.js';
@@ -75,8 +76,13 @@ export function buildApp({ services, logger = false, trustAllIdentities = false 
   });
 
   app.setErrorHandler((error, request, reply) => {
-    if (error instanceof JarvisError) {
-      void reply.code(error.statusCode).send(error.toBody(String(request.id)));
+    // Los errores del transporte —host inalcanzable, proveedor ausente, estrategia imposible—
+    // tienen nombre propio en el contrato y su código HTTP. Sin traducirlos aquí salían como
+    // «error interno», y una pantalla que recibe un 500 sin código no puede ofrecer nada mejor
+    // que «vuelve a intentarlo».
+    const known = toJarvisError(error);
+    if (known) {
+      void reply.code(known.statusCode).send(known.toBody(String(request.id)));
       return;
     }
     if ((error as { validation?: unknown }).validation) {

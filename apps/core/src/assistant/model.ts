@@ -187,27 +187,39 @@ export class AnthropicModel implements AssistantModel {
       const tools = toolbox.definitions({ decisionsOnly });
       const body = await this.#ask(messages, tools);
       const blocks = body.content ?? [];
-      const use = blocks.find((block) => block.type === 'tool_use');
+      const uses = blocks.filter((block) => block.type === 'tool_use' && block.name);
 
-      if (!use?.name) {
+      if (!uses.length) {
         // Sin llamada a herramienta no hay decisión que persistir; lo dicho se cierra como síntesis.
         const text = blocks.find((block) => block.type === 'text')?.text ?? 'el modelo no propuso ningún paso';
         return { kind: 'finish', summary: text.slice(0, 4000) };
       }
 
-      const outcome = await toolbox.invoke(use.name, use.input ?? {});
-      if (outcome.type === 'decision') return outcome.decision;
-
-      // Una observación: se le devuelve al modelo tal cual y se sigue dentro del mismo turno.
-      messages.push({ role: 'assistant', content: blocks as unknown as Array<Record<string, unknown>> });
-      messages.push({
-        role: 'user',
-        content: [{
+      /**
+       * Se responde a **todas** las herramientas que pidió, no sólo a la primera.
+       *
+       * Claude puede pedir varias en un mismo mensaje, y la Messages API exige un `tool_result`
+       * por cada `tool_use_id`: si falta uno, la siguiente llamada devuelve 400 y el plan muere
+       * con «el modelo falló». Es exactamente el fallo que se corrigió para OpenAI y que aquí
+       * quedó sin corregir — el mismo error dos veces, en dos sitios que hacen lo mismo.
+       *
+       * La primera que decide cierra el turno: lo que venga detrás en ese mismo mensaje ya no se
+       * ejecuta, porque el core persiste un checkpoint por turno y no dos.
+       */
+      const results: Array<Record<string, unknown>> = [];
+      for (const use of uses) {
+        const outcome = await toolbox.invoke(use.name as string, use.input ?? {});
+        if (outcome.type === 'decision') return outcome.decision;
+        results.push({
           type: 'tool_result',
           tool_use_id: use.id ?? '',
           content: JSON.stringify(outcome.content).slice(0, 60_000),
-        }],
-      });
+        });
+      }
+
+      // Las observaciones se le devuelven al modelo y se sigue dentro del mismo turno.
+      messages.push({ role: 'assistant', content: blocks as unknown as Array<Record<string, unknown>> });
+      messages.push({ role: 'user', content: results });
     }
 
     // Inalcanzable con el bucle de arriba, pero un plan nunca se queda sin salida por un `for`.

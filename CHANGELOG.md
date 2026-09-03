@@ -248,6 +248,21 @@ Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer
   declara perdido en cuanto se comprueba que ya no hay nada ejecutándose;
 - la pantalla de Terminal dejaba cerrar la sesión de un trabajo, que es matar a quien lo vigila:
   ahora el servidor lo rechaza y explica que eso se para desde el trabajo;
+- **un cliente que dejaba de leer podía tumbar el servidor entero**: el aviso de «te suelto por
+  lento» se escribía por el mismo camino que comprobaba si había que soltarlo, con el buffer aún
+  lleno, y se llamaba a sí mismo hasta agotar la pila dentro de un callback compartido;
+- «no se puede llegar a esa máquina» y «ahí no está instalado ese agente» salían como «error
+  interno», así que la consola no podía ni nombrar el problema ni ofrecer mirar qué salto falla;
+- una sesión nueva se daba por creada al **encargar** su primer trabajo, no al arrancarlo: si ese
+  trabajo moría antes de empezar, la conversación no existía en la máquina y todos los siguientes
+  intentaban continuarla, fallando siempre;
+- el resultado de un trabajo salía en blanco cuando la respuesta y el cierre del turno llegaban en
+  dos lecturas distintas, que con sondeos de menos de un segundo es lo normal: tarjeta vacía,
+  título automático sin material y síntesis sin nada que citar;
+- un turno del Assistant en el que Claude pedía dos consultas a la vez moría con «el modelo falló»,
+  porque sólo se respondía a la primera;
+- al agotarse el plazo de un trabajo, la petición de parada se construía con la carpeta equivocada
+  y no llegaba a salir: el trabajo sólo moría en la escalada, cinco segundos después;
 - lo que contestaba una persona a una pregunta del Assistant no llegaba al modelo: el plan
   continuaba, pero sin haber leído la respuesta. Ahora viaja en el contexto del paso siguiente y
   queda en el historial del plan;

@@ -582,3 +582,66 @@ describe('M4 · el Assistant ve los ficheros, no sólo el texto', () => {
     expect(deciden).not.toContain('read_evidence');
   });
 });
+
+/**
+ * A7: Claude puede pedir varias herramientas en un mismo mensaje.
+ *
+ * La Messages API exige un `tool_result` por cada `tool_use_id` y responde 400 si falta uno, así
+ * que contestar sólo a la primera convierte cualquier turno con dos consultas en «el modelo
+ * falló». Es el mismo fallo que se corrigió para OpenAI y que aquí quedó sin corregir: dos sitios
+ * que hacen lo mismo y sólo uno arreglado.
+ */
+describe('A7 · Anthropic pide dos herramientas a la vez', () => {
+  it('se responde a todas, no sólo a la primera', async () => {
+    const toolbox = new StubToolbox();
+    const bodies: Array<Record<string, unknown>> = [];
+    let call = 0;
+    const respuestas = [
+      {
+        content: [
+          { type: 'tool_use', id: 'tu_1', name: 'get_health', input: {} },
+          { type: 'tool_use', id: 'tu_2', name: 'get_health', input: {} },
+        ],
+      },
+      { content: [{ type: 'tool_use', id: 'tu_3', name: 'finish', input: { summary: 'listo' } }] },
+    ];
+    const fetchImpl: FetchLike = async (url, init) => {
+      expect(url).toContain('/v1/messages');
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      const body = respuestas[Math.min(call, respuestas.length - 1)];
+      call += 1;
+      return new Response(JSON.stringify(body), { status: 200 });
+    };
+
+    const model = new AnthropicModel({ apiKey: 'k', baseUrl: 'https://api.test', model: 'claude-opus-5', fetchImpl });
+    const decision = await model.decide(context, toolbox);
+
+    expect(decision.kind).toBe('finish');
+    expect(toolbox.calls.filter((name) => name === 'get_health')).toHaveLength(2);
+
+    // Lo que evita el 400: un `tool_result` por cada `tool_use_id`, en el mismo mensaje.
+    const segunda = bodies[1]?.['messages'] as Array<{ role: string; content?: unknown }>;
+    const resultados = segunda
+      .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+      .filter((block: { type?: string }) => block?.type === 'tool_result')
+      .map((block: { tool_use_id?: string }) => block.tool_use_id);
+    expect(resultados).toEqual(['tu_1', 'tu_2']);
+  });
+
+  it('la primera herramienta que decide cierra el turno, y lo que venga detrás no se ejecuta', async () => {
+    const toolbox = new StubToolbox();
+    const fetchImpl: FetchLike = async () => new Response(JSON.stringify({
+      content: [
+        { type: 'tool_use', id: 'tu_1', name: 'finish', input: { summary: 'listo' } },
+        { type: 'tool_use', id: 'tu_2', name: 'get_health', input: {} },
+      ],
+    }), { status: 200 });
+
+    const model = new AnthropicModel({ apiKey: 'k', baseUrl: 'https://api.test', model: 'claude-opus-5', fetchImpl });
+    const decision = await model.decide(context, toolbox);
+
+    expect(decision.kind).toBe('finish');
+    // Un turno persiste un checkpoint, no dos: lo que va detrás de la decisión no llega a correr.
+    expect(toolbox.calls).toEqual(['finish']);
+  });
+});

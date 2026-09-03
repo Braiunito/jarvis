@@ -287,3 +287,47 @@ describe('los avisos del panel se pueden vaciar', () => {
     expect(services.runRepository.acknowledge(user.username, '2026-09-02T12:05:00.000Z')).toBe(0);
   });
 });
+
+/**
+ * A8: el resultado de un trabajo no puede quedarse en blanco porque el texto y el cierre del turno
+ * llegaran en dos lecturas distintas.
+ *
+ * Con sondeos de menos de un segundo eso es lo normal, no la excepción — Codex cierra con métricas
+ * y sin repetir la respuesta —, y el efecto se ve en tres sitios a la vez: la tarjeta del trabajo
+ * vacía, el titulador sin material y la síntesis sin nada que citar.
+ */
+describe('A8 · el resumen sobrevive a que la salida llegue a trozos', () => {
+  const linea = (obj: unknown): string => `${JSON.stringify(obj)}\n`;
+
+  it('usa el último texto del trabajo aunque llegara en un sondeo anterior', () => {
+    const runId = seedRun('running');
+
+    // Primer sondeo: el agente responde y ahí se queda el trozo.
+    const texto = linea({ type: 'assistant', session_id: 'sid-1', message: { content: [{ type: 'text', text: 'el pool se agota a las 3am' }] } });
+    services.runs.ingest(runId, texto, 0);
+
+    // Segundo sondeo, más tarde: el turno cierra sin repetir la respuesta.
+    const cierre = linea({ type: 'result', subtype: 'success', is_error: false, session_id: 'sid-1', num_turns: 1 });
+    services.runs.ingest(runId, cierre, texto.length);
+
+    expect(services.runs.require(runId).resultSummary).toBe('el pool se agota a las 3am');
+  });
+
+  it('cuando el cierre sí trae texto, manda el suyo', () => {
+    const runId = seedRun('running');
+    const texto = linea({ type: 'assistant', session_id: 'sid-1', message: { content: [{ type: 'text', text: 'primero esto' }] } });
+    services.runs.ingest(runId, texto, 0);
+    const cierre = linea({ type: 'result', subtype: 'success', is_error: false, session_id: 'sid-1', result: 'la conclusión' });
+    services.runs.ingest(runId, cierre, texto.length);
+
+    expect(services.runs.require(runId).resultSummary).toBe('la conclusión');
+  });
+
+  it('un trabajo que no dijo nada no se inventa un resumen', () => {
+    const runId = seedRun('running');
+    const cierre = linea({ type: 'result', subtype: 'success', is_error: false, session_id: 'sid-1' });
+    services.runs.ingest(runId, cierre, 0);
+
+    expect(services.runs.require(runId).resultSummary).toBeNull();
+  });
+});

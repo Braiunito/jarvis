@@ -332,6 +332,58 @@ describe('TEC-11 · una sesión cuyo directorio nadie sabía', () => {
   });
 });
 
+/**
+ * A6: una sesión sólo está estrenada cuando el agente ha hablado.
+ *
+ * Marcarlo al crear el trabajo era confundir «se va a intentar» con «ha ocurrido». Si ese primer
+ * trabajo muere antes de arrancar al agente —el directorio no existe, falta tmux, el host se
+ * cayó—, la conversación no llegó a existir en la máquina y el workspace decía que sí: **todos**
+ * los trabajos siguientes salían a reanudar algo que no está, y fallaban para siempre.
+ */
+describe('A6 · estrenar una sesión que no llegó a arrancar', () => {
+  it('un primer trabajo que muere antes del agente deja la sesión sin estrenar', async () => {
+    const nueva = (await harness.app.inject({
+      method: 'POST', url: '/api/sessions/new',
+      payload: {
+        host: 'bastion', provider: 'claude', mode: 'task',
+        // Un directorio que no existe: el wrapper muere en el `cd` y el agente no llega a hablar.
+        cwd: '/no/existe/en/ninguna/parte', prompt: 'esto no va a arrancar',
+      },
+    })).json<{ workspace: { id: string } }>();
+
+    await waitFor(
+      async () => (await harness.app.inject({ method: 'GET', url: `/api/workspaces/${nueva.workspace.id}` }))
+        .json<{ workspace: { sessionLaunched?: boolean } }>().workspace,
+      // El estado que importa es el del workspace, y se mira cuando el trabajo ya ha terminado.
+      async () => {
+        const runs = (await harness.app.inject({ method: 'GET', url: `/api/runs?workspaceId=${nueva.workspace.id}` }))
+          .json<{ runs: Run[] }>().runs;
+        return runs.length > 0 && runs.every((run) => ['failed', 'cancelled', 'timed_out'].includes(run.status));
+      },
+      { what: 'que el primer trabajo falle', timeoutMs: 30_000 },
+    );
+
+    const workspace = (await harness.app.inject({ method: 'GET', url: `/api/workspaces/${nueva.workspace.id}` }))
+      .json<{ workspace: { sessionLaunched?: boolean } }>().workspace;
+    expect(workspace.sessionLaunched).toBe(false);
+  });
+
+  it('en cuanto el agente habla, la sesión queda estrenada', async () => {
+    const nueva = (await harness.app.inject({
+      method: 'POST', url: '/api/sessions/new',
+      payload: { host: 'bastion', provider: 'claude', mode: 'task', prompt: 'di algo' },
+    })).json<{ workspace: { id: string }; run: Run }>();
+
+    await waitFor(() => runOf(harness.app, nueva.run.id), (value) => value.status === 'completed', {
+      what: 'que el primer trabajo termine', timeoutMs: 30_000,
+    });
+
+    const workspace = (await harness.app.inject({ method: 'GET', url: `/api/workspaces/${nueva.workspace.id}` }))
+      .json<{ workspace: { sessionLaunched?: boolean } }>().workspace;
+    expect(workspace.sessionLaunched).toBe(true);
+  });
+});
+
 describe('A2 · un trabajo cuyo runner desaparece', () => {
   /**
    * El caso que se quedaba colgado cuatro horas.
@@ -384,6 +436,27 @@ describe('M3 · fallos y límites', () => {
       .find((payload) => payload.tool.truncated);
     expect(tool?.tool.originalBytes).toBeGreaterThan(500_000);
     expect(Buffer.byteLength(tool?.tool.output ?? '', 'utf8')).toBeLessThanOrEqual(33 * 1024);
+  });
+
+  /**
+   * A3: un destino imposible es una respuesta, no una avería.
+   *
+   * `resolveTarget` habla en excepciones propias porque vive en un paquete que no conoce el
+   * contrato HTTP, y nadie las traducía: salían como «500 · error interno». La consola perdía el
+   * código, así que no podía ofrecer «ver qué salto falla» ni decir lo que de verdad pasa —«claude
+   * no está instalado en esa máquina»—, que es un mensaje que ya existía y que nadie llegaba a
+   * ver.
+   */
+  it('un destino imposible responde con su código, no con «error interno»', async () => {
+    const workspaceId = await openWorkspace(harness.app, 'sid-sinagente', 'serverB');
+    const response = await createRun(harness.app, workspaceId, 'algo', { preferredStrategy: 'B' });
+
+    expect(response.statusCode).toBe(409);
+    const body = response.json<{ error: { code: string; message: string } }>();
+    expect(body.error.code).toBe('STRATEGY_IMPOSSIBLE');
+    // Y el mensaje nombra la máquina y el proveedor, que es lo que hace falta para arreglarlo.
+    expect(body.error.message).toContain('serverB');
+    expect(body.error.message).toContain('claude');
   });
 
   it('un host que no responde no crea el run: falla con un código que la UI entiende', async () => {

@@ -737,6 +737,61 @@ avanzaba hasta agotar su plazo.
 Un `running` publicado es una afirmación sobre un proceso vivo: sin tmux, ya no la sostiene nadie.
 El mensaje lo dice con esas palabras. El margen dejó de estar fijo (`JARVIS_LOST_GRACE_MS`).
 
+### [x] A3 · Un destino imposible salía como «error interno»
+
+Hecho 2026-09-02 · `apps/core/src/platform/errors.ts` (nuevo), `app.ts`
+
+`resolveTarget` y la sonda hablan en excepciones propias —viven en un paquete que no conoce el
+contrato HTTP— y nadie las traducía: cinco endpoints devolvían `500 INTERNAL`. La consola perdía el
+código, así que no podía ofrecer «ver qué salto falla» ni decir «claude no está instalado en esa
+máquina», que es un mensaje **que ya existía** con su 409 y que nadie llegaba a ver.
+
+Se traduce en el manejador de errores, en un solo sitio, y no envolviendo cada llamada: eran cinco
+rutas y serán más, y una traducción repartida se olvida en la sexta.
+
+### [x] A6 · Una sesión se daba por estrenada antes de que el agente arrancara
+
+Hecho 2026-09-02 · `apps/core/src/runs/service.ts`
+
+`markSessionLaunched` iba en la misma transacción que crear el run, o sea que se confundía «se va a
+intentar» con «ha ocurrido». Si ese primer trabajo moría antes de arrancar al agente —el directorio
+no existe, falta tmux, el host se cayó—, la conversación no existía en la máquina y el workspace ya
+decía que sí: **todos** los trabajos siguientes salían a reanudar algo que no está. Con Codex y
+OpenCode, peor: su identificador provisional no se adoptaba nunca.
+
+Ahora se marca cuando el agente habla. Vale cualquier evento suyo y no sólo el de arranque, porque
+no todos los CLI emiten uno y esperarlo dejaría al workspace estrenando en bucle.
+
+### [x] A7 · Anthropic sólo respondía a la primera herramienta
+
+Hecho 2026-09-02 · `apps/core/src/assistant/model.ts`
+
+La Messages API exige un `tool_result` por cada `tool_use_id` y responde 400 si falta uno, así que
+cualquier turno en el que Claude pidiera dos consultas moría con «el modelo falló». Es el mismo
+fallo que se corrigió para OpenAI en HZ-25 y que aquí quedó sin corregir: **dos sitios que hacen lo
+mismo y sólo uno arreglado**, que es la forma más común de que un arreglo dure la mitad.
+
+### [x] A8 · El resultado en blanco cuando la salida llega a trozos
+
+Hecho 2026-09-02 · `apps/core/src/runs/{service,repository}.ts`
+
+`lastText` era local a `ingest()`, es decir, por trozo de spool. Con sondeos de menos de un
+segundo, el texto del agente y el cierre del turno llegan casi siempre en lecturas distintas —Codex
+cierra con métricas y sin repetir la respuesta—, así que el resumen se guardaba vacío **en el caso
+normal**: tarjeta del trabajo en blanco, titulador sin material y síntesis sin nada que citar.
+Ahora, si el cierre no trae texto, se busca el último del trabajo entero en `run_events`, saltando
+los eventos ya compactados.
+
+### [x] A9 · El cancel por plazo agotado usaba la raíz de spool equivocada
+
+Hecho 2026-09-02 · `apps/core/src/runs/{service,supervisor}.ts`
+
+El supervisor llamaba al runner sin `spoolRoot`, así que se usaba la raíz de la configuración —que
+puede venir con `~` sin expandir—, `spoolLayout` lanzaba «must be an absolute path» y un `.catch`
+se lo tragaba. La señal amable no salía nunca: el trabajo sólo moría cinco segundos después, a lo
+bruto, en la escalada. Ahora va por el servicio, que sabe con qué raíz se creó ese run, y si no se
+puede señalar se anota en vez de tragarse el fallo.
+
 ### [x] A4 (mitad del core) · El directorio de una terminal lo decide el servidor
 
 Hecho 2026-09-02 · `apps/core/src/terminal/routes.ts`, `packages/contracts/src/terminal.ts`
@@ -755,6 +810,18 @@ ahora aterriza en su carpeta de verdad.
 El identificador va en el cuerpo y no se reutiliza el `from` del enlace, que es sólo la vuelta
 atrás (lo señaló `litechat-de`): un parámetro con dos significados se paga cuando alguien cambia
 uno de los dos usos sin saber del otro.
+
+### [x] N01 · El corte por consumidor lento tumbaba el core entero
+
+Hecho 2026-09-02 · `apps/core/src/runs/sse.ts`
+
+El corte estaba bien pensado —si el socket acumula, se suelta— y mal hecho: el aviso volvía a
+entrar por la misma función que comprueba el umbral, con el buffer todavía lleno, así que la
+comprobación daba verdadero otra vez y nunca se alcanzaba el cierre. Eso no rompe una conexión:
+acaba en `RangeError: Maximum call stack size exceeded` dentro de un callback del bus de eventos, o
+sea **tumbando el proceso que sirve a todos los demás** por culpa de la única conexión que se
+quería proteger. Ahora el aviso se escribe directo al socket y los fallos síncronos de escritura se
+capturan.
 
 ### [x] A2b · Cerrar la tmux de un trabajo desde la pantalla de Terminal
 
