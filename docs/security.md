@@ -27,6 +27,18 @@ Una persona autenticada puede ejecutar agentes en máquinas reales, con permisos
   flags UP y UV, y `signCount` —si retrocede, la credencial puede estar clonada—.
 - El `user.id` es un **UUID opaco en bytes**. Nunca el nombre ni el correo: algunos autenticadores
   lo guardan para siempre.
+- **Pedir un challenge cuesta algo.** Emitirlos era gratis: el limitador sólo cuenta fallos, así
+  que una llamada anónima con éxito no consumía nada y dejaba una entrada viva cinco minutos.
+  Ahora hay tope por dirección —se conservan los últimos y se tiran los viejos, para no
+  perjudicar a quien reintenta de verdad— y un tope global que responde `429` en vez de seguir
+  guardando (`JARVIS_CHALLENGE_MAX_PER_IP`, `JARVIS_CHALLENGE_MAX_TOTAL`).
+- **Salir significa salir, y si no, se dice.** La lista de sesiones revocadas **falla cerrada**: si
+  el fichero no se puede leer, se invalida todo lo anterior a ese momento en vez de empezar con una
+  lista vacía —que resucitaba precisamente las sesiones que alguien había cerrado— y el fichero
+  roto se aparta en vez de sobrescribirse, porque si lo corrompió alguien es lo primero que hay
+  que mirar. Volver a entrar sigue funcionando: se invalida el pasado, no el futuro. Y `logout`
+  responde error si no ha podido anotar la revocación: irse convencida de haber cerrado mientras
+  el token sigue sirviendo es peor que un fallo a la cara.
 
 ## El límite de privilegio
 
@@ -41,6 +53,15 @@ Una persona autenticada puede ejecutar agentes en máquinas reales, con permisos
 El gateway firma una identidad interna corta y la manda en `X-Jarvis-Identity`, con un secreto
 distinto del de sesión. Sin esa firma, el core responde 401 aunque la petición venga de dentro de
 la red de Docker.
+
+**El WebSocket de la terminal comprueba de dónde viene.** Antes de mirar la cookie y antes de
+hablar con el core, el `Origin` tiene que estar en la allowlist. `SameSite=Strict` no sustituye a
+esto: las cookies no aíslan puertos ni subdominios del mismo site, así que otro servicio en el
+mismo host podía abrir un socket con las credenciales de la víctima y quedarse con una terminal
+interactiva —CSWSH, y contra una terminal es lo más caro que se puede perder aquí—. Un navegador
+manda `Origin` siempre, así que exigirlo no cierra ninguna puerta legítima; para clientes que no
+son navegadores está `JARVIS_REQUIRE_WS_ORIGIN=false`, y lo que no puede volver a pasar es que
+omitir la cabecera baste para saltarse la comprobación.
 
 ## Ejecución remota
 
@@ -57,6 +78,16 @@ la red de Docker.
 5. **Los ids son opacos.** Un id de run acaba siendo un nombre de directorio y de sesión tmux; se
    valida contra un alfabeto cerrado antes de tocar nada.
 6. **Sólo se destruyen sesiones tmux con el prefijo de Jarvis.** Lo demás no es nuestro.
+7. **Las claves de host se recuerdan de verdad.** Vivían en `/tmp` del contenedor, que se vacía en
+   cada arranque: con `StrictHostKeyChecking=accept-new`, un fichero vacío significa aceptar sin
+   preguntar la primera clave que conteste, otra vez, en cada despliegue. Un TOFU que se repite no
+   es TOFU, es una ventana de suplantación por reinicio. Ahora viven en el volumen de datos
+   (`JARVIS_KNOWN_HOSTS_FILE`). No en el `~/.ssh` montado: ése es de sólo lectura a propósito
+   porque lleva la clave de la flota, y ssh, al no poder anotar allí, avisaba por stderr en cada
+   llamada y el aviso acababa dentro de la salida del agente.
+8. **No hay agente SSH.** La autenticación es la clave montada de sólo lectura y nada más. El
+   `SSH_AUTH_SOCK` que se pasaba al contenedor apuntaba a un socket que no estaba montado: una
+   variable inerte no es inofensiva, es un rastro falso para quien depure por qué falla ssh.
 
 ## Adjuntos
 
@@ -105,8 +136,12 @@ ssh -L 8080:127.0.0.1:8080 usuario@bastion   # y abrir http://localhost:8080 con
 
 ## Lo que nunca se commitea
 
-`.env` y variantes · `secrets/` · `users.json` · `session.key` · `internal.key` · ficheros `.pem`
-o claves privadas pegadas dentro de cualquier fichero.
+`.env` y variantes · `secrets/` · `users.json` · `session.key` · `internal.key` · `backups/` ·
+ficheros `.pem` o claves privadas pegadas dentro de cualquier fichero.
+
+`backups/` está en esa lista por una razón concreta: `bin/jarvis backup` deja la copia ahí, dentro
+del propio repositorio del bastión, y esa copia lleva `session.key` y el `users.json` con las
+passkeys. Sin la línea del `.gitignore`, un `git add -A` distraído las publica.
 
 ## Superficie que se dejó fuera a propósito
 
