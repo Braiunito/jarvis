@@ -76,13 +76,15 @@ escotilla se revisa **en cada despliegue** ([docs/security.md](docs/security.md)
 | Documento | Qué contesta |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | qué hace cada pieza y dónde vive la verdad de cada dato |
+| [docs/console.md](docs/console.md) | qué promete la interfaz y con qué reglas está hecha |
 | [docs/security.md](docs/security.md) | qué se protege, cómo, y qué está deliberadamente abierto |
 | [docs/runbook.md](docs/runbook.md) | levantar, mirar, diagnosticar, respaldar y volver atrás |
 | [docs/trace-a-request.md](docs/trace-a-request.md) | seguir una petición desde el clic hasta el host |
 | [docs/contracts/registry.md](docs/contracts/registry.md) | los contratos congelados y sus fixtures |
 | [docs/adr/](docs/adr/) | las decisiones y por qué se tomaron |
 | [docs/migration/](docs/migration/) | el estado de la migración desde LiteChat y su evidencia |
-| [backlog.md](backlog.md) | lo siguiente, empezando por el bloque de UX |
+| [docs/audits/](docs/audits/) | las auditorías del código, con la evidencia de cada hallazgo |
+| [backlog.md](backlog.md) | lo siguiente, y quién lleva qué de las auditorías |
 
 [ADR-001]: docs/adr/0001-gateway-core-privilege-boundary.md
 [ADR-003]: docs/adr/0003-remote-runner-tmux-spool.md

@@ -118,6 +118,17 @@ lo que la auditoría afirma después. No se recalcula al pintar el historial.
 | adjuntos | HTTP binario | streaming, sin acumular en memoria |
 | core ↔ aiSessions | HTTP interno | timeout y último dato bueno visible |
 
+El gateway pone plazo a lo que habla con el core (`JARVIS_CORE_TIMEOUT_MS`), pero **sólo hasta las
+cabeceras**: un stream de eventos dura horas por diseño y un WebSocket de terminal puede pasarlas
+sin que nadie teclee. Lo que no puede quedarse abierto para siempre es el intento. Un core que
+acepta y luego calla responde 504 con `CORE_TIMEOUT`, distinto del 502 de «no llegué»: el primero
+significa que el core está vivo y atascado, y eso se diagnostica mirando qué lo tiene ocupado, no
+volviendo a pulsar.
+
+Al stream no se le pone plazo porque su latido es contrato del core —`KEEPALIVE_MS` en
+`runs/sse.ts`, hoy 15 s—. Es una dependencia que se rompería en silencio, así que quien cambie ese
+latido tiene que mirar también el proxy.
+
 MCP no es la API de la aplicación: si vuelve, será como adaptador para modelos externos, llamando
 a los mismos casos de uso.
 

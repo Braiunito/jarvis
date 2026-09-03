@@ -19,6 +19,10 @@ Una persona autenticada puede ejecutar agentes en máquinas reales, con permisos
   como hash.
 - **La cadena de pasos es configurable** (`passkey`, `password+passkey`, `+totp`). Añadir un factor
   es añadir un paso, nunca reescribir el flujo.
+- **La consola recorre esa cadena, no la supone.** Cada verificación responde «autenticado» —y
+  entonces hay cookie— o «falta este otro paso, y aquí llevas la prueba de lo hecho». El token
+  pendiente vive sólo en memoria del navegador: recargar vuelve a empezar, que es lo correcto para
+  medio inicio de sesión. La aplicación se da por dentro **únicamente** cuando el servidor lo dice.
 - En cada aserción se comprueba **todo**: challenge de un solo uso, `origin`, hash del `rp.id`,
   flags UP y UV, y `signCount` —si retrocede, la credencial puede estar clonada—.
 - El `user.id` es un **UUID opaco en bytes**. Nunca el nombre ni el correo: algunos autenticadores
