@@ -207,3 +207,63 @@ test('empezar una sesión desde cero', async ({ page }) => {
   await expect(page.getByText('sin estrenar')).toBeVisible();
   await expect(page.getByLabel('Qué quieres que haga el agente')).toBeVisible();
 });
+
+/**
+ * La cadena de autenticación se recorre, no se supone.
+ *
+ * Con una política de dos factores el primer paso **no** emite cookie: responde
+ * `{authenticated: false, next, pending}`. La pantalla llamaba a `onAuthenticated()` igualmente, la
+ * aplicación se creía dentro y `/auth/me` la echaba sin explicar nada; con `totp` no se podía
+ * entrar en absoluto.
+ *
+ * Se prueba interceptando las respuestas del gateway en vez de levantar un despliegue con otra
+ * política: lo que hay que comprobar es que la pantalla obedece lo que le dicen —qué paso toca y
+ * que devuelve el token pendiente—, y eso no depende de quién genere esas respuestas.
+ */
+test('con dos factores, la pantalla pide el segundo y lleva el token pendiente', async ({ page }) => {
+  await page.route('**/auth/config', (route) => route.fulfill({
+    json: {
+      rpId: 'localhost', rpName: 'Jarvis', steps: ['password', 'totp'],
+      discoverableLogin: true, userVerification: 'required', insecureLogin: false,
+    },
+  }));
+  await page.route('**/auth/password/verify', (route) => route.fulfill({
+    json: { authenticated: false, next: 'totp', pending: 'token-de-prueba' },
+  }));
+
+  let meChecks = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith('/auth/me')) meChecks += 1;
+  });
+
+  let sentPending: string | null = null;
+  await page.route('**/auth/totp/verify', async (route) => {
+    sentPending = (route.request().postDataJSON() as { pending?: string }).pending ?? null;
+    await route.fulfill({ json: { authenticated: true, user: { username: 'braian', displayName: 'Braian' } } });
+  });
+
+  // El `beforeEach` ya entró con la política real: se sale para recorrer la cadena desde cero.
+  await page.context().clearCookies();
+  await page.goto('/');
+  await page.getByLabel('Usuario').fill('braian');
+  await page.getByLabel('Contraseña').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Entrar' }).click();
+
+  // El segundo paso aparece, y no se ha dado por buena la sesión.
+  await expect(page.getByLabel('Código de la aplicación')).toBeVisible();
+  await expect(page.getByText('No tengo el teléfono')).toBeVisible();
+
+  await page.getByLabel('Código de la aplicación').fill('123456');
+  await page.getByRole('button', { name: 'Confirmar' }).click();
+
+  /*
+   * Lo que se comprueba es la cadena, no la cookie.
+   *
+   * Una respuesta fingida no puede emitir sesión, así que al terminar la aplicación vuelve a
+   * preguntar `/auth/me`, el gateway de verdad dice que no, y la pantalla empieza otra vez. Esa
+   * segunda pregunta **es** la prueba: significa que se dio por autenticada al final de la cadena
+   * y no en el primer paso, que era el fallo.
+   */
+  await expect.poll(() => meChecks).toBeGreaterThan(1);
+  expect(sentPending).toBe('token-de-prueba');
+});

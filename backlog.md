@@ -662,7 +662,7 @@ para cuando se decida abrirlos. No se borran ni se resumen; simplemente no se ha
 |---|---|---|---|
 | Core, adaptadores, Assistant | `litechat-ea` | A1, A2 (+A2b), A3, A6, A7, A8, A9, N01, N04–N09, N12 | M1–M24, N14–N19 |
 | Despliegue, gateway, seguridad | `jarvis-69` | N10, N11, N13 | M31, M32, M33 |
-| Consola web | esta sesión | A4 (mitad de interfaz), A5, N03 | M25–M30, N20 |
+| Consola web | esta sesión | A4 (mitad de interfaz), A5, ~~N03~~ | M25–M30, N20 |
 
 Dos avisos sobre lo que queda fuera, porque no todo lo «medio» pesa igual:
 
@@ -679,6 +679,25 @@ que se quería cortar; y un run cuya tmux muere en `running` se queda así cuatr
 **N02 no es un bug, es una decisión de producto**: hoy cualquier cuenta autenticada puede verlo y
 tocarlo todo. Con una sola persona no se nota; en cuanto haya dos, hay que decidir si un workspace
 tiene dueño. Eso lo decide el usuario, no nosotros.
+
+### [x] N03 · La pantalla de login no recorría la cadena que anuncia el servidor
+
+Hecho el 2026-09-02. Cada verificación responde `{authenticated: true}` —y entonces ya hay
+cookie— o `{authenticated: false, next, pending}`, que significa «este paso está hecho, falta ese
+otro, y aquí llevas la prueba». La pantalla llamaba a `onAuthenticated()` pasara lo que pasara: con
+dos factores la aplicación se creía dentro, `/auth/me` la echaba y no se explicaba por qué; con
+`totp` no se podía entrar en absoluto.
+
+Ahora es una máquina de estados guiada por `next`: **un solo paso a la vista**, el token pendiente
+**sólo en memoria** —recargar vuelve a empezar, que es lo correcto para medio inicio de sesión—, y
+`onAuthenticated()` **sólo** con `authenticated === true`, que es la línea que separa «he entrado»
+de «he empezado a entrar». Se añade el paso TOTP con su código de recuperación, y con dos o más
+pasos se enseña la cadena entera para que el segundo factor no aparezca de la nada.
+
+La prueba E2E finge las respuestas del gateway en vez de levantar un despliegue con otra política:
+lo que hay que comprobar es que la pantalla obedece —qué paso toca y que devuelve el token—, y eso
+no depende de quién genere esas respuestas. Comprueba además que sólo se da por autenticada al
+final de la cadena, que era el fallo.
 
 ## Propuestas sin acordar
 

@@ -64,6 +64,10 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **El login recorre la cadena de verdad**: con dos factores, la pantalla pedía el primero y se
+  daba por autenticada, así que la aplicación entraba y salía sola sin decir por qué; con un código
+  de aplicación no se podía entrar en absoluto. Ahora se enseña un paso cada vez, se ve la cadena
+  entera cuando hay más de uno, y hay sitio para el código y para el de recuperación.
 - **Una sesión sin nada que continuar deja de invitarte a fallar**: las que dejó el puente del
   stack anterior tienen fichero y ni un turno, así que el agente ni las reanuda ni puede reutilizar
   su identificador. Ahora, en vez del compositor —que garantizaba un fallo veinte segundos después—
