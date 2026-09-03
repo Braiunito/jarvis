@@ -296,6 +296,34 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
       return;
     }
 
+    /**
+     * Se imita la rueda del ratón, pero **sólo cuando hay alguien escuchándola**.
+     *
+     * Si la aplicación de dentro captura el ratón —Claude Code lo hace— es ella quien recibe la
+     * rueda y mueve su propio contenido, que es justo el que la persona está leyendo. Se despacha
+     * un evento de verdad en vez de fabricar las secuencias a mano porque cuáles son depende del
+     * modo que haya negociado la aplicación (SGR, urxvt, el X10 de toda la vida) y equivocarse
+     * escribe basura dentro de la sesión.
+     *
+     * Cuando **nadie** captura el ratón no se puede despachar: con la pantalla alternativa activa
+     * —y `tmux attach` la activa— xterm traduce la rueda a **flechas del cursor**, treinta de una
+     * tacada. Eso en un `less` es cómodo y dentro de un agente es destructivo: navega su historial
+     * de prompts y le cambia lo que tiene escrito. Lo cazó la prueba que exige que mirar no mande
+     * ni un byte al TTY; sin ella habría llegado a producción y el daño lo habría descubierto
+     * quien lo estuviera usando.
+     */
+    const capturaElRaton = terminal.modes.mouseTrackingMode !== 'none';
+    if (capturaElRaton) {
+      const screen = holder.current?.querySelector('.xterm-screen');
+      const alto = holder.current?.clientHeight ?? 240;
+      const deltaY = (action === 'up' ? -1 : 1) * Math.max(120, Math.round(alto * 0.75));
+      screen?.dispatchEvent(new WheelEvent('wheel', {
+        deltaY, deltaMode: 0, bubbles: true, cancelable: true,
+      }));
+      return;
+    }
+
+    // Nadie escucha el ratón: se mueve el buffer de aquí, y si está agotado, el de tmux.
     const antes = terminal.buffer.active.viewportY;
     terminal.scrollPages(action === 'up' ? -1 : 1);
     if (terminal.buffer.active.viewportY === antes) sendTmuxScroll(action);
@@ -337,7 +365,16 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
      * El hueco cambia de tamaño sin que la ventana cambie, así que el `resize` de siempre no se
      * dispara y nadie avisaría a tmux. Se espera un fotograma para medir después del reflow.
      */
+    /*
+     * Se mide varias veces a propósito.
+     *
+     * Al salir de pantalla completa hay dos cambios de tamaño encadenados y no simultáneos: el
+     * del CSS, inmediato, y el del navegador devolviendo su barra cuando abandona su propio modo
+     * de pantalla completa, que llega unos fotogramas después. Medir sólo en el primero deja la
+     * rejilla con el tamaño grande dentro de un hueco que ya es pequeño.
+     */
     const frame = requestAnimationFrame(() => refit());
+    const tardios = [setTimeout(refit, 150), setTimeout(refit, 450)];
     /*
      * Salir con Escape se descartó a propósito: Escape es una tecla de trabajo dentro de una
      * terminal —vim, los menús de los agentes— y robársela para cerrar una vista sería quitarle
@@ -345,10 +382,13 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
      */
     const onFullscreenChange = (): void => {
       if (!document.fullscreenElement) setImmersive(false);
+      // Salir desde el navegador (Escape, o su propio botón) también cambia el hueco.
+      setTimeout(refit, 150);
     };
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
       cancelAnimationFrame(frame);
+      for (const tardio of tardios) clearTimeout(tardio);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
       shell?.classList.remove('terminal-immersive');
     };

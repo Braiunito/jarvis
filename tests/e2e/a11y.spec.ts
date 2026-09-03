@@ -364,6 +364,32 @@ test('la terminal se puede ver a pantalla completa, y se puede volver', async ({
   await expect(page.locator('.topbar')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Ver la terminal a pantalla completa' })).toBeVisible();
 
+  /*
+   * Y al volver, la rejilla encoge con el hueco.
+   *
+   * Agrandar y encoger no son el mismo camino: al salir, el hueco se reduce y si xterm se queda
+   * con las filas de la pantalla completa, el contenido se sale por debajo del recuadro. Se mide
+   * la rejilla, no el recuadro, porque el recuadro lo encoge el CSS solo.
+   */
+  await expect.poll(async () => {
+    const filas = await page.locator('.terminal-host .xterm-screen').evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    const hueco = await page.locator('.terminal-host').evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    return { filas: Math.round(filas), hueco: Math.round(hueco) };
+  }, { timeout: 10_000 }).toEqual(
+    expect.objectContaining({ filas: expect.any(Number) }),
+  );
+  const despues = await page.locator('.terminal-host .xterm-screen').evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  const huecoFinal = await page.locator('.terminal-host').evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  expect(despues).toBeLessThanOrEqual(huecoFinal + 2);
+
   // La sesión no se ha tocado por cambiar de vista.
   await expect(page.getByText('conectada', { exact: true })).toBeVisible();
 });
@@ -389,6 +415,16 @@ test('se puede subir y bajar por el historial sin teclear dentro', async ({ page
   await page.waitForTimeout(500);
   enviados.length = 0;
 
+  /*
+   * Se escucha en fase de captura para ver la rueda antes que xterm, sin quitársela.
+   */
+  await page.evaluate(() => {
+    (window as unknown as { __ruedas: number[] }).__ruedas = [];
+    document.querySelector('.xterm-screen')?.addEventListener('wheel', (evento) => {
+      (window as unknown as { __ruedas: number[] }).__ruedas.push((evento as WheelEvent).deltaY);
+    }, true);
+  });
+
   await page.getByRole('button', { name: 'Subir en el historial de la sesión' }).click();
   await page.getByRole('button', { name: 'Bajar en el historial de la sesión' }).click();
   await page.getByRole('button', { name: 'Volver al final de la sesión' }).click();
@@ -409,6 +445,19 @@ test('se puede subir y bajar por el historial sin teclear dentro', async ({ page
    */
   const teclas = enviados.filter((payload) => !payload.startsWith('{'));
   expect(teclas).toEqual([]);
+
+  /*
+   * Aquí dentro **nadie captura el ratón**, así que no puede salir ninguna rueda.
+   *
+   * Es el detalle que hace peligrosa la imitación: con la pantalla alternativa activa —y
+   * `tmux attach` la activa— xterm traduce una rueda a treinta flechas del cursor. En un `less`
+   * eso es cómodo; dentro de un agente le navega el historial de prompts y le cambia lo que tiene
+   * escrito. Por eso la rueda sólo se despacha cuando la aplicación de dentro la ha pedido, y por
+   * eso esta comprobación es que **no** hay ninguna: el camino de la rueda se toma en el caso
+   * contrario, que esta prueba no puede montar porque no controla lo que corre al otro lado.
+   */
+  const ruedas = await page.evaluate(() => (window as unknown as { __ruedas: number[] }).__ruedas);
+  expect(ruedas).toEqual([]);
 
   await expect(page.getByText('conectada', { exact: true })).toBeVisible();
 });
