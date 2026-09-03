@@ -461,3 +461,42 @@ test('se puede subir y bajar por el historial sin teclear dentro', async ({ page
 
   await expect(page.getByText('conectada', { exact: true })).toBeVisible();
 });
+
+test('mantener pulsado sigue desplazando, y soltar lo para', async ({ page }) => {
+  const enviados: string[] = [];
+  page.on('websocket', (socket) => {
+    socket.on('framesent', (frame) => {
+      if (typeof frame.payload === 'string') enviados.push(frame.payload);
+    });
+  });
+
+  await conectarTerminal(page);
+  await page.waitForTimeout(500);
+  enviados.length = 0;
+
+  const subir = page.getByRole('button', { name: 'Subir en el historial de la sesión' });
+
+  // Un toque suelto cuenta una vez, no dos: el puntero empieza y el clic posterior se ignora.
+  await subir.click();
+  await page.waitForTimeout(200);
+  const unToque = enviados.filter((payload) => payload.includes('"action":"up"')).length;
+  expect(unToque).toBe(1);
+
+  // Mantenerlo pulsado repite mientras el dedo siga ahí.
+  enviados.length = 0;
+  await subir.hover();
+  await page.mouse.down();
+  await page.waitForTimeout(800);
+  await page.mouse.up();
+
+  const mientras = enviados.filter((payload) => payload.includes('"action":"up"')).length;
+  expect(mientras).toBeGreaterThan(2);
+
+  // Y soltar lo para: lo que llegue después no puede seguir creciendo.
+  const alSoltar = enviados.length;
+  await page.waitForTimeout(500);
+  expect(enviados.length).toBe(alSoltar);
+
+  // Nada de esto ha escrito en la sesión.
+  expect(enviados.filter((payload) => !payload.startsWith('{'))).toEqual([]);
+});

@@ -53,6 +53,12 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   const holder = useRef<HTMLDivElement | null>(null);
   const term = useRef<Terminal | null>(null);
   const fitter = useRef<FitAddon | null>(null);
+  /** Temporizadores del desplazamiento: la repetición al mantener y la ráfaga de «al final». */
+  const repeticion = useRef<{
+    espera: ReturnType<typeof setTimeout> | null;
+    repite: ReturnType<typeof setInterval> | null;
+  }>({ espera: null, repite: null });
+  const rafaga = useRef<ReturnType<typeof setInterval> | null>(null);
   const socket = useRef<WebSocket | null>(null);
   /**
    * Pantalla completa, resuelta en CSS y no sólo con la API del navegador.
@@ -285,16 +291,22 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
     socket.current.send(JSON.stringify({ type: 'scroll', action }));
   };
 
+  /** Una rueda de ratón hacia donde se diga, con el tamaño de la pantalla como paso. */
+  const rueda = (direccion: -1 | 1): void => {
+    const screen = holder.current?.querySelector('.xterm-screen');
+    if (!screen) return;
+    const alto = holder.current?.clientHeight ?? 240;
+    screen.dispatchEvent(new WheelEvent('wheel', {
+      deltaY: direccion * Math.max(120, Math.round(alto * 0.75)),
+      deltaMode: 0,
+      bubbles: true,
+      cancelable: true,
+    }));
+  };
+
   const sendScroll = (action: 'up' | 'down' | 'end'): void => {
     const terminal = term.current;
     if (!terminal) return;
-
-    if (action === 'end') {
-      terminal.scrollToBottom();
-      // Y que tmux vuelva también al presente, por si quedó en modo copia de una vuelta anterior.
-      sendTmuxScroll('end');
-      return;
-    }
 
     /**
      * Se imita la rueda del ratón, pero **sólo cuando hay alguien escuchándola**.
@@ -308,18 +320,36 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
      * Cuando **nadie** captura el ratón no se puede despachar: con la pantalla alternativa activa
      * —y `tmux attach` la activa— xterm traduce la rueda a **flechas del cursor**, treinta de una
      * tacada. Eso en un `less` es cómodo y dentro de un agente es destructivo: navega su historial
-     * de prompts y le cambia lo que tiene escrito. Lo cazó la prueba que exige que mirar no mande
-     * ni un byte al TTY; sin ella habría llegado a producción y el daño lo habría descubierto
-     * quien lo estuviera usando.
+     * de prompts y le cambia lo que tiene escrito.
      */
     const capturaElRaton = terminal.modes.mouseTrackingMode !== 'none';
+
+    if (action === 'end') {
+      // Lo que se puede hacer sin la aplicación: el buffer de aquí y el modo copia de tmux.
+      terminal.scrollToBottom();
+      sendTmuxScroll('end');
+      /**
+       * Y si la vista desplazada es la suya, la única forma de devolverla al presente es
+       * arrastrar hasta abajo: no hay «ir al final» que mandarle. Se hace en ráfaga y espaciado,
+       * no de golpe, porque cada rueda es una secuencia por línea y soltarle mil de una vez es
+       * pedirle que se atragante.
+       */
+      if (capturaElRaton) {
+        if (rafaga.current) clearInterval(rafaga.current);
+        let quedan = 30;
+        rafaga.current = setInterval(() => {
+          rueda(1);
+          quedan -= 1;
+          if (quedan > 0) return;
+          if (rafaga.current) clearInterval(rafaga.current);
+          rafaga.current = null;
+        }, 25);
+      }
+      return;
+    }
+
     if (capturaElRaton) {
-      const screen = holder.current?.querySelector('.xterm-screen');
-      const alto = holder.current?.clientHeight ?? 240;
-      const deltaY = (action === 'up' ? -1 : 1) * Math.max(120, Math.round(alto * 0.75));
-      screen?.dispatchEvent(new WheelEvent('wheel', {
-        deltaY, deltaMode: 0, bubbles: true, cancelable: true,
-      }));
+      rueda(action === 'up' ? -1 : 1);
       return;
     }
 
@@ -327,6 +357,28 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
     const antes = terminal.buffer.active.viewportY;
     terminal.scrollPages(action === 'up' ? -1 : 1);
     if (terminal.buffer.active.viewportY === antes) sendTmuxScroll(action);
+  };
+
+  /**
+   * Mantener pulsado sigue desplazando.
+   *
+   * En un teléfono, subir un rato a base de toques son veinte toques. Se arranca con un desplazo
+   * inmediato —para que un toque suelto siga siendo un toque— y sólo si el dedo sigue ahí pasados
+   * unos instantes empieza a repetir, que es como se comporta cualquier tecla mantenida.
+   */
+  const mantener = (action: 'up' | 'down'): void => {
+    soltar();
+    sendScroll(action);
+    repeticion.current.espera = setTimeout(() => {
+      repeticion.current.repite = setInterval(() => sendScroll(action), 90);
+    }, 350);
+  };
+
+  const soltar = (): void => {
+    if (repeticion.current.espera) clearTimeout(repeticion.current.espera);
+    if (repeticion.current.repite) clearInterval(repeticion.current.repite);
+    repeticion.current.espera = null;
+    repeticion.current.repite = null;
   };
 
   /** Reajusta la rejilla al hueco de ahora y se lo dice a tmux, que si no sigue pintando al viejo. */
@@ -357,6 +409,12 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
       // El modo propio ya está puesto: que la API no quiera no cambia nada de lo que se ve.
     }
   }
+
+  // Ningún temporizador sobrevive a la pantalla: seguirían desplazando una terminal que ya no está.
+  useEffect(() => () => {
+    soltar();
+    if (rafaga.current) clearInterval(rafaga.current);
+  }, []);
 
   useEffect(() => {
     const shell = document.querySelector('.shell');
@@ -473,13 +531,24 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
           <div className="terminal-actions">
             <span className="row tight">
               <span className="tiny faint nowrap">Historial</span>
+              {/*
+                * `onPointerDown` empieza y `onClick` sólo actúa cuando vino del teclado
+                * (`detail === 0`); si no, un toque contaría dos veces. `preventDefault` evita que
+                * el dedo arrastre la página por debajo mientras se mantiene pulsado.
+                */}
               <button type="button" className="btn small" aria-label="Subir en el historial de la sesión"
-                title="Sube una pantalla en lo que ya pasó" onClick={() => sendScroll('up')}>
+                title="Sube una pantalla; mantenlo pulsado para seguir subiendo"
+                onPointerDown={(event) => { event.preventDefault(); mantener('up'); }}
+                onPointerUp={soltar} onPointerLeave={soltar} onPointerCancel={soltar}
+                onClick={(event) => { if (event.detail === 0) sendScroll('up'); }}>
                 <Glyph icon={ACTION_ICON.scrollUp} />
                 Subir
               </button>
               <button type="button" className="btn small" aria-label="Bajar en el historial de la sesión"
-                title="Baja una pantalla" onClick={() => sendScroll('down')}>
+                title="Baja una pantalla; mantenlo pulsado para seguir bajando"
+                onPointerDown={(event) => { event.preventDefault(); mantener('down'); }}
+                onPointerUp={soltar} onPointerLeave={soltar} onPointerCancel={soltar}
+                onClick={(event) => { if (event.detail === 0) sendScroll('down'); }}>
                 <Glyph icon={ACTION_ICON.scrollDown} />
                 Bajar
               </button>
