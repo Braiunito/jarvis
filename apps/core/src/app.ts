@@ -106,6 +106,21 @@ export function buildApp({ services, logger = false, trustAllIdentities = false 
    * Los adjuntos viajan como bytes y no se parsean: el stream se pasa tal cual al servicio, que
    * lo empuja por SSH sin acumularlo en memoria.
    */
+  /**
+   * El cuerpo de un adjunto son **bytes**, y Fastify no puede decidir eso por su cuenta.
+   *
+   * Con los parsers por defecto, un `Content-Type: text/plain` se convierte en una cadena antes de
+   * llegar a la ruta. Entonces el adjunto se sube contando **caracteres**, y basta una tilde para
+   * que el total no cuadre con el `Content-Length`: la subida se rechaza con «body length did not
+   * match» y quien la hizo no tiene forma de entender por qué. Sólo se libraba lo que fuera ASCII
+   * puro, que es justamente lo que probaban los tests.
+   *
+   * Así que se quitan todos y se registran dos: JSON para las peticiones normales de la API, y
+   * cualquier otra cosa como el stream tal cual, sin tocar un byte.
+   */
+  app.removeAllContentTypeParsers();
+  app.addContentTypeParser('application/json', { parseAs: 'string' },
+    app.getDefaultJsonParser('ignore', 'ignore'));
   app.addContentTypeParser('*', (_request, payload, done) => {
     done(null, payload);
   });

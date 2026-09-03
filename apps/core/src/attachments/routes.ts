@@ -17,9 +17,20 @@ export function registerAttachmentRoutes(app: FastifyInstance, services: CoreSer
     if (!request.headers['content-length']) {
       throw new JarvisError('BAD_REQUEST', 'a Content-Length is required to reserve quota before streaming');
     }
-    // El parser de octet-stream devuelve el propio stream; para cualquier otro tipo se usa el
-    // crudo, que a esas alturas nadie ha tocado.
-    const body = (request.body as NodeJS.ReadableStream | undefined) ?? request.raw;
+    /**
+     * El cuerpo tiene que llegar como bytes.
+     *
+     * Con el parser de `*` eso es lo que pasa siempre salvo con `application/json`, que la API
+     * necesita parseado para todo lo demás. Un fichero `.json` adjunto llegaría entonces como
+     * objeto, y volver a serializarlo **no** reproduce el original: se dice, en vez de subir algo
+     * que no es lo que el usuario eligió.
+     */
+    const body = request.body as NodeJS.ReadableStream | undefined;
+    if (!body || typeof (body as { pipe?: unknown }).pipe !== 'function') {
+      throw new JarvisError('BAD_REQUEST',
+        'manda el fichero con Content-Type application/octet-stream; su tipo real va en `type`',
+        { retryable: false });
+    }
 
     const attachment = await services.attachments.stage(body as never, {
       user: identityOf(request),

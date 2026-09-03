@@ -276,6 +276,13 @@ Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer
   el servidor tiene guardado;
 - el Assistant podía **parar el trabajo que había lanzado una persona**, sin pedir permiso y sólo
   con lo que hubiera leído por ahí; ahora sólo para lo suyo y para el resto pide aprobación;
+- **un adjunto de texto con una tilde no se podía subir**: el cuerpo llegaba convertido a texto y
+  se contaban caracteres en vez de bytes, así que sólo funcionaba lo que fuera ASCII puro;
+- una subida cortada a medias podía dejar el fichero publicado en la máquina con la subida dada por
+  fallida, y un adjunto ya usado podía quedarse ocupando sitio para siempre si el servidor se caía
+  en el momento justo; ahora la limpieza converge sola;
+- los adjuntos ya no se anuncian al agente como «de sólo lectura», porque no se puede garantizar
+  con el usuario que hay: se le pide que no los toque y se le dice que son copias.
 - lo que contestaba una persona a una pregunta del Assistant no llegaba al modelo: el plan
   continuaba, pero sin haber leído la respuesta. Ahora viaja en el contexto del paso siguiente y
   queda en el historial del plan;

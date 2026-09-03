@@ -811,6 +811,60 @@ El identificador va en el cuerpo y no se reutiliza el `from` del enlace, que es 
 atrás (lo señaló `litechat-de`): un parámetro con dos significados se paga cuando alguien cambia
 uno de los dos usos sin saber del otro.
 
+### [x] HZ-28 · Un adjunto de texto con una tilde no se podía subir
+
+Encontrado 2026-09-02 escribiendo la prueba de N08 · `apps/core/src/app.ts`,
+`apps/core/src/attachments/routes.ts`
+
+Con `Content-Type: text/plain`, Fastify aplicaba su parser por defecto y el cuerpo llegaba al core
+**decodificado a cadena** en vez de bytes. El core cuenta lo que recibe para cuadrarlo con el
+`Content-Length`, y sobre una cadena eso cuenta caracteres:
+
+```
+received: 20   expected: 21      ← «lo que quedó colgado»
+```
+
+Una tilde y ya no cuadra: 400 con «body length did not match Content-Length», que no le dice nada a
+quien acaba de arrastrar un fichero. Sólo se libraba lo ASCII puro — que es justamente lo que
+probaban los tests que había, con `'registro de errores del 1 de septiembre'`. **El caso feliz
+elegido en el test era el único que funcionaba.**
+
+Apareció justo después de que la consola estrenara la subida (A5), así que llevaba ahí desde que
+existe el endpoint y nadie podía haberlo notado antes.
+
+Ahora los parsers son dos: JSON para la API y **todo lo demás como stream, sin tocar un byte**. Un
+`.json` adjunto se rechaza con un mensaje que dice qué hacer, porque volver a serializar un JSON
+parseado no reproduce el fichero que el usuario eligió.
+
+### [x] N07 · «Sólo lectura» era una promesa que no se podía cumplir
+
+Hecho 2026-09-02 · `apps/core/src/attachments/service.ts`
+
+El agente corre con el mismo usuario remoto que creó el fichero, así que puede editarlo o borrarlo
+por mucho que el modo sea 0600. Decirle «trátalos como de sólo lectura» es una petición, no una
+barrera, y llamarlo garantía hacía que alguien pudiera apoyarse en ella.
+
+Garantizarlo de verdad exige otro UID y un montaje `ro`: es una decisión de despliegue con nombre
+propio, no una línea de código. Mientras tanto, lo honesto es **pedirlo y decir que es una
+petición** — el texto que ve el agente ya no promete lo que no hay, y añade lo que de verdad
+importa: son copias, y lo que cambie ahí se pierde al terminar.
+
+### [x] N08 · La limpieza de adjuntos no sobrevivía a un corte
+
+Hecho 2026-09-02 · `apps/core/src/attachments/service.ts`
+
+Tres agujeros, todos de la misma familia — cosas que sólo se limpiaban si nadie se caía en el
+momento justo:
+
+1. Un cuerpo **más corto** que su `Content-Length` dejaba el fichero **entero y publicado** en la
+   máquina con la fila marcada como fallida, porque el `mv` remoto ocurre al cerrar la entrada y la
+   comprobación iba después. Ahora se comprueba antes de cerrar.
+2. El barrido no miraba las filas `failed` ni los `.part`. Ahora sí, y el borrado remoto se lleva
+   los dos.
+3. Un adjunto `claimed` cuyo run ya terminó se quedaba así **para siempre** si el core caía justo
+   entre confirmar el estado y liberar. Ahora el barrido reconcilia contra el estado del run, que
+   sí está guardado, en vez de fiarse de que alguien se acuerde.
+
 ### [x] N04 · Dos trabajos podían reanudar la misma conversación a la vez
 
 Hecho 2026-09-02 · `apps/core/src/runs/{repository,supervisor}.ts`

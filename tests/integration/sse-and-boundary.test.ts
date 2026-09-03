@@ -5,7 +5,7 @@
  * sobrevivir a una desconexión.
  */
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -275,6 +275,92 @@ describe('ATTACH-01 · ciclo de vida de un adjunto', () => {
       body: JSON.stringify({ workspaceId, prompt: 'ajeno', attachmentIds: [attachment.id] }),
     });
     expect([403, 409]).toContain(third.status);
+  });
+
+  /**
+   * N08: una subida que no cuadra no puede dejar el fichero publicado en la máquina.
+   *
+   * El `mv` remoto ocurre al cerrar la entrada, así que comprobar la longitud después dejaba el
+   * fichero **entero y visible** con una fila marcada como fallida. Basura que nadie barría y que
+   * nadie sabía que estaba ahí: ni el core, que la daba por fallida, ni quien la subió.
+   */
+  it('un cuerpo más corto que su Content-Length no deja fichero en la máquina', async () => {
+    const workspaceId = await openWorkspace('sid-attach-corto');
+    const workspace = services.workspaces.require(workspaceId);
+    const target = await services.runs.planTarget(workspace, {});
+
+    // Se va por el servicio y no por HTTP a propósito: el cliente de `fetch` se niega a mandar
+    // menos bytes de los que declara, y lo que hay que probar es qué hace el core cuando llegan.
+    await expect(services.attachments.stage(Readable.from([Buffer.from('sólo doce')]), {
+      user: { userId: 'u1', username: 'braian' },
+      target,
+      sessionHost: workspace.ref.host,
+      workspaceId,
+      scopeId: workspaceId,
+      displayName: 'corto.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 100,
+    })).rejects.toThrow(/Content-Length/);
+
+    const fila = services.db.prepare(
+      "SELECT state, remote_path FROM attachments WHERE display_name = 'corto.txt'",
+    ).get() as { state: string; remote_path: string } | undefined;
+    expect(fila?.state).toBe('failed');
+    // Lo que importa: el fichero definitivo no llegó a publicarse.
+    expect(existsSync(join(root, 'fake-ssh', 'bastion', fila?.remote_path ?? 'x'))).toBe(false);
+
+    // Y el barrido lo deja limpio, `.part` incluido, sin que nadie tenga que acordarse.
+    services.db.prepare("UPDATE attachments SET expires_at = '2000-01-01T00:00:00.000Z' WHERE display_name = 'corto.txt'").run();
+    await services.attachments.sweep();
+    const despues = services.db.prepare(
+      "SELECT state FROM attachments WHERE display_name = 'corto.txt'",
+    ).get() as { state: string };
+    // `expired` o `released` según si el borrado remoto respondió: las dos son «ya no cuelga nada».
+    expect(['expired', 'released']).toContain(despues.state);
+  });
+
+  /**
+   * N08: si el core cae justo después de terminar un run, su adjunto se quedaba `claimed` para
+   * siempre — y su fichero con él. El barrido reconcilia contra el estado del run, que sí está
+   * guardado, en vez de fiarse de que alguien se acuerde.
+   */
+  it('un adjunto reclamado por un trabajo ya terminado se libera en el barrido', async () => {
+    const workspaceId = await openWorkspace('sid-attach-huerfano');
+    const payload = Buffer.from('lo que quedó colgado');
+    // 20 caracteres, 21 bytes: la diferencia es justo lo que este caso viene a comprobar.
+    expect(payload.length).toBe(21);
+    const uploaded = await fetch(`${baseUrl}/api/attachments?workspaceId=${workspaceId}&name=huerfano.txt`, {
+      method: 'POST',
+      headers: {
+        'x-jarvis-identity': identityHeader(),
+        'content-type': 'text/plain',
+        'content-length': String(payload.length),
+      },
+      body: payload,
+      duplex: 'half',
+    } as RequestInit);
+    const cuerpoSubida = uploaded.status === 201 ? '' : await uploaded.text();
+    expect({ status: uploaded.status, cuerpo: cuerpoSubida }).toEqual({ status: 201, cuerpo: '' });
+    const { attachment } = await uploaded.json() as { attachment: { id: string } };
+
+    const creado = await fetch(`${baseUrl}/api/runs`, {
+      method: 'POST', headers: authed(),
+      body: JSON.stringify({ workspaceId, prompt: 'usa el adjunto', attachmentIds: [attachment.id] }),
+    });
+    const { run } = await creado.json() as { run: Run };
+    await waitFor(
+      async () => (await (await fetch(`${baseUrl}/api/runs/${run.id}`, { headers: authed() })).json() as { run: Run }).run,
+      (value) => value.status === 'completed',
+      { what: 'el run del adjunto huérfano' },
+    );
+
+    // Se simula el corte: el run terminó pero el adjunto se quedó reclamado.
+    services.db.prepare("UPDATE attachments SET state = 'claimed', released_at = NULL WHERE id = ?").run(attachment.id);
+    await services.attachments.sweep();
+
+    const estado = (services.db.prepare('SELECT state FROM attachments WHERE id = ?')
+      .get(attachment.id) as { state: string }).state;
+    expect(['released', 'release_pending']).toContain(estado);
   });
 
   it('sin Content-Length no se acepta: la cuota se reserva antes de leer un byte', async () => {
