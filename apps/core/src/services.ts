@@ -59,6 +59,8 @@ export const VERSION = '0.1.0';
 
 export interface CoreServices {
   config: CoreConfig;
+  /** Encuentra el directorio de una sesión que no lo tenía guardado (TEC-11). */
+  cwdResolver: CwdResolver;
   db: Db;
   clock: Clock;
   sshConfig: SshConfig;
@@ -251,7 +253,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   };
 
   return {
-    config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces,
+    config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces, cwdResolver,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
     plans, planSupervisor, retention, imports, titles, metrics,
     close() {

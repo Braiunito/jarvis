@@ -18,6 +18,15 @@ export const OpenTerminalRequest = Type.Object({
   sessionId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   cwd: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   permissionProfile: Type.Optional(PermissionProfile),
+  /**
+   * Desde qué workspace se abre.
+   *
+   * Con esto el servidor resuelve el directorio y la sesión por su cuenta, en vez de fiarse de lo
+   * que le llegue en la petición: quien conoce el `cwd` de una sesión es el core, que lo tiene
+   * guardado y hasta sabe deducirlo. Sigue admitiéndose un `cwd` explícito —una terminal suelta en
+   * otra carpeta es un caso legítimo— pero cuando viene el workspace, manda lo que el core sabe.
+   */
+  workspaceId: Type.Optional(Type.String()),
 });
 export type OpenTerminalRequest = Static<typeof OpenTerminalRequest>;
 

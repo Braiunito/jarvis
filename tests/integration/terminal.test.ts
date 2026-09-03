@@ -112,6 +112,33 @@ describe('TERM-TMUX-01 · abrir y listar', () => {
     expect(session?.kind).toBe('interactive');
   });
 
+  /**
+   * A4: quien sabe dónde vive una sesión es el servidor.
+   *
+   * Que el `cwd` viajara en la petición dejaba la parte más delicada en manos de quien llama: si
+   * llega mal, la terminal se abre en otra carpeta y quien la use empezará a editar los ficheros
+   * equivocados creyendo que está donde debe.
+   */
+  it('abrir desde un workspace usa el directorio que el servidor tiene guardado', async () => {
+    const abierto = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-term' }, cwd: '/srv/app' },
+      { userId: 'u1', username: 'braian' },
+    ).workspace;
+
+    const response = await fetch(`${baseUrl}/api/terminal/open`, {
+      method: 'POST', headers: authed(),
+      body: JSON.stringify({ workspaceId: abierto.id, host: 'bastion', provider: 'claude' }),
+    });
+    expect(response.status).toBe(200);
+    const opened = await response.json() as { name: string };
+    // La sesión sale del workspace, no de lo que mandara la petición.
+    expect(opened.name).toBe('jarvis-claude-sid-term');
+
+    const listed = await (await fetch(`${baseUrl}/api/terminal/sessions?host=bastion`, { headers: authed() }))
+      .json() as { sessions: TerminalSession[] };
+    expect(listed.sessions.some((s) => s.name === opened.name)).toBe(true);
+  });
+
   it('un host sin tmux lo dice en vez de fallar de forma rara', async () => {
     const response = await fetch(`${baseUrl}/api/terminal/open`, {
       method: 'POST', headers: authed(),

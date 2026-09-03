@@ -737,6 +737,25 @@ avanzaba hasta agotar su plazo.
 Un `running` publicado es una afirmación sobre un proceso vivo: sin tmux, ya no la sostiene nadie.
 El mensaje lo dice con esas palabras. El margen dejó de estar fijo (`JARVIS_LOST_GRACE_MS`).
 
+### [x] A4 (mitad del core) · El directorio de una terminal lo decide el servidor
+
+Hecho 2026-09-02 · `apps/core/src/terminal/routes.ts`, `packages/contracts/src/terminal.ts`
+
+`POST /api/terminal/open` acepta `workspaceId` y saca de ahí host, proveedor, sesión y directorio.
+Que el `cwd` viajara en la petición dejaba la parte más delicada en manos de quien llama, y el
+fallo no se ve: la terminal se abre en otra carpeta y **una persona empieza a editar los ficheros
+equivocados creyendo que está donde debe**. En un trabajo eso queda en la evidencia; en una
+terminal viva no lo ve nadie hasta que es tarde.
+
+Un `cwd` explícito sigue admitiéndose y gana — abrir una terminal suelta en otra carpeta es un caso
+legítimo. Y si el workspace no tiene directorio guardado, se deduce ahí mismo con el resolutor de
+TEC-11 y se deja escrito: abrir una terminal sobre una de las sesiones cuyo directorio nadie sabía
+ahora aterriza en su carpeta de verdad.
+
+El identificador va en el cuerpo y no se reutiliza el `from` del enlace, que es sólo la vuelta
+atrás (lo señaló `litechat-de`): un parámetro con dos significados se paga cuando alguien cambia
+uno de los dos usos sin saber del otro.
+
 ### [x] A2b · Cerrar la tmux de un trabajo desde la pantalla de Terminal
 
 Hecho 2026-09-02 · `apps/core/src/terminal/service.ts`
