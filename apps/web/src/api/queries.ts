@@ -10,7 +10,7 @@ import type {
   Approval, Attachment, Draft, Health, HostCapabilities, Plan, PlanStep, Run, RunEvent,
   SessionSearchResult, TargetPlan, TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
-import { get, post, put } from './client.js';
+import { api, get, post, put } from './client.js';
 
 export interface MetricsSnapshot {
   window: { hours: number; from: string; to: string };
@@ -425,6 +425,33 @@ export function useSaveDraft(workspaceId: string | null) {
     onSuccess: (draft) => {
       client.setQueryData(keys.workspace(workspaceId ?? 'none'), (previous: WorkspaceDetail | undefined) =>
         previous ? { ...previous, draft } : previous);
+    },
+  });
+}
+
+/**
+ * Subir un fichero para que el agente lo lea.
+ *
+ * Va en crudo y no como JSON: el core lo transmite directo a la máquina donde el agente lo va a
+ * leer, sin acumularlo en memoria. El navegador pone el `Content-Length`, que es lo que el core
+ * necesita para reservar cuota **antes** de empezar a recibir.
+ */
+export function useUploadAttachment(workspaceId: string | null) {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (file: File) => api<{ attachment: Attachment }>(
+      `/api/attachments?workspaceId=${encodeURIComponent(workspaceId as string)}`
+      + `&name=${encodeURIComponent(file.name)}`
+      + `&type=${encodeURIComponent(file.type || 'application/octet-stream')}`,
+      {
+        method: 'POST',
+        body: file,
+        headers: { 'content-type': file.type || 'application/octet-stream' },
+      },
+    ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.workspace(workspaceId ?? 'none') });
     },
   });
 }

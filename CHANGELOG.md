@@ -64,6 +64,9 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **Ya se pueden adjuntar ficheros**: la pantalla los prometía —«los ficheros que le subiste»— y no
+  había forma de subir ninguno. Se adjuntan desde el compositor, se ve cuáles van con el próximo
+  envío y se puede dejar alguno fuera sin borrarlo de la máquina.
 - **El login recorre la cadena de verdad**: con dos factores, la pantalla pedía el primero y se
   daba por autenticada, así que la aplicación entraba y salía sola sin decir por qué; con un código
   de aplicación no se podía entrar en absoluto. Ahora se enseña un paso cada vez, se ve la cadena

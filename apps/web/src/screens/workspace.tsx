@@ -15,8 +15,8 @@ import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Attachment, PermissionProfile, Run, TranscriptMessage } from '@jarvis/contracts';
 import {
-  useCancelRun, useCreateRun, useRenameWorkspace, useSaveDraft, useTarget, useTranscript, useUsage,
-  useWorkspace,
+  useCancelRun, useCreateRun, useRenameWorkspace, useSaveDraft, useTarget, useTranscript,
+  useUploadAttachment, useUsage, useWorkspace,
 } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import {
@@ -118,6 +118,15 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
   const [profile, setProfile] = useState<PermissionProfile>('safe');
   const target = useTarget(workspaceId, profile);
   const createRun = useCreateRun(workspaceId);
+  const upload = useUploadAttachment(workspaceId);
+  /**
+   * Qué adjuntos van con el próximo envío.
+   *
+   * Se excluye aquí y no se borra allí a propósito: un fichero ya subido vive en la máquina y
+   * caduca solo, y borrarlo de verdad sería otra acción con otras consecuencias. Lo que esta lista
+   * decide es qué se le pasa al agente, que es la pregunta que se hace al escribir.
+   */
+  const [excluded, setExcluded] = useState<string[]>([]);
   const cancelRun = useCancelRun();
   const saveDraft = useSaveDraft(workspaceId);
 
@@ -188,7 +197,12 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
     if (!body.trim()) return;
     // La clave de idempotencia es del envío, no del render: un doble toque manda la misma.
     const idempotencyKey = `${workspaceId}:${version}:${body.length}:${body.slice(0, 24)}`;
-    const created = await createRun.mutateAsync({ prompt: body, permissionProfile: profile, idempotencyKey });
+    const created = await createRun.mutateAsync({
+      prompt: body,
+      permissionProfile: profile,
+      idempotencyKey,
+      ...(attached.length ? { attachmentIds: attached.map((file) => file.id) } : {}),
+    });
     // El borrador sólo se limpia cuando el servidor ya tiene el run.
     setBody('');
     setDirty(false);
@@ -241,6 +255,10 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
   const messageBadge = messageBadgeText({
     shown: messages.length, total: transcript.data?.messageCount ?? null,
   });
+
+  /** Subidos y todavía sin usar: lo que se puede mandar con el próximo trabajo. */
+  const staged = attachments.filter((file) => file.state === 'staged');
+  const attached = staged.filter((file) => !excluded.includes(file.id));
 
   const suggest = (text: string): void => {
     onChangeBody(body.trim() ? `${body.trim()}\n${text}` : text);
@@ -515,7 +533,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                       tight
                       icon={ACTION_ICON.attach}
                       title="Sin adjuntos"
-                      hint="Se suben al mandar trabajo, viven en la máquina con un nombre que pone Jarvis y caducan solos."
+                      hint="Se suben desde el compositor, con «Adjuntar ficheros». Viven en la máquina con un nombre que pone Jarvis y caducan solos."
                     />
                   ) : (
                     <div className="list">
@@ -633,6 +651,67 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   aria-label="Qué quieres que haga el agente"
                 />
               </label>
+
+              {/*
+                * Adjuntar.
+                *
+                * La pestaña de contexto llevaba meses diciendo «los ficheros que le subiste» sin
+                * que hubiera forma de subir ninguno. Va aquí y no allí porque adjuntar es parte de
+                * escribir la tarea: se elige el fichero mientras se piensa qué pedir.
+                */}
+              <div className="row" style={{ gap: 8 }}>
+                <label className="btn small" style={{ cursor: 'pointer' }}>
+                  <Glyph icon={ACTION_ICON.attach} />
+                  {upload.isPending ? 'Subiendo…' : 'Adjuntar ficheros'}
+                  <input
+                    type="file"
+                    multiple
+                    className="visually-hidden"
+                    disabled={upload.isPending}
+                    onChange={(event) => {
+                      const chosen = [...(event.target.files ?? [])];
+                      event.target.value = '';
+                      // De uno en uno: el core reserva cuota por fichero y así un rechazo dice
+                      // cuál falló, en vez de dejar media subida a medias sin saber de quién es.
+                      void chosen.reduce(
+                        (chain, file) => chain.then(() => upload.mutateAsync(file).then(() => undefined)),
+                        Promise.resolve(),
+                      ).catch(() => undefined);
+                    }}
+                  />
+                </label>
+                {staged.length ? (
+                  <span className="tiny faint">
+                    {attached.length} de {staged.length} irán con este envío
+                  </span>
+                ) : null}
+              </div>
+
+              {staged.length ? (
+                <div className="facts">
+                  {staged.map((file) => {
+                    const off = excluded.includes(file.id);
+                    return (
+                      <span key={file.id} className={`fact ${off ? '' : 'ok'}`}>
+                        <span className="fact-label">
+                          <Glyph icon={ACTION_ICON.attach} size={12} />
+                        </span>
+                        <span className={`fact-value ${off ? 'faint' : ''}`} title={file.displayName}>
+                          {file.displayName} · {formatBytes(file.sizeBytes)}
+                        </span>
+                        <button type="button" className="linklike tiny"
+                          aria-label={`${off ? 'Incluir' : 'Quitar'} ${file.displayName}`}
+                          onClick={() => setExcluded((list) => (
+                            off ? list.filter((id) => id !== file.id) : [...list, file.id]
+                          ))}>
+                          {off ? 'incluir' : 'quitar'}
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <ErrorNote error={upload.error} />
 
               <div className="suggestions">
                 {SUGGESTIONS.map((text) => (

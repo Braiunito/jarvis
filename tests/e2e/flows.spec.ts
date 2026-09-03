@@ -267,3 +267,35 @@ test('con dos factores, la pantalla pide el segundo y lleva el token pendiente',
   await expect.poll(() => meChecks).toBeGreaterThan(1);
   expect(sentPending).toBe('token-de-prueba');
 });
+
+/**
+ * Adjuntar un fichero, que la pantalla prometía sin poder cumplirlo.
+ *
+ * La pestaña de contexto decía «los ficheros que le subiste» y en toda la consola no había un solo
+ * `input` de fichero. Se prueba el camino entero —subir, verlo, mandarlo con el trabajo— porque el
+ * fallo era justamente que no existía ninguno de los tres pasos.
+ */
+test('adjuntar un fichero y mandarlo con el trabajo', async ({ page }) => {
+  await openWorkspace(page, 'pipeline de despliegue');
+
+  await page.getByLabel('Adjuntar ficheros').setInputFiles({
+    name: 'notas.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('el pool se queda sin conexiones a las 3am'),
+  });
+
+  // Aparece como lo que va a ir con el próximo envío, y se puede dejar fuera. Se comprueba por el
+  // fichero y no por el contador: el workspace es el mismo en las dos pasadas de la suite, así que
+  // el número de adjuntos depende de quién llegó antes.
+  await expect(page.getByText(/notas\.txt/).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/\d+ de \d+ irán con este envío/)).toBeVisible();
+
+  const quitar = page.getByRole('button', { name: 'Quitar notas.txt' }).first();
+  await quitar.click();
+  await expect(page.getByRole('button', { name: 'Incluir notas.txt' }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Incluir notas.txt' }).first().click();
+
+  // Y llega a la pestaña de contexto, que es donde se mira lo que el agente puede ver.
+  await page.getByRole('tab', { name: /Archivos y contexto/ }).click();
+  await expect(page.getByText('notas.txt').first()).toBeVisible();
+});

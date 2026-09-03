@@ -682,7 +682,7 @@ para cuando se decida abrirlos. No se borran ni se resumen; simplemente no se ha
 |---|---|---|---|
 | Core, adaptadores, Assistant | `litechat-ea` | A1, A2 (+A2b), A3, A6, A7, A8, A9, N01, N04–N09, N12 | M1–M24, N14–N19 |
 | Despliegue, gateway, seguridad | `jarvis-69` | N10, N11, N13 | M31, M32, M33 |
-| Consola web | esta sesión | A4 (mitad de interfaz), A5, ~~N03~~ | M25–M30, N20 |
+| Consola web | esta sesión | A4 (mitad de interfaz), ~~A5~~, ~~N03~~ | M25–M30, N20 |
 
 Dos avisos sobre lo que queda fuera, porque no todo lo «medio» pesa igual:
 
@@ -759,6 +759,27 @@ despliegue, después del modelo del titulador y del proveedor del Assistant.
 **N02 no es un bug, es una decisión de producto**: hoy cualquier cuenta autenticada puede verlo y
 tocarlo todo. Con una sola persona no se nota; en cuanto haya dos, hay que decidir si un workspace
 tiene dueño. Eso lo decide el usuario, no nosotros.
+
+### [x] A5 · Los adjuntos: la interfaz los prometía y no se podía subir ninguno
+
+Hecho el 2026-09-02. La pestaña «Archivos y contexto» decía «los ficheros que le subiste» y en toda
+la consola no había un solo `input` de fichero: el core tenía la subida en streaming, el `claim` al
+crear el run y el `promptFor` al preparar, y nadie llamaba a nada de eso.
+
+Ahora se adjunta **desde el compositor**, que es donde se decide: se elige el fichero mientras se
+piensa qué pedir, no en otra pestaña. Los subidos aparecen como lo que va a ir con el próximo
+envío, con la cuenta a la vista, y se pueden dejar fuera uno a uno.
+
+Dos decisiones que se notan:
+
+- **Se sube de uno en uno**, encadenado. El core reserva cuota por fichero, así que un rechazo dice
+  cuál falló en vez de dejar media tanda a medias sin saber de quién es el error.
+- **«Quitar» excluye del envío, no borra**. Un fichero subido vive en la máquina y caduca solo;
+  borrarlo de verdad es otra acción con otras consecuencias. Lo que esa lista decide es qué se le
+  pasa al agente, que es la pregunta que uno se hace al escribir.
+
+Prueba E2E del camino entero —subir, verlo, excluirlo, incluirlo y encontrarlo en la pestaña de
+contexto—, porque el fallo era justamente que no existía ninguno de esos pasos.
 
 ### [x] N03 · La pantalla de login no recorría la cadena que anuncia el servidor
 
