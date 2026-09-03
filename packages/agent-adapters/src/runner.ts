@@ -240,14 +240,21 @@ export function parsePollOutput(stdout: string): PollResult {
 }
 
 /**
- * Pide la cancelación: deja el marcador y manda SIGINT al agente.
+ * Pide la cancelación: deja el marcador y manda la señal al agente.
  *
  * El marcador es lo que permite al wrapper distinguir «lo pararon» de «falló», y sobrevive a que
  * el core muera entre la señal y la confirmación.
+ *
+ * **Por qué TERM y no INT.** Un shell POSIX pone SIGINT y SIGQUIT en SIG_IGN a todo lo que lanza
+ * en segundo plano, y `exec` conserva esa disposición: el agente nace sordo a Ctrl-C y ningún
+ * `trap` puede devolvérsela, porque un shell no puede reactivar una señal que heredó ignorada.
+ * Comprobado en el bastión — `SigIgn: 0x6`, `kill -INT` no le hace nada y `kill -TERM` lo para en
+ * el acto. Con INT, parar un trabajo dependía **siempre** de la escalada a SIGKILL: segundos de
+ * espera y una muerte sin cierre ordenado, mientras el agente seguía escribiendo y gastando cuota.
  */
 export function buildCancelCommand(layout: SpoolLayout, { escalate = false }: { escalate?: boolean } = {}): string {
   const pid = shellQuote(layout.pid);
-  const signal = escalate ? 'KILL' : 'INT';
+  const signal = escalate ? 'KILL' : 'TERM';
   const lines = [
     `touch ${shellQuote(layout.cancel)} 2>/dev/null || true`,
     `PID=$(cat ${pid} 2>/dev/null || echo)`,

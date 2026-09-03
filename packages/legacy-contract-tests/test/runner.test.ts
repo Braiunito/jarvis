@@ -154,15 +154,42 @@ describe('RUNNER-SPOOL-01: layout y arranque', () => {
 });
 
 describe('RUNNER-SPOOL-01: cancelación', () => {
-  it('un agente que ignora SIGINT se para al escalar, y el estado dice cancelled', async () => {
+  /**
+   * Lo que este contrato tiene que probar es que **el proceso muere**, no que el estado lo diga.
+   *
+   * Durante meses la señal amable fue SIGINT, y un shell POSIX pone SIGINT en SIG_IGN a todo lo
+   * que lanza en segundo plano: el agente nacía sordo a ella y ningún `trap` puede devolvérsela.
+   * Los tests pasaban igual porque miraban el `status.json`, que lo publica el wrapper. Aquí se
+   * comprueba con `kill -0` que ya no hay nadie con ese PID, que es la única pregunta que importa
+   * cuando alguien pulsa «parar» sobre un agente que puede escribir ficheros.
+   */
+  it('parar mata al agente de verdad, no sólo al shell que lo lanzó', async () => {
     const { layout, outcome } = await prepare('run-cancel', '@@hang no me pares');
+    expect(outcome).toBe('started');
+    await pollUntil(layout, (p) => p.alive && p.status?.state === 'running');
+
+    const pid = (await exec(`cat ${layout.pid}`)).stdout.trim();
+    expect(pid).toMatch(/^[0-9]+$/);
+    // Está vivo antes de pedir nada: si no, el resto del test no probaría nada.
+    expect((await exec(`kill -0 ${pid} 2>/dev/null && echo vivo || echo muerto`)).stdout.trim()).toBe('vivo');
+
+    const soft = await exec(buildCancelCommand(layout));
+    expect(soft.stdout).toContain('jarvis:cancel-sent');
+
+    await pollUntil(layout, (p) => !p.alive || p.status?.state !== 'running');
+    const despues = (await exec(`kill -0 ${pid} 2>/dev/null && echo vivo || echo muerto`)).stdout.trim();
+    expect(despues).toBe('muerto');
+  });
+
+  it('un agente sordo también a SIGTERM se para al escalar, y el estado dice cancelled', async () => {
+    const { layout, outcome } = await prepare('run-cancel-deaf', '@@deaf no me pares');
     expect(outcome).toBe('started');
     await pollUntil(layout, (p) => p.alive && p.status?.state === 'running');
 
     const soft = await exec(buildCancelCommand(layout));
     expect(soft.stdout).toContain('jarvis:cancel-sent');
 
-    // El agente falso ignora SIGINT a propósito: sigue vivo tras la señal amable.
+    // Éste ignora las dos señales amables: sigue vivo, y por eso existe la escalada.
     await new Promise((r) => setTimeout(r, 500));
     const midway = parsePollOutput((await exec(buildPollCommand({ layout, offset: 0 }))).stdout);
     expect(midway.status?.state).toBe('running');

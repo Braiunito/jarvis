@@ -176,16 +176,33 @@ export class TerminalService {
     return result.stdout;
   }
 
-  /** Destruir una tmux es explícito y se audita: es la única forma de perder ese contexto. */
+  /**
+   * Destruir una tmux es explícito y se audita: es la única forma de perder ese contexto.
+   *
+   * Con una excepción que no se negocia: **la tmux de un trabajo no se destruye por aquí**. Ahí
+   * dentro no hay una consola, hay el wrapper que vigila al agente y publica cómo acabó; matarlo
+   * deja al agente huérfano y al trabajo diciendo «en marcha» hasta que agote su plazo. Se para
+   * con «parar», que manda la señal, escribe el marcador y deja el estado en `cancelled`.
+   *
+   * La comprobación vive aquí y no sólo en la interfaz: esconder el botón evita el accidente, pero
+   * cualquiera puede llamar a la API, y una defensa que sólo existe en la pantalla no es una
+   * defensa.
+   */
   async destroy({ host, name, user }: { host: string; name: string; user: UserIdentity }): Promise<void> {
     this.#assertOurs(name);
+    if (name.startsWith('jarvis-run-')) {
+      throw new JarvisError('FORBIDDEN',
+        'esa sesión es la de un trabajo, no una terminal: se para desde el trabajo, no cerrándola. '
+        + 'Cerrarla dejaría al agente suelto y al trabajo sin saber cómo acabó',
+        { scope: { host } });
+    }
     const result = await this.#exec(host, killSessionCommand(name));
     if (result.code !== 0) {
       throw new JarvisError('NOT_FOUND', result.stderr.trim() || 'the terminal session is not there', { scope: { host } });
     }
     this.#deps.audit.record({ actorUser: user.username, eventType: 'terminal.destroyed', host, payload: { name } });
-    // Las de trabajo no entran en el contador, así que tampoco lo bajan al desaparecer.
-    if (!name.startsWith('jarvis-run-')) this.#adjustCount(host, -1);
+    // Aquí sólo llegan interactivas, que son las que cuenta el chip.
+    this.#adjustCount(host, -1);
   }
 
   #assertOurs(name: string): void {

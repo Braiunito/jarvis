@@ -98,6 +98,16 @@ services:
       JARVIS_TITLE_API_KEY: ${JARVIS_TITLE_API_KEY:-}
       JARVIS_TITLE_BASE_URL: ${JARVIS_TITLE_BASE_URL:-https://api.groq.com/openai}
       JARVIS_TITLE_MODEL: ${JARVIS_TITLE_MODEL:-llama-3.1-8b-instant}
+      # Cuánto se guarda y cada cuánto se limpia. Van aquí porque **un ajuste que no llega al
+      # contenedor es peor que uno que no existe**: promete un control que no se tiene, y cuando
+      # alguien lo cambie en el `.env` no pasará nada y nadie sabrá por qué. Es el mismo fallo que
+      # dejó los títulos saliendo del heurístico durante días, y ya van tres veces.
+      JARVIS_EVENT_COMPACT_AFTER_DAYS: ${JARVIS_EVENT_COMPACT_AFTER_DAYS:-7}
+      JARVIS_EVENT_DROP_AFTER_DAYS: ${JARVIS_EVENT_DROP_AFTER_DAYS:-30}
+      JARVIS_EVENT_SUMMARY_CHARS: ${JARVIS_EVENT_SUMMARY_CHARS:-200}
+      JARVIS_RETENTION_INTERVAL_MS: ${JARVIS_RETENTION_INTERVAL_MS:-21600000}
+      JARVIS_SWEEP_INTERVAL_MS: ${JARVIS_SWEEP_INTERVAL_MS:-21600000}
+      JARVIS_SPOOL_RETENTION_DAYS: ${JARVIS_SPOOL_RETENTION_DAYS:-7}
       JARVIS_TITLE_PER_MINUTE: ${JARVIS_TITLE_PER_MINUTE:-8}
       SSH_AUTH_SOCK: ${SSH_AUTH_SOCK:-}
     volumes:

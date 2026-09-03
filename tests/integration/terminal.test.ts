@@ -128,6 +128,26 @@ describe('TERM-TMUX-01 · abrir y listar', () => {
     });
     expect(response.status).toBe(403);
   });
+
+  /**
+   * La tmux de un trabajo no es una terminal, y cerrarla no es cerrar una consola.
+   *
+   * Dentro está el wrapper que vigila al agente y publica cómo acabó: matarlo deja al agente
+   * suelto y al trabajo diciendo «en marcha». La pantalla ya no ofrece el botón, pero la defensa
+   * tiene que estar aquí — una que sólo existe en la interfaz no protege de nadie que llame a la
+   * API.
+   */
+  it('la sesión de un trabajo no se cierra por aquí: se para el trabajo', async () => {
+    const response = await fetch(`${baseUrl}/api/terminal/destroy`, {
+      method: 'POST', headers: authed(),
+      body: JSON.stringify({ host: 'bastion', name: 'jarvis-run-rabc123' }),
+    });
+    expect(response.status).toBe(403);
+    const body = await response.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('FORBIDDEN');
+    // El mensaje dice qué hacer en su lugar, que es la mitad del trabajo de un error.
+    expect(body.error.message).toContain('se para desde el trabajo');
+  });
 });
 
 describe('TERM-WS-01 · el socket es transporte, no continuidad', () => {

@@ -48,6 +48,13 @@ export const config = {
   runTimeoutMs: Number(env['JARVIS_RUN_TIMEOUT_MS'] || 4 * 60 * 60 * 1000),
   /** Cuánto se le da a un run interrumpido para parar por las buenas antes de matarlo. */
   interruptGraceMs: Number(env['JARVIS_INTERRUPT_GRACE_MS'] || 5000),
+  /**
+   * Cuánto se espera antes de dar por perdido un trabajo cuya tmux ya no está.
+   *
+   * Es un margen para el arranque a medias y para un sondeo que llega entre dos escrituras, no una
+   * política: pasado eso, seguir diciendo «en marcha» es afirmar algo que ya no es verdad.
+   */
+  lostGraceMs: Number(env['JARVIS_LOST_GRACE_MS'] || 15_000),
   /** Cada cuánto el core mira el spool de un run vivo. */
   pollIntervalMs: Number(env['JARVIS_POLL_INTERVAL_MS'] || 700),
   pollChunkBytes: Number(env['JARVIS_POLL_CHUNK_BYTES'] || 512 * 1024),

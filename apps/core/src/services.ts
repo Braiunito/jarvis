@@ -16,6 +16,7 @@ import { WorkspaceService } from './workspaces/use-cases.js';
 import { HttpSessionIndex, type SessionIndex } from './sessions/index-client.js';
 import { SessionService } from './sessions/service.js';
 import { CwdResolver } from './sessions/cwd-resolver.js';
+import { EvidenceService } from './evidence/service.js';
 import { FleetService } from './fleet/service.js';
 import { RunRepository } from './runs/repository.js';
 import { RunEventBus } from './runs/events-bus.js';
@@ -139,6 +140,9 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     onWarn: (message) => console.warn(`[jarvis] ${message}`),
   });
 
+  /** Ficheros y cambios del host, para que el Assistant vea la evidencia que no es texto (TEC-06). */
+  const evidence = new EvidenceService({ sshConfig });
+
   const runs = new RunService({
     repository: runRepository, runner, workspaces, capabilities, bus, audit, clock, sshConfig, attachments,
     cwd: cwdResolver,
@@ -158,6 +162,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     runs, repository: runRepository, runner, clock,
     pollIntervalMs: config.pollIntervalMs,
     interruptGraceMs: config.interruptGraceMs,
+    lostGraceMs: config.lostGraceMs,
     // Para barrer hace falta saber a qué máquinas se puede llegar y dónde tienen su spool.
     capabilities, hosts: config.hosts, spoolRoot: config.spoolRoot,
     sweepIntervalMs: config.sweepIntervalMs,
@@ -196,7 +201,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     sshConfig, clock, audit, capabilities, bastionHost: config.bastionHost, hosts: config.hosts,
   });
   const plans = new PlanService({
-    db, clock, runs, workspaces, sessions, health, model, audit,
+    db, clock, runs, workspaces, sessions, health, model, audit, attachments, evidence,
     maxToolCalls: config.assistantMaxToolCalls,
   });
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });

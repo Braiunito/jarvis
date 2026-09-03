@@ -156,6 +156,7 @@ export class RunSupervisor {
    * | running      | tmux viva         | reanudar el tail desde el cursor         |
    * | running      | status terminal   | importar el resto y terminar             |
    * | running      | ni tmux ni status | esperar el grace y fallar RUNNER_LOST    |
+   * | running      | status running    | **sin tmux, también RUNNER_LOST**        |
    * | cancelling   | tmux viva         | repetir la señal                         |
    * | cancelling   | ausente/terminal  | confirmar el estado real                 |
    */
@@ -330,9 +331,21 @@ export class RunSupervisor {
       return;
     }
 
-    // Ni proceso, ni estado publicado, ni nada nuevo que leer: puede ser un arranque a medias.
-    // Se le da un margen antes de declararlo perdido, y nunca se relanza.
-    if (!poll.alive && !remoteState) {
+    /**
+     * El proceso ya no está, diga lo que diga el spool.
+     *
+     * Sin `status.json` esto era un arranque a medias, y ya se contemplaba. Lo que faltaba es el
+     * caso contrario y más frecuente: un `status.json` que **quedó** en `running` porque al
+     * wrapper se lo llevaron por delante antes de publicar el final — el host se reinició, el OOM
+     * killer eligió esa tmux, alguien cerró la sesión desde la pantalla de Terminal. Ahí ninguna
+     * rama aplicaba: el estado remoto no era terminal, así que no se importaba, y no era ausente,
+     * así que no se declaraba perdido. El trabajo se quedaba «en marcha» hasta agotar su plazo,
+     * cuatro horas después, mientras la consola prometía que seguía avanzando.
+     *
+     * Un `running` publicado es una afirmación sobre un proceso vivo. Sin tmux no hay proceso, así
+     * que esa afirmación ya no la sostiene nadie y el estado honesto es «se perdió».
+     */
+    if (!poll.alive && (!remoteState || remoteState === 'running')) {
       const since = this.#missingSince.get(run.id) ?? clock.nowMs();
       this.#missingSince.set(run.id, since);
       const grace = this.#deps.lostGraceMs ?? 15_000;
@@ -340,7 +353,10 @@ export class RunSupervisor {
         runs.transition(run.id, 'failed', {
           reason: 'runner lost',
           errorCode: 'RUNNER_LOST',
-          errorMessage: `no tmux session and no status file for run ${run.id} on ${run.executionHost}`,
+          errorMessage: remoteState === 'running'
+            ? `run ${run.id} on ${run.executionHost}: its spool still says "running" but the tmux `
+              + 'session is gone, so nothing is running any more'
+            : `no tmux session and no status file for run ${run.id} on ${run.executionHost}`,
         });
         this.#missingSince.delete(run.id);
       }

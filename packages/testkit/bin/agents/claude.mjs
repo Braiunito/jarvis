@@ -81,8 +81,18 @@ async function main() {
   }
 
   if (directive('hang') !== null) {
-    // Ignora SIGINT a propósito: así se prueba la escalación de la cancelación.
+    // Ignora SIGINT a propósito: es lo que hace un CLI que trata Ctrl-C como «cancela lo que estás
+    // haciendo, pero sigue vivo». Con SIGTERM sí se muere, que es lo que debe pasar al parar.
     process.on('SIGINT', () => {});
+    setInterval(() => {}, 1000);
+    return;
+  }
+
+  if (directive('deaf') !== null) {
+    // Sordo a las dos señales amables: sólo lo para SIGKILL. Existe para probar que la escalada
+    // sigue funcionando, ahora que la señal normal ya no es la que todo el mundo ignora.
+    process.on('SIGINT', () => {});
+    process.on('SIGTERM', () => {});
     setInterval(() => {}, 1000);
     return;
   }

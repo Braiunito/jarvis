@@ -40,6 +40,8 @@ const overrides = {
   interruptGraceMs: 800,
   maxConcurrentRuns: 8,
   capabilityTtlMs: 60_000,
+  // El margen para dar por perdido un runner, bajado para que el test no espere quince segundos.
+  lostGraceMs: 300,
 };
 
 interface Harness { services: CoreServices; app: FastifyInstance }
@@ -327,6 +329,35 @@ describe('TEC-11 · una sesión cuyo directorio nadie sabía', () => {
     const workspaceId = await openWorkspace(harness.app, 'sid-fantasma');
     const { run } = (await createRun(harness.app, workspaceId, 'a ver qué pasa')).json<{ run: Run }>();
     expect(run.cwd).toBeNull();
+  });
+});
+
+describe('A2 · un trabajo cuyo runner desaparece', () => {
+  /**
+   * El caso que se quedaba colgado cuatro horas.
+   *
+   * Si la tmux muere después de que el wrapper publicara `running` —el host se reinicia, el OOM
+   * killer elige esa sesión, alguien la cierra— el estado remoto no es terminal, así que no se
+   * importa, y no está ausente, así que no se declaraba perdido. El trabajo seguía diciendo «en
+   * marcha» mientras no quedaba nadie ejecutándolo.
+   */
+  it('se declara perdido aunque su spool siga diciendo «running»', async () => {
+    const workspaceId = await openWorkspace(harness.app);
+    const { run } = (await createRun(harness.app, workspaceId, '@@slow:40 tarda un rato')).json<{ run: Run }>();
+    await waitFor(() => runOf(harness.app, run.id), (value) => value.status === 'running', {
+      what: 'que arranque', timeoutMs: 20_000,
+    });
+
+    // La tmux se va, el `status.json` se queda como estaba: exactamente el hueco.
+    const config = defaultSshConfig({ sshCommand: fakeSshPath(), hosts: ['bastion'], knownHostsFile: '' });
+    await sshExec({ host: 'bastion', command: `tmux kill-session -t '=jarvis-run-${run.id}' 2>/dev/null || true`, config });
+
+    const perdido = await waitFor(() => runOf(harness.app, run.id), (value) => value.status === 'failed', {
+      what: 'que se declare perdido', timeoutMs: 20_000,
+    });
+    expect(perdido.errorCode).toBe('RUNNER_LOST');
+    // Y el mensaje dice qué pasó de verdad, no «salió con código null».
+    expect(perdido.errorMessage).toContain('tmux');
   });
 });
 

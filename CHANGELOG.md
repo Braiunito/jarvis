@@ -185,6 +185,12 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   carpeta. El explorador ya no invita a intentarlo: el servidor dice cuáles no se pueden continuar
   y ahí se ofrece empezar una conversación nueva, con la máquina y la carpeta ya puestas.
 
+- **El Assistant ve los ficheros, no sólo el texto**: puede listar los adjuntos de su workspace,
+  leer uno acotado y mirar qué cambió en el directorio de trabajo, incluido el diff de un fichero.
+  Antes, un plan que dependiera de un adjunto tenía que encargar un trabajo para que se lo contara.
+  Todo lo que lee sale marcado como contenido ajeno: un log o un diff pueden llevar texto dirigido
+  al coordinador, y eso es información que reportar, no una orden que obedecer.
+
 ### Corregido durante la migración
 
 Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer el código:
@@ -211,6 +217,16 @@ Fallos reales encontrados al probar contra tmux y procesos de verdad, no al leer
   esperando bytes que nadie iba a mandar;
 - un fallo anterior al primer evento (un `cwd` que no existe, un binario que falta) se reportaba
   como «salió con código 2»; ahora el core adjunta la cola de `stderr` y dice qué pasó;
+- **«parar» no paraba**: la señal amable era SIGINT, y un shell POSIX pone SIGINT en «ignorar» a
+  todo lo que lanza en segundo plano, así que el agente nacía sordo a ella y sólo lo mataba la
+  escalada a SIGKILL — segundos después y sin cierre ordenado, mientras seguía escribiendo y
+  gastando cuota. Ahora se manda la señal que sí llega, y la prueba comprueba que **no queda nadie
+  con ese PID** en vez de leer el estado que publica el propio wrapper;
+- un trabajo cuya sesión remota moría **después** de anunciarse en marcha se quedaba así hasta
+  agotar su plazo, cuatro horas más tarde, con la consola prometiendo que avanzaba; ahora se
+  declara perdido en cuanto se comprueba que ya no hay nada ejecutándose;
+- la pantalla de Terminal dejaba cerrar la sesión de un trabajo, que es matar a quien lo vigila:
+  ahora el servidor lo rechaza y explica que eso se para desde el trabajo;
 - lo que contestaba una persona a una pregunta del Assistant no llegaba al modelo: el plan
   continuaba, pero sin haber leído la respuesta. Ahora viaja en el contexto del paso siguiente y
   queda en el historial del plan;

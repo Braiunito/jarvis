@@ -449,6 +449,9 @@ export class RunService {
       env,
       pathExtra: this.#deps.limits.remotePath,
       stdinFromNull: true,
+      // El PID que se publica tiene que ser el del agente, no el de un shell intermedio: es el
+      // que recibe la señal cuando alguien pulsa «parar».
+      execFinal: true,
     });
   }
 

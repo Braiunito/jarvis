@@ -86,18 +86,31 @@ export interface RemoteScriptOptions {
   pathExtra?: string;
   /** Un run headless no teclea nada; dejarle un pipe abierto hace esperar a algunas CLIs. */
   stdinFromNull?: boolean;
+  /**
+   * Reemplaza el shell por el agente en vez de dejarlo como hijo.
+   *
+   * Sin esto, qué PID queda publicado depende del shell remoto: dash optimiza el último comando
+   * de un subshell y deja el del agente, y otros dejan el del shell intermedio. Cuando el PID
+   * publicado no es el del agente, cancelar mata al intermedio, el wrapper anuncia `cancelled` y
+   * el agente sigue vivo, escribiendo y gastando cuota. Decirlo explícitamente vale más que
+   * confiar en la optimización de cada máquina.
+   */
+  execFinal?: boolean;
 }
 
 export function remoteScript({
-  argv, cwd, env, pathExtra = DEFAULT_REMOTE_PATH, stdinFromNull = false,
+  argv, cwd, env, pathExtra = DEFAULT_REMOTE_PATH, stdinFromNull = false, execFinal = false,
 }: RemoteScriptOptions): string {
   const parts: string[] = [];
   const prefix = remotePathExport(pathExtra);
   if (cwd) parts.push(`cd ${shellQuote(cwd)} &&`);
+  // `exec` va **después** de las asignaciones de entorno: `exec VAR=x cmd` no es válido, y
+  // `VAR=x exec cmd` sí — el orden importa y equivocarlo rompe el arranque, no la cancelación.
   for (const [key, value] of Object.entries(env ?? {})) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new SshError(`unsafe environment name: ${key}`);
     parts.push(`${key}=${shellQuote(value)}`);
   }
+  if (execFinal) parts.push('exec');
   parts.push(shellJoin(argv));
   if (stdinFromNull) parts.push('< /dev/null');
   return prefix + parts.join(' ');

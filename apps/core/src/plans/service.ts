@@ -15,6 +15,8 @@ import { isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId, newPlanId, newStepId } from '../platform/ids.js';
 import type { AuditLog } from '../platform/audit.js';
+import type { AttachmentService } from '../attachments/service.js';
+import type { EvidenceService } from '../evidence/service.js';
 import type { RunService } from '../runs/service.js';
 import type { WorkspaceService } from '../workspaces/use-cases.js';
 import type { SessionService } from '../sessions/service.js';
@@ -115,6 +117,9 @@ export interface PlanServiceDeps {
   /** Las herramientas de lectura del Assistant salen de estos mismos casos de uso, no de REST. */
   sessions: SessionService;
   health: HealthService;
+  /** Para que el Assistant vea la evidencia que no es texto (TEC-06). Opcionales las dos. */
+  attachments?: AttachmentService;
+  evidence?: EvidenceService;
   model: AssistantModel | null;
   audit: AuditLog;
   approvalTtlMs?: number;
@@ -381,6 +386,8 @@ export class PlanService {
     // otro workspace ni actúa como otra persona.
     const toolbox = new CoreAssistantToolbox({
       plan, workspace, sessions, health, runs, audit, user,
+      ...(this.#deps.attachments ? { attachments: this.#deps.attachments } : {}),
+      ...(this.#deps.evidence ? { evidence: this.#deps.evidence } : {}),
       maxObservations: this.#maxToolCalls,
       ...(toolLimits ? { limits: toolLimits } : {}),
     });
