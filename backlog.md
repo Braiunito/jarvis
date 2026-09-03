@@ -682,7 +682,7 @@ para cuando se decida abrirlos. No se borran ni se resumen; simplemente no se ha
 |---|---|---|---|
 | Core, adaptadores, Assistant | `litechat-ea` | A1, A2 (+A2b), A3, A6, A7, A8, A9, N01, N04–N09, N12 | M1–M24, N14–N19 |
 | Despliegue, gateway, seguridad | `jarvis-69` | N10, N11, N13 | M31, M32, M33 |
-| Consola web | esta sesión | ~~A4~~, ~~A5~~, ~~N03~~ — **hecho** | M25–M30, N20 |
+| Consola web | esta sesión | ~~A4~~, ~~A5~~, ~~N03~~, ~~N12~~ — **hecho** | M25–M30, N20 |
 
 Dos avisos sobre lo que queda fuera, porque no todo lo «medio» pesa igual:
 
@@ -845,6 +845,25 @@ despliegue, después del modelo del titulador y del proveedor del Assistant.
 **N02 no es un bug, es una decisión de producto**: hoy cualquier cuenta autenticada puede verlo y
 tocarlo todo. Con una sola persona no se nota; en cuanto haya dos, hay que decidir si un workspace
 tiene dueño. Eso lo decide el usuario, no nosotros.
+
+### [x] N12 · El plazo del core estaba configurado y no lo aplicaba nadie
+
+Hecho el 2026-09-02. `JARVIS_CORE_TIMEOUT_MS` existía en la configuración y no se usaba ni en el
+proxy HTTP ni en el handshake del WebSocket. El caso que importa no es «el core no está» —eso ya
+fallaba rápido— sino **«el core acepta la conexión y luego calla»**: la petición se quedaba abierta
+para siempre, consumiendo sockets, y la consola en «cargando» sin nada que la sacara de ahí.
+
+El plazo cubre **hasta que llegan las cabeceras**, no la respuesta entera: un stream de eventos dura
+horas por diseño y cortarlo a los treinta segundos rompería justo lo que sostiene la pantalla de un
+trabajo. Después de las cabeceras se aplica inactividad, salvo a los `text/event-stream`, cuyo
+latido es contrato del core y no cosa del proxy. En el WebSocket el plazo es sólo del handshake: una
+terminal viva puede estar horas sin que nadie teclee.
+
+Se responde **504 con `CORE_TIMEOUT`**, distinto del 502 de «no llegué»: la primera se reintenta
+sola, la segunda quiere decir que el core está vivo y atascado, y eso se mira en Salud.
+
+Verificado al revés contra `d5e029b^`: sin el arreglo las dos pruebas se cuelgan hasta que las mata
+el plazo del propio test.
 
 ### [x] A4 · La terminal se abría en el home, así que no reanudaba nada
 

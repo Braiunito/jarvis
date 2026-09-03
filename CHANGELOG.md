@@ -64,6 +64,10 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Cuántas terminales hay abiertas**, junto a Terminal en el carril. Se enseña sólo cuando se ha
   contado de verdad: un cero que en realidad significa «todavía no lo sé» haría creer que no hay
   ninguna.
+- **Un core que acepta y calla deja de colgar la consola**: había un plazo configurado que no
+  aplicaba nadie, así que una petición podía quedarse abierta para siempre y la pantalla en
+  «cargando». Ahora corta con un error que distingue «no llegué» de «llegué y no contestó», y sin
+  tocar los streams de eventos ni una terminal abierta, que por diseño duran horas.
 - **La terminal se abre donde vive la sesión**: se abría en el home, así que el agente no
   encontraba la conversación y «continuar aquí» no continuaba nada. Ahora la carpeta la resuelve el
   servidor a partir del workspace —y la deduce si no la sabía—, en vez de viajar en el enlace: si

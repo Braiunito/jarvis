@@ -22,4 +22,14 @@ process.env['JARVIS_ATTACHMENT_ROOT'] = join(dir, 'attachments');
 // El secreto con el que el gateway firma la identidad interna: se fija aquí porque la
 // configuración se resuelve al importar, y para entonces el cuerpo del test aún no ha corrido.
 process.env['JARVIS_INTERNAL_SECRET'] = 'jarvis-test-internal-secret';
+/*
+ * A dónde cree el gateway que está el core.
+ *
+ * Por defecto es `core:8770`, el nombre del contenedor, que en una prueba no resuelve: el proxy
+ * falla al conectar y nunca se llega a ejercitar lo que pasa cuando el core **sí** acepta y
+ * luego calla, que es lo que N12 arregla. Con una dirección local, una prueba puede poner ahí un
+ * servidor mudo. El plazo se acorta para no esperar treinta segundos por caso.
+ */
+process.env['JARVIS_CORE_URL'] = process.env['JARVIS_CORE_URL'] ?? 'http://127.0.0.1:8794';
+process.env['JARVIS_CORE_TIMEOUT_MS'] = process.env['JARVIS_CORE_TIMEOUT_MS'] ?? '800';
 process.env['JARVIS_TEST_TMP'] = dir;
