@@ -51,7 +51,12 @@ function buildHeaders(req: IncomingMessage, target: URL, user: ProxyUser, reques
  * El plazo cubre **hasta que llegan las cabeceras**, no la respuesta entera: un stream de eventos
  * dura horas por diseño y cortarlo a los treinta segundos rompería justo lo que sostiene la
  * pantalla de un trabajo. Después de las cabeceras se aplica un plazo de inactividad, salvo a los
- * `text/event-stream`, cuyo latido es contrato del core y no cosa del proxy.
+ * `text/event-stream`.
+ *
+ * A un stream no se le pone plazo porque **su latido es contrato del core**: `KEEPALIVE_MS` en
+ * `apps/core/src/runs/sse.ts`, hoy 15 s. Esa dependencia es de las que se rompen en silencio — si
+ * ese latido desapareciera o se espaciara más que este plazo, aquí no se notaría nada y allí un
+ * stream muerto podría quedarse abierto. Quien lo cambie tiene que mirar también esto.
  */
 function timeoutError(): Error {
   return Object.assign(new Error(`the core did not answer in ${config.coreTimeoutMs}ms`), {
