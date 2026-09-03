@@ -138,6 +138,14 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
       fontSize: 13,
       convertEol: false,
       cursorBlink: true,
+      /**
+       * Cuánto se recuerda aquí.
+       *
+       * Éste es el histórico que de verdad se mira: tmux sólo archiva lo que se le va por arriba,
+       * y un agente que repinta su interfaz en el sitio apenas le manda nada. Mil líneas —el
+       * valor por defecto— se agotan en una conversación de media tarde.
+       */
+      scrollback: 5000,
       theme: { background: '#000000' },
     });
     const fit = new FitAddon();
@@ -262,14 +270,35 @@ export function TerminalScreen({ query }: { query: URLSearchParams }): JSX.Eleme
   /**
    * Mirar hacia atrás sin escribir nada.
    *
-   * El histórico **no está aquí**: `tmux attach` pinta sobre la pantalla alternativa, así que
-   * xterm no guarda ninguna línea que se haya ido por arriba y arrastrar el dedo no tiene nada
-   * que mover. Quien las guarda es tmux, y esto le pide que mueva su vista. Por eso son botones
-   * y no un gesto: el gesto ya existe y no puede funcionar.
+   * Hay **dos** históricos, y el bueno casi siempre es el de aquí. xterm guarda todo lo que tmux
+   * le ha ido pintando; tmux, en cambio, sólo archiva lo que se le va por arriba de su ventana, y
+   * un agente que repinta su interfaz en el sitio apenas le manda nada: se han visto sesiones con
+   * cincuenta líneas en el modo copia y miles en el navegador. Por eso se mueve primero el de
+   * aquí, que es además instantáneo y no cuesta una conexión ssh.
+   *
+   * Cuando el de aquí se agota —una pestaña recién abierta sobre una sesión que lleva horas
+   * corriendo no tiene nada que enseñar— se le pide a tmux el suyo, que ahí sí es lo único que
+   * queda. Se nota que se acabó porque el desplazamiento no mueve la vista ni una línea.
    */
-  const sendScroll = (action: 'up' | 'down' | 'end'): void => {
+  const sendTmuxScroll = (action: 'up' | 'down' | 'end'): void => {
     if (socket.current?.readyState !== WebSocket.OPEN) return;
     socket.current.send(JSON.stringify({ type: 'scroll', action }));
+  };
+
+  const sendScroll = (action: 'up' | 'down' | 'end'): void => {
+    const terminal = term.current;
+    if (!terminal) return;
+
+    if (action === 'end') {
+      terminal.scrollToBottom();
+      // Y que tmux vuelva también al presente, por si quedó en modo copia de una vuelta anterior.
+      sendTmuxScroll('end');
+      return;
+    }
+
+    const antes = terminal.buffer.active.viewportY;
+    terminal.scrollPages(action === 'up' ? -1 : 1);
+    if (terminal.buffer.active.viewportY === antes) sendTmuxScroll(action);
   };
 
   /** Reajusta la rejilla al hueco de ahora y se lo dice a tmux, que si no sigue pintando al viejo. */

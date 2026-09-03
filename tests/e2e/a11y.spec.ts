@@ -394,12 +394,14 @@ test('se puede subir y bajar por el historial sin teclear dentro', async ({ page
   await page.getByRole('button', { name: 'Volver al final de la sesión' }).click();
   await page.waitForTimeout(300);
 
+  /*
+   * Hay dos históricos y los botones usan el de aquí primero, así que un control sólo viaja
+   * cuando el buffer local se ha agotado. Lo que sí es una garantía: «Al final» siempre le dice a
+   * tmux que vuelva al presente, porque puede haber quedado en modo copia de una vuelta anterior.
+   */
   const controles = enviados.filter((payload) => payload.includes('"type":"scroll"'));
-  expect(controles).toEqual([
-    '{"type":"scroll","action":"up"}',
-    '{"type":"scroll","action":"down"}',
-    '{"type":"scroll","action":"end"}',
-  ]);
+  expect(controles).toContain('{"type":"scroll","action":"end"}');
+  expect(controles.every((payload) => /"action":"(up|down|end)"/.test(payload))).toBe(true);
 
   /*
    * Y lo importante: mirar no es teclear. Desde que se pulsan los botones no puede salir un solo
