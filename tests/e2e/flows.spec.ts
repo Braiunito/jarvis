@@ -299,3 +299,34 @@ test('adjuntar un fichero y mandarlo con el trabajo', async ({ page }) => {
   await page.getByRole('tab', { name: /Archivos y contexto/ }).click();
   await expect(page.getByText('notas.txt').first()).toBeVisible();
 });
+
+/**
+ * Lo que no es ASCII, y lo que no es texto.
+ *
+ * Una sola eñe rompía la subida con un 400 que hablaba de longitudes: el cuerpo llegaba decodificado
+ * a cadena y contar caracteres no es contar bytes. Se prueban los dos casos que lo destapan —acentos
+ * y binario— porque los tests que había sólo mandaban ASCII puro, que era justo lo único que pasaba.
+ */
+test('se pueden adjuntar acentos y binarios, no sólo ASCII', async ({ page }) => {
+  await openWorkspace(page, 'certificado caducado');
+
+  await page.getByLabel('Adjuntar ficheros').setInputFiles([
+    {
+      name: 'añoración.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('el año pasado ya pasó; ñ, á, ü', 'utf8'),
+    },
+    {
+      // Un PNG de 1×1 de verdad, para que sea binario y no texto disfrazado.
+      name: 'punto.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    },
+  ]);
+
+  await expect(page.getByText(/añoración\.txt/).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/punto\.png/).first()).toBeVisible({ timeout: 20_000 });
+});

@@ -447,7 +447,15 @@ export function useUploadAttachment(workspaceId: string | null) {
       {
         method: 'POST',
         body: file,
-        headers: { 'content-type': file.type || 'application/octet-stream' },
+        /*
+         * El cuerpo va siempre como octetos, y el tipo real en la URL.
+         *
+         * El `Content-Type` decide cómo se parsea el cuerpo por el camino, y aquí no queremos que
+         * lo parsee nadie: si un `.json` viajara como `application/json`, lo que llegaría al otro
+         * lado sería el resultado de parsear y volver a serializar, que no es el fichero que la
+         * persona eligió. El tipo de verdad viaja en `type=` y es el que el core guarda.
+         */
+        headers: { 'content-type': 'application/octet-stream' },
       },
     ),
     onSuccess: () => {
