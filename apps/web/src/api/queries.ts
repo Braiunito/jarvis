@@ -536,6 +536,9 @@ export function useDestroyTerminal() {
       post<{ ok: true }>('/api/terminal/destroy', { host, name }),
     onSuccess: (_data, variables) => {
       void client.invalidateQueries({ queryKey: keys.terminals(variables.host) });
+      // Destruir mueve el contador del core en el acto; pedir de nuevo las métricas hace que el
+      // carril vea ese cero ahora, en vez de conservar el badge anterior en su caché.
+      void client.invalidateQueries({ queryKey: ['metrics'] });
     },
   });
 }
