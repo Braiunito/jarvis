@@ -206,3 +206,31 @@ ssh <host> 'cat <spool>/<runId>/status.json'
 
 Y después, en la consola, **reintentar** —que crea un run nuevo enlazado al anterior— en vez de
 tocar la base a mano.
+
+## Conectar el MCP de sistema de Zeus (pendiente, no integrado)
+
+En Zeus corre un servidor MCP con 108 herramientas de diagnóstico —estado del
+host, servicios, Docker, red, disco, la iGPU y el sistema de cámaras— en
+**http://192.168.1.100:8765/mcp** (Streamable HTTP). Vive fuera de este repo, en
+`/home/zeus/mcp-sistema`, con su propio README.
+
+**Hoy Jarvis no lo consume, y es una decisión, no un olvido.** Este stack no
+tiene cliente MCP: [ADR-004](adr/0004-rest-sse-ws-mcp.md) define MCP como
+*adaptador para modelos externos* —Jarvis lo expone, no lo llama— y el toolbox
+del Assistant exige que una herramienta llame a un caso de uso del core, nunca a
+una API HTTP. Enchufarlo "a lo rápido" desde una tool rompería las dos reglas.
+
+Las dos formas legítimas de hacerlo, si algún día hace falta:
+
+1. **Un modelo que hable MCP por su cuenta.** Es el caso que ADR-004 contempla:
+   el runtime del modelo (la app Jan, LM Studio, un wrapper del `llama-server`)
+   se conecta al puerto 8765 por configuración. Cero cambios en este repo. Es la
+   vía prevista para Jan-v1-4B cuando pase de los benchmarks a estar servido.
+2. **Un caso de uso en el core.** Un `SystemService` que hable MCP y unas pocas
+   tools en `assistant/toolbox.ts` que lo llamen, igual que las demás. Respeta
+   ADR-004 y la regla del toolbox, pero es una capacidad nueva del core: pide
+   contracts, tests y su propio ADR.
+
+Mientras tanto el servidor está corriendo y endurecido (`systemctl status
+mcp-sistema` en Zeus): sirve para diagnosticar la máquina a mano aunque ningún
+modelo lo use todavía.
