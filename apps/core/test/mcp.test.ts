@@ -19,6 +19,7 @@ import { AuditLog } from '../src/platform/audit.js';
 import { McpHttpClient } from '../src/mcp/client.js';
 import { McpService, summarize } from '../src/mcp/service.js';
 import { DEFAULT_DENIED_TOOLS, parseMcpServers, parsePairs } from '../src/mcp/config.js';
+import { fitToSchema } from '../src/mcp/service.js';
 import { readSseEvents } from '../src/platform/sse-read.js';
 
 const NOW = '2026-09-04T12:00:00.000Z';
@@ -415,5 +416,68 @@ describe('SSE · leer lo que llega', () => {
 
   it('entrega el último evento aunque el servidor cierre sin la línea en blanco', async () => {
     expect(await collect('data: final')).toEqual([{ event: 'message', data: 'final' }]);
+  });
+});
+
+
+/**
+ * Argumentos que el modelo se inventa por analogía.
+ *
+ * Pasó en el primer turno real en producción: le dio `seconds: 60` a `system_health_snapshot` y
+ * `top: 10` a `disk_usage`, ninguna de las cuales recibe nada. No fue aleatorio —en el mismo lote
+ * viajaban `cpu_sampled(seconds, top)` y `memory_pressure(top)`— y por eso se repetiría.
+ *
+ * Es un caso distinto del JSON truncado: aquí los argumentos **parsean perfectamente**, y quien
+ * los rechaza es la función que hay al otro lado.
+ */
+describe('ajustar los argumentos a lo que la herramienta declara', () => {
+  const sinParametros = { type: 'object', properties: {}, additionalProperties: false };
+  const conParametros = {
+    type: 'object',
+    properties: { seconds: { type: 'integer' }, top: { type: 'integer' } },
+    additionalProperties: false,
+  };
+
+  it('quita lo que no está declarado y dice cuál', () => {
+    const fitted = fitToSchema({ seconds: 60 }, sinParametros);
+    expect(fitted.args).toEqual({});
+    expect(fitted.dropped).toEqual(['seconds']);
+  });
+
+  it('deja pasar lo declarado y sólo quita lo demás', () => {
+    const fitted = fitToSchema({ seconds: 3, top: 6, inventado: 1 }, conParametros);
+    expect(fitted.args).toEqual({ seconds: 3, top: 6 });
+    expect(fitted.dropped).toEqual(['inventado']);
+  });
+
+  it('un esquema sin properties significa «no recibe nada», no «recibe cualquier cosa»', () => {
+    // Es lo contrario del defecto de JSON Schema, y a propósito: una tool MCP no valida un
+    // documento, llama a una función, y una clave que sobra es un argumento con nombre inexistente.
+    expect(fitToSchema({ top: 10 }, { type: 'object' }).dropped).toEqual(['top']);
+  });
+
+  it('respeta al servidor que dice expresamente que admite más', () => {
+    const abierto = { type: 'object', properties: {}, additionalProperties: true };
+    expect(fitToSchema({ lo_que_sea: 1 }, abierto).args).toEqual({ lo_que_sea: 1 });
+    expect(fitToSchema({ lo_que_sea: 1 }, abierto).dropped).toEqual([]);
+  });
+
+  it('sin esquema no hay nada contra lo que ajustar, y decide el servidor', () => {
+    expect(fitToSchema({ a: 1 }, undefined).args).toEqual({ a: 1 });
+  });
+});
+
+describe('MCP · llamar con argumentos que sobran', () => {
+  it('la consulta se hace igual, sin ellos, y el resultado lo cuenta', async () => {
+    const server = fakeMcpServer();
+    const service = buildService(server);
+    // `docker_logs` del servidor falso no declara `seconds`.
+    const result = await service.call('docker_logs', { seconds: 60 }, { actor: 'braian' });
+
+    expect(result.ok).toBe(true);
+    expect(result.dropped).toEqual(['seconds']);
+    // Y al servidor le llegó la llamada limpia, no la que traía el argumento inventado.
+    const call = server.calls.find((entry) => entry.method === 'tools/call');
+    expect((call?.params as { arguments?: unknown })?.arguments).toEqual({});
   });
 });

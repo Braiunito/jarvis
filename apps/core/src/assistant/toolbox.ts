@@ -1124,6 +1124,16 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         content: result.content,
         truncated: result.truncated,
         ...(result.originalChars ? { originalChars: result.originalChars } : {}),
+        /*
+         * Si se le quitaron argumentos, se le dice.
+         *
+         * La consulta se hizo igual —de eso se encarga el core— pero callarlo sería enseñarle el
+         * resultado de una pregunta distinta de la que hizo. Y con suerte deja de pegarle a una
+         * herramienta los parámetros de su vecina, que es de donde salen.
+         */
+        ...(result.dropped?.length
+          ? { ignoredArgs: result.dropped, argsNote: 'esa capacidad no acepta esos argumentos; se consultó sin ellos' }
+          : {}),
         // Lo que devuelve una máquina es dato, igual que un fichero o un diff.
         note: CONTENT_IS_DATA,
       },

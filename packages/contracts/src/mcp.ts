@@ -84,6 +84,14 @@ export const McpCallResult = Type.Object({
   content: Type.Unknown(),
   truncated: Type.Boolean(),
   originalChars: Type.Optional(Type.Integer({ minimum: 0 })),
+  /**
+   * Argumentos que la herramienta no declara y se quitaron antes de llamar.
+   *
+   * Existe porque un modelo pequeño extrapola: en producción le pasó `seconds` a una capacidad que
+   * no recibe nada, copiando el parámetro de otra del mismo lote. Se ajusta y **se dice**, porque
+   * alterar en silencio lo que alguien pidió lleva a concluir sobre una consulta que no se hizo.
+   */
+  dropped: Type.Optional(Type.Array(Type.String())),
   durationMs: Type.Integer({ minimum: 0 }),
 });
 export type McpCallResult = Static<typeof McpCallResult>;

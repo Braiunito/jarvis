@@ -302,9 +302,24 @@ export class McpService {
         { scope: { capability: name } });
     }
 
+    /*
+     * Los argumentos se ajustan al esquema **antes** de salir.
+     *
+     * Visto en el primer turno real en producción: el modelo le pasó `seconds: 60` a
+     * `system_health_snapshot` y `top: 10` a `disk_usage`, y ninguna de las dos recibe argumentos.
+     * No fue aleatorio y por eso importa: en el lote de arranque conviven `cpu_sampled(seconds,
+     * top)` y `memory_pressure(top)`, y les pegó por analogía los parámetros de sus vecinas. Un
+     * fallo por analogía se repite.
+     *
+     * Se arregla aquí y no pidiéndole al modelo que se fije, porque ya se le dice: el catálogo que
+     * ve pone «sin parámetros» en esas dos. Decírselo mejor no lo va a arreglar; quitarle la
+     * ocasión, sí.
+     */
+    const { args: safeArgs, dropped } = fitToSchema(args, tool.inputSchema);
+
     let result;
     try {
-      result = await runtime.client.callTool(tool.name, args);
+      result = await runtime.client.callTool(tool.name, safeArgs);
       runtime.lastOkAt = this.#clock.nowIso();
       runtime.lastError = null;
     } catch (error) {
@@ -347,6 +362,9 @@ export class McpService {
       content: truncated ? `${serialized.slice(0, this.#maxOutputChars)}…` : result.content,
       truncated,
       ...(truncated ? { originalChars: serialized.length } : {}),
+      // Se dice lo que se quitó. Alterar en silencio lo que alguien pidió es cómo se acaba
+      // concluyendo sobre una consulta que no fue la que se hizo.
+      ...(dropped.length ? { dropped } : {}),
       durationMs: this.#clock.nowMs() - started,
     };
   }
@@ -512,6 +530,39 @@ function effectsOf(tool: McpToolDescriptor, config: McpServerConfig): boolean {
   // Sin etiquetas que lo aclaren: en un servidor de sólo lectura no hay daño posible, así que se
   // deja pasar como lectura; en uno con escrituras habilitadas, se exige aprobación.
   return !config.readOnly;
+}
+
+/**
+ * Deja los argumentos en lo que la herramienta declara aceptar.
+ *
+ * La regla es estricta por defecto, al revés que JSON Schema, y es a propósito: una herramienta
+ * MCP no valida un documento, **llama a una función**, y las claves que sobran acaban como
+ * argumentos con nombre que no existen. El servidor de casa contesta a eso con
+ * `unexpected_keyword_argument` y pierde la vuelta entera. Sólo se dejan pasar las claves no
+ * declaradas cuando el esquema dice expresamente que admite más (`additionalProperties`), que es
+ * la única forma de saber que al otro lado hay algo capaz de recibirlas.
+ *
+ * Un esquema sin `properties` significa «no recibe nada», no «recibe cualquier cosa».
+ */
+export function fitToSchema(
+  args: Record<string, unknown>,
+  schema: Record<string, unknown> | undefined,
+): { args: Record<string, unknown>; dropped: string[] } {
+  const properties = schema?.['properties'] as Record<string, unknown> | undefined;
+  const additional = schema?.['additionalProperties'];
+  // Sin esquema no hay nada contra lo que ajustar; se pasa tal cual y que decida el servidor.
+  if (!schema || additional === true || (additional && typeof additional === 'object')) {
+    return { args, dropped: [] };
+  }
+
+  const declared = new Set(Object.keys(properties ?? {}));
+  const kept: Record<string, unknown> = {};
+  const dropped: string[] = [];
+  for (const [key, value] of Object.entries(args)) {
+    if (declared.has(key)) kept[key] = value;
+    else dropped.push(key);
+  }
+  return { args: kept, dropped };
 }
 
 function isAllowed(name: string, config: McpServerConfig): boolean {
