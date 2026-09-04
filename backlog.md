@@ -33,6 +33,12 @@ Lo medido durante la implementación, que es lo que explica cada decisión:
 
 De 453 s a 108 s en la misma pregunta y la misma máquina, con la respuesta correcta.
 
+**Desplegado el mismo día** (`ef50771` y `5dda2a2`), y el primer turno real destapó cinco fallos
+que ni la suite ni el banco de pruebas cogieron —todos arreglados—. Lo que se midió, lo que se
+rompió y lo que quedó pendiente está en
+[`evidence/2026-09-04-asistente-local.md`](evidence/2026-09-04-asistente-local.md); la taxonomía de
+en qué capa se arregla cada clase de fallo, en [ADR-009](docs/adr/0009-local-brain-and-mcp-client.md).
+
 ### [ ] IA-02 · El redactor de 1,7B se equivoca al contar lo que ha leído
 
 Salió al probar IA-01 contra el servidor real. Los **datos** que trae son correctos —los saca del

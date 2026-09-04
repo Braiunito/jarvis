@@ -15,3 +15,13 @@ Lo que no se puede probar aquí es lo que exige el bastión y sus hosts (fases M
 | M3 | trabajo directo durable | [M3.md](M3.md) |
 | M4 | Assistant, terminal y diagnóstico | [M4.md](M4.md) |
 | M5 | importación y copia de seguridad | [M5.md](M5.md) |
+
+## Campañas reales
+
+Lo de arriba corre contra dobles. Esto corrió contra las máquinas, las CLIs y las cuentas de
+verdad, que es donde aparecen los fallos que un doble no tiene forma de reproducir.
+
+| Fecha | Qué se estrenó | Evidencia |
+|---|---|---|
+| 2026-09-02 | el stack completo sobre zeus, goro2 y vultr | [2026-09-02-campana-real.md](2026-09-02-campana-real.md) |
+| 2026-09-04 | el asistente pasa a pensar en el bastión, con MCP de sistema | [2026-09-04-asistente-local.md](2026-09-04-asistente-local.md) |

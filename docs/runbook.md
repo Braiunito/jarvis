@@ -308,3 +308,9 @@ Correrlo con el core ya conectado y comparar contra esa referencia es lo que dic
 integración añadió espera o se comió aciertos. Una advertencia al comparar: la misma tanda dio
 32,4 s y 46,6 s en dos ejecuciones seguidas sin tocar nada, porque `llama` cede CPU a las cámaras
 (`CPUWeight=30`). Comparar sólo con carga parecida, o dos veces cada configuración.
+
+Los números del estreno —cuánto cuesta el catálogo, cuánto tarda según cuántas herramientas se le
+ofrezcan, dónde se va el tiempo de un turno y qué se rompió el primer día— están en
+[`evidence/2026-09-04-asistente-local.md`](../evidence/2026-09-04-asistente-local.md). Es el sitio
+al que volver antes de tocar un ajuste: casi todos los valores por defecto de esta feature salen de
+una medida que está ahí.

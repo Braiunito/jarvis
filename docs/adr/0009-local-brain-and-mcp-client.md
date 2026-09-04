@@ -107,6 +107,36 @@ herramienta no dice qué es, se trata como si escribiera: el MCP de Zeus etiquet
 como `admin` y **no** como `write`, así que un clasificador que sólo mirase `write` daría por
 inofensivo apagar el servidor.
 
+## Lo que un modelo pequeño hace mal, y en qué capa se arregla
+
+Salió del primer turno en producción, donde **cinco de ocho llamadas a herramienta fallaron**. No
+son fallos aleatorios: cada uno tiene una forma reconocible y un sitio donde arreglarlo. El sitio
+nunca es el prompt.
+
+| Lo que hace | Ejemplo real | Dónde se arregla |
+|---|---|---|
+| Trunca lo que genera | `arguments: "{"` | se sanea a `{}` en el adaptador del modelo |
+| Inventa argumentos por analogía | `seconds: 60` a una tool sin parámetros | se ajustan al `inputSchema` antes de llamar |
+| Manda un valor fuera de rango | `cpu_sampled(seconds=60)`, tope 30 | el servidor acota y **devuelve el valor efectivo** |
+| Se inventa el nombre de una capacidad | `zeus.processes` | se le contestan las tres que más se parecen |
+| Escribe el aspecto de una llamada | `<finish>`, `summary:` como prosa | se limpia antes de enseñarlo |
+
+Tres cosas que esta tabla enseña y que valen más que la tabla:
+
+**El prompt no es una capa de defensa.** Al modelo ya se le decía `[sin parámetros]` en el catálogo
+de las herramientas a las que luego les inventó argumentos. Lo tenía delante. Decírselo mejor no lo
+arregla; quitarle la ocasión, sí. Cada vez que la respuesta a un fallo sea «se lo explicamos en el
+system prompt», la respuesta es otra.
+
+**Un tope existe para proteger la máquina, no para dar lecciones a quien llama.** Rechazar
+`seconds=60` porque el máximo es 30 pierde la vuelta entera; acotar a 30 y **decir con qué se
+midió** conserva la respuesta y no engaña. Vale para cualquier validación de esta frontera.
+
+**Nada se altera en silencio.** Un argumento que se quita se reporta (`ignoredArgs`), un resultado
+que se recorta dice cuánto ocupaba, un valor acotado devuelve el efectivo. La regla de ADR-007
+—recortar diciéndolo— resulta que no era sólo sobre tamaño: un modelo al que se le cambia la
+pregunta sin avisar concluye con seguridad sobre una consulta que no hizo.
+
 ## Consecuencias
 
 - El coste por turno de lo habitual —diagnosticar, buscar, resumir— baja a cero. Lo que se paga
