@@ -46,8 +46,8 @@ RemainAfterExit=yes
 User=zeus
 Group=zeus
 WorkingDirectory=/home/zeus/jarvis/jarvis-next
-# La superposición de red local, mientras no haya certificado. Quítalo cuando entre Caddy con TLS.
-Environment=JARVIS_MODE=lan
+# TLS real vía nginx+certbot del host (DNS-01, no el Caddy propio del stack).
+Environment=JARVIS_MODE=host-tls
 
 # `up` es idempotente: lo que ya está corriendo se queda como está, así que da igual si esto se
 # ejecuta tras un arranque limpio, tras un `jarvis down` o a mano.

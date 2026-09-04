@@ -1,0 +1,15 @@
+# Superposición para TLS terminado por un reverse proxy del host (nginx + certbot vía DNS-01),
+# en lugar del Caddy propio del stack.
+#
+# A diferencia de compose.lan.yml, aquí sí hay un proxy de confianza delante: por eso NO se
+# tocan JARVIS_TRUST_PROXY ni JARVIS_INSECURE_COOKIES, que en compose.yml ya vienen en "true" y
+# "false" respectivamente (los valores correctos cuando hay TLS real). Lo único que cambia es
+# quién hace de borde: se apaga Caddy (compite por los puertos 80/443 con nginx) y el gateway se
+# publica solo en loopback, que es donde nginx lo va a encontrar.
+services:
+  caddy:
+    profiles: ["disabled"]
+
+  gateway:
+    ports:
+      - "127.0.0.1:${JARVIS_LAN_PORT:-8080}:8080"

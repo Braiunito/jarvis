@@ -15,6 +15,11 @@ if [[ "${JARVIS_MODE:-}" == "lan" ]]; then
   overlay=(-f "$here/deploy/compose.lan.yml")
 fi
 
+# TLS real, pero terminado por un reverse proxy del host (nginx+certbot) en vez del Caddy propio.
+if [[ "${JARVIS_MODE:-}" == "host-tls" ]]; then
+  overlay=(-f "$here/deploy/compose.host-tls.yml")
+fi
+
 compose() {
   docker compose -f "$compose_file" "${overlay[@]}" --env-file "$env_file" "$@"
 }
