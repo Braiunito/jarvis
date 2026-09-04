@@ -1107,7 +1107,17 @@ export class CoreAssistantToolbox implements AssistantToolbox {
        * primera, y son treinta tokens.
        */
       if (error instanceof JarvisError && error.code === 'NOT_FOUND') {
-        const nearby = await mcp.search(name.replace(/[._]+/g, ' '), 3);
+        /*
+         * Se busca por el nombre **sin el servidor**, y no es un detalle.
+         *
+         * Al modelo se le enseña el catálogo cualificado, así que cuando se inventa una capacidad
+         * se la inventa cualificada: pidió `zeus.processes` y `zeus.network_traffic`. Buscando la
+         * cadena entera, «zeus» es un término más, y en este servidor casa con `zeus_playbook` tan
+         * fuerte como «processes» con `list_processes`: las sugerencias saldrían encabezadas por
+         * el manual del servidor en vez de por lo que se buscaba. El servidor ya lo sabemos; lo
+         * que hay que adivinar es la herramienta.
+         */
+        const nearby = await mcp.search(bare.replace(/[._]+/g, ' '), 3);
         return toolError('NOT_FOUND', `no existe la capacidad ${name}`,
           nearby.length
             ? `no te la inventes: las que más se parecen son ${nearby.map((one) => one.name).join(', ')}`

@@ -71,6 +71,10 @@ function fakeMcp({ writable = false }: { writable?: boolean } = {}): { service: 
       inputSchema: { type: 'object', properties: { container: { type: 'string' } }, required: ['container'] },
       _meta: { fastmcp: { tags: ['docker', 'write'] } },
     },
+    {
+      name: 'list_processes', title: 'List Processes', description: 'Lista procesos con PID y consumo.',
+      inputSchema: { type: 'object', properties: {} }, _meta: { fastmcp: { tags: ['process', 'safe'] } },
+    },
   ];
 
   const sse = (payload: unknown, headers: Record<string, string> = {}): Response => new Response(
@@ -394,6 +398,29 @@ describe('CHAT · tocar una máquina', () => {
 
     // Un «no existe» seco le hace inventarse otro; darle los parecidos lo pone en la vía.
     expect(JSON.stringify(outcome)).toContain('no te la inventes');
+  });
+
+  it('al inventarse un nombre CUALIFICADO, el servidor no contamina las sugerencias', async () => {
+    /*
+     * En producción se inventó `zeus.processes` y `zeus.network_traffic`, cualificados, porque el
+     * catálogo que ve va cualificado. Si se busca la cadena entera, «zeus» es un término más y
+     * casa con `zeus_playbook` tan fuerte como «processes» con `list_processes`: las sugerencias
+     * saldrían encabezadas por el manual del servidor en vez de por lo que se buscaba.
+     */
+    let outcome = '';
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        outcome = JSON.stringify(await toolbox.invoke('use_capability', { name: 'zeus.processes', args: {} }));
+        return { kind: 'finish', summary: 'ya' };
+      },
+    ]);
+    const { services } = track(harness({ local }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'qué procesos hay', user);
+    await settled(services, conversation.id);
+
+    expect(outcome).toContain('zeus.list_processes');
+    expect(outcome).not.toContain('zeus_playbook');
   });
 });
 
