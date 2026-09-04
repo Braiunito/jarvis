@@ -63,9 +63,23 @@ durabilidad se prueba rompiendo cosas, no describiéndolas.
 
 ```bash
 cp deploy/.env.example deploy/.env    # y rellenarlo
-bin/jarvis up
+JARVIS_MODE=lan bin/jarvis up         # ver el aviso de abajo
 bin/jarvis smoke
 ```
+
+> ⚠️ **`JARVIS_MODE=lan` no es opcional en esta instalación, y olvidarlo tira el
+> servicio.** Sin esa variable, `bin/jarvis up` levanta el compose completo: Caddy
+> toma los puertos 80 y 443, fuerza redirección a HTTPS con un certificado
+> autofirmado para `localhost`, y **el gateway deja de publicar el 8080** — que es
+> por donde se entra de verdad (`JARVIS_ORIGINS` apunta a `:8080`). Desde fuera
+> queda un 308 hacia un HTTPS que no responde: parece que Jarvis se ha caído,
+> cuando por dentro gateway y core siguen sanos y el `smoke` da 200.
+>
+> Pasó el 04/09/2026 al desplegar a mano. `deploy/jarvis.service` sí lleva
+> `Environment=JARVIS_MODE=lan`; quien despliegue sin systemd tiene que ponerla.
+>
+> Cómo se comprueba que quedó bien: `curl -o /dev/null -w '%{http_code}'
+> http://<host>:8080/` devuelve 200, y `ss -tln` no muestra nada escuchando en 443.
 
 Sin TLS no hay passkeys: el navegador no expone WebAuthn fuera de un contexto seguro. Mientras no
 haya certificado se usa `JARVIS_MODE=lan` con la escotilla de contraseña o un túnel SSH. Esa
