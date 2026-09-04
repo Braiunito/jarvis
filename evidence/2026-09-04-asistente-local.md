@@ -32,8 +32,9 @@ bearer**, que es lo que evita que abrirlo sea abrirlo a cualquiera.
 | Migración 11 en producción | ✅ `conversations` y `chat_messages` creadas y vacías, `plans` intacta |
 | Conversación de punta a punta | ✅ buscó, encontró, ejecutó contra el MCP real y respondió con datos ciertos |
 | Primer turno real (20:15) | ✅ 87 s · prompt eval 434 tokens · eval 317 tokens · `conversations: 1` |
+| Segundo turno, tras los arreglos | ✅ **cero `WARNING Invalid arguments`** en el log del MCP: 9 llamadas, 6 con éxito, 2 con nombre inventado, 1 sin presupuesto |
 | Copia de seguridad y ensayo de restauración | ✅ las dos mitades, `integrity_check ok`, esquema 11, restaurada y verificada |
-| Suite tras el cambio | ✅ 404 pruebas + 60 e2e, typecheck y lint limpios |
+| Suite tras el cambio | ✅ 407 pruebas + 60 e2e, typecheck y lint limpios |
 
 ## Lo que se midió, que es lo que explica el diseño
 
@@ -100,7 +101,24 @@ máquina, con la respuesta correcta.
    nombre sin cualificar.
 6. **El modelo escribía el aspecto de una llamada en vez de hacerla** —`<finish>`, `summary:`,
    bloques `<think>`— y eso llegaba tal cual a la pantalla. Se limpia y queda la frase.
-7. **La copia de seguridad salió a medias** al desplegar: sólo el volumen del core, sin
+7. **La escalada a la nube estaba rota al 100 %**, y fue una regresión introducida ese mismo día.
+   Al añadir un tope de generación para el modelo local lo puse en los dos caminos, y los modelos
+   nuevos de OpenAI rechazan `max_tokens` con un 400 exigiendo `max_completion_tokens`: la tarjeta
+   se firmaba y el turno moría. Antes del cambio ese camino no mandaba tope ninguno. Ahora el tope
+   es **opcional** —sólo se manda si se configura— y su nombre también, porque no hay uno único.
+   *No se deduce de la URL ni del texto del error*: una red que depende de cómo redacta un mensaje
+   otro servidor desaparece en silencio el día que lo cambien.
+8. **Ante «Hola» hacía nueve consultas** y agotaba el presupuesto del turno. La descripción de
+   `finish` decía qué hacía pero no **cuándo** usarla, y con cinco herramientas de diagnóstico
+   delante, un modelo pequeño diagnostica. Medido aparte: basta con que `finish` diga «úsala
+   también cuando no haga falta consultar nada» para que elija bien ante un saludo.
+9. **Se inventa capacidades y no busca antes de hacerlo**: fue directo a `use_capability` con
+   `zeus.network_stats` y `zeus.container_status`. Ahora un nombre inexistente **devuelve la
+   búsqueda hecha** —las candidatas con su resumen y sus parámetros— en vez de unos nombres que
+   costarían otra vuelta para pedir sus detalles. Lo que sigue sin hacerse es ejecutar la que más
+   se parezca: adivinar qué quiso decir alguien que ya se equivocó al decirlo es como se ejecuta
+   algo que nadie pidió.
+10. **La copia de seguridad salió a medias** al desplegar: sólo el volumen del core, sin
    `jarvis-auth` —usuarios, passkeys y claves de sesión, que es la mitad que no se reconstruye—.
    No es un defecto del código: `bin/jarvis backup` ya hacía las dos mitades y falla si sale
    incompleta. Fue no usar el comando que había.
@@ -112,8 +130,8 @@ máquina, con la respuesta correcta.
   memoria está en uso» con un dato que decía 38 %. **La cadena es fiable; el redactor no siempre.**
   Mientras tanto, la interfaz enseña la consulta desplegable: el número real está a un clic de la
   frase que lo cuenta.
-- **Verificar en el log del MCP** que tras `5dda2a2` desaparecen los `WARNING Invalid arguments`.
-  Se comprueba desde el otro lado del cable, que es mejor sitio que el nuestro.
+- **Verificado**: tras `5dda2a2` desaparecieron los `WARNING Invalid arguments` del log del MCP.
+  Se comprobó desde el otro lado del cable, que es mejor sitio que el nuestro.
 - El banco de pruebas de `~/harness-ia/` (fuera de este repositorio) tiene los números de
   referencia **anteriores** a la integración. Correrlo ahora y comparar dice si enchufarlo añadió
   espera o se comió aciertos.

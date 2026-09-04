@@ -264,6 +264,16 @@ export interface AnthropicModelOptions {
    */
   maxOutputTokens?: number;
   /**
+   * Cómo se llama el tope de generación en el servidor de destino.
+   *
+   * Existe porque no hay un nombre único: `llama-server` y la API clásica de OpenAI entienden
+   * `max_tokens`, y los modelos nuevos de OpenAI lo **rechazan con un 400** exigiendo
+   * `max_completion_tokens`. Es configuración y no olfateo de la URL ni del texto del error: una
+   * red que depende de cómo redacta un mensaje otro servidor desaparece en silencio el día que lo
+   * cambien.
+   */
+  maxOutputTokensParam?: string;
+  /**
    * Dónde se fue el tiempo de una llamada.
    *
    * Con un modelo de casa, «el asistente va lento» es la queja que va a llegar siempre, y sin esto
@@ -301,6 +311,11 @@ export class AnthropicModel implements AssistantModel {
   readonly #fetch: FetchLike;
   readonly #systemPrompt: string;
   readonly #maxToolResultChars: number;
+  /**
+   * Tope de generación. Aquí **no** es opcional: la Messages API exige `max_tokens` y rechaza la
+   * petición sin él, así que si no se configura se le da uno. `maxOutputTokensParam` no pinta nada
+   * en esta clase —el campo se llama siempre igual— y por eso no se guarda.
+   */
   readonly #maxOutputTokens: number;
   readonly #onUsage: ((usage: ModelTurnUsage) => void) | null;
 
@@ -460,13 +475,25 @@ export class OpenAiCompatibleModel implements AssistantModel {
   readonly #fetch: FetchLike;
   readonly #systemPrompt: string;
   readonly #maxToolResultChars: number;
-  readonly #maxOutputTokens: number;
+  /**
+   * Tope de generación, **opcional a propósito**.
+   *
+   * `undefined` significa «no mandes nada y que decida el servidor», y ése es el valor por defecto
+   * para un endpoint compatible. Ponerlo siempre fue un error que rompió la escalada el primer día
+   * que se usó: los modelos nuevos de OpenAI rechazan `max_tokens` con un 400 y exigen
+   * `max_completion_tokens`. Un tope hace falta en casa —a 4-7 tokens/s, divagar son minutos— y no
+   * hace falta en la nube, que era como estaba antes.
+   */
+  readonly #maxOutputTokens: number | null;
+  /** Cómo se llama ese campo en el servidor de destino. Ver `maxOutputTokensParam`. */
+  readonly #maxOutputTokensParam: string;
   readonly #onUsage: ((usage: ModelTurnUsage) => void) | null;
 
   constructor(options: AnthropicModelOptions) {
     this.#systemPrompt = options.systemPrompt ?? SYSTEM_PROMPT;
     this.#maxToolResultChars = options.maxToolResultChars ?? 60_000;
-    this.#maxOutputTokens = options.maxOutputTokens ?? 4096;
+    this.#maxOutputTokens = options.maxOutputTokens ?? null;
+    this.#maxOutputTokensParam = options.maxOutputTokensParam ?? 'max_tokens';
     this.#onUsage = options.onUsage ?? null;
     this.#apiKey = options.apiKey;
     this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
@@ -570,7 +597,8 @@ export class OpenAiCompatibleModel implements AssistantModel {
         body: JSON.stringify({
           model: this.#model,
           messages,
-          max_tokens: this.#maxOutputTokens,
+          // Sólo si se pidió, y con el nombre que entienda el destino.
+          ...(this.#maxOutputTokens !== null ? { [this.#maxOutputTokensParam]: this.#maxOutputTokens } : {}),
           tools: tools.map((tool) => ({
             type: 'function',
             function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },

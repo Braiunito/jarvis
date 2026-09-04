@@ -216,6 +216,17 @@ export const config = {
   cloudModelBaseUrl: env['JARVIS_CLOUD_MODEL_BASE_URL'] || env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com',
   cloudModelApiKey: env['JARVIS_CLOUD_MODEL_API_KEY'] || env['JARVIS_MODEL_API_KEY'] || '',
   cloudModelName: env['JARVIS_CLOUD_MODEL_NAME'] || env['JARVIS_MODEL_NAME'] || 'claude-sonnet-5',
+  /**
+   * Tope de generación en la nube. **Vacío por defecto: no se manda nada.**
+   *
+   * Lo aprendimos rompiéndolo: mandar `max_tokens` siempre tumbó la escalada el primer día que se
+   * usó, porque los modelos nuevos de OpenAI lo rechazan con un 400 y exigen
+   * `max_completion_tokens`. Quien quiera acotar el gasto de un turno en la nube lo pone aquí, y
+   * dice además cómo se llama el campo en su proveedor. No se deduce de la URL ni del texto del
+   * error: eso es una red que desaparece en silencio el día que el otro lado cambie una cadena.
+   */
+  cloudModelMaxOutputTokens: Number(env['JARVIS_CLOUD_MODEL_MAX_OUTPUT_TOKENS'] || 0) || 0,
+  cloudModelMaxTokensParam: env['JARVIS_CLOUD_MODEL_MAX_TOKENS_PARAM'] || 'max_tokens',
   cloudModelProvider: (env['JARVIS_CLOUD_MODEL_PROVIDER'] || env['JARVIS_MODEL_PROVIDER']
     || (/anthropic/i.test(env['JARVIS_CLOUD_MODEL_BASE_URL'] || env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com')
       ? 'anthropic' : 'openai')

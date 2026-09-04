@@ -381,7 +381,9 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
   },
   {
     name: 'finish',
-    description: 'Cierra el plan con una síntesis. Cita los trabajos por su id en evidence_run_ids '
+    description: 'Responde y cierra el turno. **Úsala también cuando no haga falta consultar '
+      + 'nada**: un saludo, una pregunta sobre ti, o algo que ya sabes contestar. Y úsala en '
+      + 'cuanto tengas el dato que te pidieron. Cita los trabajos por su id en evidence_run_ids '
       + 'en vez de copiar su salida: la interfaz enlaza a la evidencia completa.',
     inputSchema: {
       type: 'object',
@@ -1108,6 +1110,16 @@ export class CoreAssistantToolbox implements AssistantToolbox {
        */
       if (error instanceof JarvisError && error.code === 'NOT_FOUND') {
         /*
+         * Se le devuelve la búsqueda **hecha**, no la sugerencia de que busque.
+         *
+         * En producción va directo a `use_capability` con un nombre plausible sin buscar antes
+         * —`zeus.network_stats`, `zeus.container_status`—, así que darle sólo unos nombres le
+         * cuesta otra vuelta para pedir sus parámetros, y a diez segundos la vuelta eso es lo que
+         * agota el presupuesto del turno. Con las candidatas completas puede llamar a la buena
+         * inmediatamente. Lo que NO se hace es ejecutar la que más se parezca: adivinar qué quiso
+         * decir alguien que ya se equivocó al decirlo es como se ejecuta algo que nadie pidió.
+         */
+        /*
          * Se busca por el nombre **sin el servidor**, y no es un detalle.
          *
          * Al modelo se le enseña el catálogo cualificado, así que cuando se inventa una capacidad
@@ -1118,10 +1130,28 @@ export class CoreAssistantToolbox implements AssistantToolbox {
          * que hay que adivinar es la herramienta.
          */
         const nearby = await mcp.search(bare.replace(/[._]+/g, ' '), 3);
-        return toolError('NOT_FOUND', `no existe la capacidad ${name}`,
-          nearby.length
-            ? `no te la inventes: las que más se parecen son ${nearby.map((one) => one.name).join(', ')}`
-            : 'mira list_capabilities antes de llamar: los nombres son exactos');
+        if (!nearby.length) {
+          return toolError('NOT_FOUND', `no existe la capacidad ${name}`,
+            'mira list_capabilities antes de llamar: los nombres son exactos');
+        }
+        return {
+          type: 'observation',
+          content: {
+            ok: false,
+            error: {
+              code: 'NOT_FOUND',
+              message: `no existe la capacidad ${name}`,
+              hint: 'no te la inventes; éstas sí existen y una de ellas es la que buscabas. '
+                + 'Llámala con su nombre exacto.',
+            },
+            capabilities: nearby.map((capability) => ({
+              name: capability.name,
+              summary: capability.summary,
+              writes: capability.writes,
+              params: compactParams(capability.inputSchema),
+            })),
+          },
+        };
       }
       throw error;
     }

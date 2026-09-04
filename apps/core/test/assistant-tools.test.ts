@@ -777,3 +777,62 @@ describe('la síntesis de un modelo que contestó con texto', () => {
     expect(cleanSummary(limpio)).toBe(limpio);
   });
 });
+
+
+/**
+ * El tope de generación, que rompió la escalada el primer día que se usó.
+ *
+ * Mandar `max_tokens` siempre parecía inofensivo y no lo es: los modelos nuevos de OpenAI lo
+ * rechazan con un 400 —«Unsupported parameter: use max_completion_tokens instead»— y el turno
+ * muere justo después de que alguien haya firmado la escalada. Un tope hace falta en casa, donde
+ * divagar cuesta minutos, y no hace falta en la nube.
+ */
+describe('el tope de generación de un endpoint compatible', () => {
+  const capture = (): { bodies: Array<Record<string, unknown>>; fetchImpl: FetchLike } => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl: FetchLike = (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return Promise.resolve(new Response(JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: 'listo' } }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    };
+    return { bodies, fetchImpl };
+  };
+
+  const context: PlanContext = {
+    objective: 'hola', history: [], pendingInput: null, pendingApprovals: [],
+    limits: { stepsUsed: 0, maxSteps: 1, maxToolCalls: 1, maxToolOutputBytes: 1000 },
+  };
+  const toolbox = {
+    definitions: () => [],
+    invoke: () => Promise.resolve({ type: 'observation' as const, content: {} }),
+    terminalOffer: null,
+    observations: 0,
+  };
+
+  it('por defecto NO manda ningún tope', async () => {
+    const { bodies, fetchImpl } = capture();
+    await new OpenAiCompatibleModel({ apiKey: 'k', baseUrl: 'https://api.openai.com', model: 'gpt-5', fetchImpl })
+      .decide(context, toolbox);
+    expect(bodies[0]).not.toHaveProperty('max_tokens');
+    expect(bodies[0]).not.toHaveProperty('max_completion_tokens');
+  });
+
+  it('manda el que se le pida, con el nombre que se le diga', async () => {
+    const { bodies, fetchImpl } = capture();
+    await new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'https://api.openai.com', model: 'gpt-5', fetchImpl,
+      maxOutputTokens: 2048, maxOutputTokensParam: 'max_completion_tokens',
+    }).decide(context, toolbox);
+    expect(bodies[0]?.['max_completion_tokens']).toBe(2048);
+    expect(bodies[0]).not.toHaveProperty('max_tokens');
+  });
+
+  it('el modelo de casa sí lo lleva, y con el nombre que entiende llama-server', async () => {
+    const { bodies, fetchImpl } = capture();
+    await new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'http://192.168.1.100:8181', model: 'qwen', fetchImpl, maxOutputTokens: 400,
+    }).decide(context, toolbox);
+    expect(bodies[0]?.['max_tokens']).toBe(400);
+  });
+});

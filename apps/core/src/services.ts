@@ -91,6 +91,11 @@ function buildCloudModel(config: CoreConfig): AssistantModel | null {
     baseUrl: config.cloudModelBaseUrl,
     model: config.cloudModelName,
     maxToolCalls: config.assistantMaxToolCalls,
+    // Sin tope salvo que alguien lo pida: ver `cloudModelMaxOutputTokens`.
+    ...(config.cloudModelMaxOutputTokens ? {
+      maxOutputTokens: config.cloudModelMaxOutputTokens,
+      maxOutputTokensParam: config.cloudModelMaxTokensParam,
+    } : {}),
   };
   return config.cloudModelProvider === 'anthropic'
     ? new AnthropicModel(options)
