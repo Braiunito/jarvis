@@ -25,6 +25,7 @@ import { ACTION_ICON, Glyph, NAV_ICON, PLAN_STATUS_ICON, STATUS_ICON } from './u
 import { PageMetaProvider, usePageMetaValue } from './ui/page-meta.jsx';
 import { formatDuration } from './ui/primitives.jsx';
 import { LoginScreen } from './screens/login.jsx';
+import { EnrollScreen } from './screens/enroll.jsx';
 import { HomeScreen } from './screens/home.jsx';
 import { ExplorerScreen } from './screens/explorer.jsx';
 import { WorkspaceScreen } from './screens/workspace.jsx';
@@ -309,6 +310,14 @@ export function App(): JSX.Element {
   }, []);
 
   if (!checked) return <div className="page"><p className="muted">Comprobando la sesión…</p></div>;
+  /*
+   * `/enroll` va ANTES de la comprobación de sesión, y tiene que ser así: quien
+   * llega con un código de enrolamiento todavía no puede entrar —esa es la
+   * situación—, así que mandarlo al login lo dejaba sin ningún sitio donde
+   * escribirlo. Lo que protege esta ruta es el código, que caduca a los 15
+   * minutos y muere en su primer uso correcto.
+   */
+  if (window.location.pathname.replace(/\/+$/, '') === '/enroll') return <EnrollScreen />;
   if (!me) return <LoginScreen onAuthenticated={refresh} />;
 
   return (
