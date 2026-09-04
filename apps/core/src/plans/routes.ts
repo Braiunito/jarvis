@@ -61,6 +61,17 @@ export function registerPlanRoutes(app: FastifyInstance, services: CoreServices)
     if (body.decision !== 'approved' && body.decision !== 'rejected') {
       throw new JarvisError('BAD_REQUEST', 'decision debe ser approved o rejected');
     }
+    /*
+     * Una tarjeta de aprobación se ve igual venga de donde venga, pero **lo que ocurre al firmarla
+     * no es lo mismo**: un plan lanza el run que autorizaba; una conversación puede además
+     * ejecutar una capacidad del sistema o abrir la puerta a la nube. La ruta es una sola —la
+     * interfaz no tiene por qué saber de dónde salió— y el despacho se hace aquí, por el dueño de
+     * la aprobación, que es un dato de la propia tarjeta.
+     */
+    const existing = services.plans.approval(id);
+    if (existing?.conversationId) {
+      return reply.send({ approval: await services.chat.resolveApproval(id, body.decision, identityOf(request)) });
+    }
     const approval = services.plans.resolveApproval(id, body.decision, identityOf(request));
     if (approval.planId) {
       void services.plans.advance(approval.planId, identityOf(request)).catch(() => undefined);

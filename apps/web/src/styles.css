@@ -1023,6 +1023,61 @@ a:hover { text-decoration: underline; }
 }
 
 /*
+ * El trabajo del agente, en una sola tarjeta que cambia.
+ *
+ * Entre lo que se pide y lo que se contesta hay treinta eventos que, uno por tarjeta, empujaban
+ * la respuesta fuera de la pantalla justo mientras se esperaba. Aquí el tramo entero ocupa una
+ * fila que se reescribe con lo último que ha llegado: la silueta del hilo no crece —lo que
+ * pediste, el trabajo, la respuesta— por largo que sea por dentro.
+ *
+ * Nada se esconde: el tramo se despliega entero, con sus horas y sus puntos, y cada evento sigue
+ * llevando su crudo a un clic.
+ */
+.event-card.steps { gap: 0; }
+/*
+ * La cabecera del tramo no envuelve.
+ *
+ * El aspa y el contador dicen «esto sigue vivo y va por aquí», y eso se mira arriba a la derecha,
+ * siempre en el mismo sitio; dejándolos envolver, un resumen largo los tiraba a una segunda línea
+ * y el indicador cambiaba de sitio cada vez que llegaba un evento. El que cede es el resumen, que
+ * se corta y se lee entero desplegando.
+ */
+.event-card.steps .event-head { flex-wrap: nowrap; }
+.event-card.steps .event-headline { font-weight: 500; color: var(--text); flex: 1 1 auto; }
+.event-card.steps[aria-expanded='true'] {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+/* Arriba a la derecha: donde ya se mira para saber si algo sigue vivo. */
+.steps-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+.steps-meta .spin { color: var(--running); }
+
+/*
+ * El cambio se ve, no se adivina.
+ *
+ * Una línea que se sustituye sin más parece un parpadeo del navegador; entrando desde arriba se
+ * lee como lo que es —ha pasado algo nuevo— y el ojo no tiene que releer para saberlo. Con
+ * `prefers-reduced-motion` esto se queda en nada, como todo lo demás.
+ */
+.steps-latest { animation: step-swap 200ms ease-out; }
+@keyframes step-swap {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Lo desplegado cuelga del tramo: mismo carril, un paso adentro y el punto algo más pequeño. */
+.tl-row.nested { animation: step-swap 160ms ease-out both; }
+.tl-row.nested .event-card { margin-left: 16px; }
+.tl-row.nested .tl-dot { transform: scale(0.82); }
+
+/*
  * Chips de campo y valor.
  *
  * Es lo que se enseña cuando el evento no se puede contar en una frase: un objeto plano se lee
@@ -1658,6 +1713,216 @@ a:hover { text-decoration: underline; }
     white-space: nowrap;
   }
   .chip { padding: 0 8px; }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * El Asistente (ADR-009).
+ *
+ * Dos columnas en escritorio —los hilos a la izquierda, la conversación a la derecha— y una sola
+ * en el móvil, donde la lista se convierte en una tira que se desliza: en una pantalla de teléfono
+ * el hilo abierto es lo único que importa, y robarle un tercio del ancho a una conversación para
+ * enseñar títulos es el error de traer el escritorio encogido.
+ *
+ * La conversación ocupa el alto disponible y **sólo hace scroll la lista de mensajes**: el
+ * compositor y la cabecera se quedan donde están. Un compositor que se va hacia arriba mientras
+ * llega la respuesta obliga a perseguirlo justo cuando se quiere escribir.
+ * ------------------------------------------------------------------------- */
+
+.assistant-page {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  /* El alto del área de trabajo menos el respiro de la página: lo que sobra es del hilo. */
+  min-height: calc(100vh - 190px);
+}
+
+.chat-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.chat-rail-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; overflow-y: auto; }
+
+.chat-rail-list a {
+  display: grid;
+  gap: 1px;
+  padding: 8px 9px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.chat-rail-list a:hover { background: var(--bg-elevated); }
+.chat-rail-list a.current { background: var(--bg-elevated); border-color: var(--border-accent); }
+
+.chat-rail-title {
+  font-size: 13px;
+  font-weight: 550;
+  /* Un título largo no puede empujar la columna: se corta y se lee el principio, que es lo útil. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-capabilities {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chat-capabilities ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; width: 100%; }
+
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.chat-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.chat-head h2 { margin: 0 0 4px; font-size: 15px; }
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-bubble {
+  max-width: 46rem;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+/* Lo propio va a la derecha y con el acento: el hilo se recorre sin leer quién dijo cada cosa. */
+.chat-bubble.user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+}
+
+.chat-bubble-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+/* La respuesta puede traer saltos de línea y hay que respetarlos, pero no desbordar por un log. */
+.chat-bubble-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.chat-tool { align-self: flex-start; max-width: 46rem; width: 100%; }
+
+.chat-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 9px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-tool-head:hover { color: var(--text); border-color: var(--border-strong); }
+.chat-tool.failed .chat-tool-head { color: var(--danger); border-color: var(--danger); }
+
+.chat-tool-body {
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.chat-tool-body pre { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); }
+
+.chat-event {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.chat-thinking { display: flex; align-items: center; gap: 6px; align-self: flex-start; padding: 4px 2px; }
+
+.chat-approval { align-self: stretch; max-width: 46rem; }
+.chat-approval-args {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow: auto;
+  margin: 0 0 10px;
+  color: var(--text-muted);
+}
+
+.chat-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.chat-composer textarea {
+  flex: 1;
+  min-height: var(--touch);
+  resize: vertical;
+  font: inherit;
+}
+
+@media (max-width: 900px) {
+  .assistant-page {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: calc(100vh - 150px);
+  }
+
+  /*
+   * En el móvil la lista de hilos es una tira horizontal, no una columna.
+   *
+   * Ocupa dos líneas de alto en vez de un tercio del ancho, y el hilo abierto —que es a lo que se
+   * ha entrado— se queda con la pantalla entera.
+   */
+  .chat-rail { max-height: 132px; }
+  .chat-rail-list { grid-auto-flow: column; grid-auto-columns: 62%; overflow-x: auto; }
+  .chat-rail-list a { border: 1px solid var(--border); }
+  .chat-capabilities { display: none; }
+  .chat-bubble, .chat-tool, .chat-approval { max-width: 100%; }
 }
 
 .visually-hidden {

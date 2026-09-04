@@ -365,4 +365,73 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE workspaces ADD COLUMN cwd_source TEXT;
     `,
   },
+  {
+    version: 11,
+    name: 'conversations',
+    sql: `
+      -- La conversación con el asistente local (ADR-009).
+      --
+      -- No es un plan. Un plan es una lista de pasos con checkpoint que puede pasarse cuatro horas
+      -- esperando a que termine un run; una conversación es un ida y vuelta que se lee de arriba
+      -- abajo. Comparten lo que importa —herramientas, aprobaciones, auditoría— y por eso una
+      -- conversación puede acabar creando un plan, pero meterlas en la misma tabla obligaría a que
+      -- una de las dos fingiera ser la otra.
+      --
+      -- \`workspace_id\` admite NULL a propósito: preguntar por el servidor no exige haber abierto
+      -- antes una sesión de agente. Y va con ON DELETE SET NULL y no CASCADE porque borrar un
+      -- workspace no debe llevarse por delante lo que se habló: la conversación deja de estar
+      -- atada a esa sesión, no deja de haber ocurrido.
+      CREATE TABLE conversations (
+        id              TEXT PRIMARY KEY,
+        title           TEXT NOT NULL,
+        created_by      TEXT NOT NULL,
+        workspace_id    TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+        autonomy        TEXT NOT NULL DEFAULT 'manual',
+        status          TEXT NOT NULL DEFAULT 'idle',
+        source          TEXT NOT NULL DEFAULT 'local',
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        last_message_at TEXT
+      );
+      CREATE INDEX idx_conversations_updated ON conversations (updated_at DESC);
+      CREATE INDEX idx_conversations_workspace ON conversations (workspace_id);
+
+      -- Un mensaje. \`seq\` es identidad pública dentro de la conversación y no se reutiliza jamás:
+      -- es lo que hace que reconectar el stream con Last-Event-ID devuelva exactamente lo que
+      -- falta. El UNIQUE lo garantiza incluso si dos turnos entraran a la vez, que es justo el
+      -- caso en el que un contador en memoria se equivoca.
+      CREATE TABLE chat_messages (
+        id              TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        seq             INTEGER NOT NULL,
+        role            TEXT NOT NULL,
+        text            TEXT NOT NULL,
+        tool_name       TEXT,
+        tool_input      TEXT,
+        tool_ok         INTEGER,
+        source          TEXT,
+        model_id        TEXT,
+        approval_id     TEXT,
+        run_ids         TEXT NOT NULL DEFAULT '[]',
+        created_at      TEXT NOT NULL,
+        UNIQUE (conversation_id, seq)
+      );
+      CREATE INDEX idx_chat_messages_conv ON chat_messages (conversation_id, seq);
+
+      -- Una aprobación puede nacer en una conversación y no en un plan. Quien la resuelve necesita
+      -- saber a dónde volver, y sobre todo: el motor que la ejecuta al aprobarla es distinto —un
+      -- plan lanza un run, una conversación puede además ejecutar una capacidad MCP—.
+      ALTER TABLE approvals ADD COLUMN conversation_id TEXT;
+      CREATE INDEX idx_approvals_conversation ON approvals (conversation_id)
+        WHERE conversation_id IS NOT NULL;
+
+      -- Para qué paso se concedió salir a la nube.
+      --
+      -- Un número y no un booleano porque el permiso es **para un turno**, no para el plan: se
+      -- guarda el ordinal del paso que puede pensarse fuera, y el siguiente vuelve a casa solo,
+      -- sin que nadie tenga que acordarse de apagarlo. Un booleano "escalated = 1" se queda
+      -- encendido para siempre y convierte una autorización puntual en una suscripción.
+      ALTER TABLE plans ADD COLUMN escalate_for_step INTEGER;
+    `,
+  },
 ];

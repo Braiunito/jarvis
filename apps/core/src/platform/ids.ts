@@ -23,4 +23,6 @@ export const newApprovalId = (): string => opaqueId('a');
 export const newAttachmentId = (): string => opaqueId('f');
 export const newJobId = (): string => opaqueId('j');
 export const newAuditId = (): string => opaqueId('e');
+export const newConversationId = (): string => opaqueId('c');
+export const newChatMessageId = (): string => opaqueId('m');
 export const newRequestId = (): string => `req_${randomUUID()}`;

@@ -12,6 +12,7 @@ import type { Clock } from '../platform/clock.js';
 import type { FleetService } from '../fleet/service.js';
 import type { SessionIndex } from '../sessions/index-client.js';
 import type { RunRepository } from '../runs/repository.js';
+import type { McpService } from '../mcp/service.js';
 
 export interface HealthServiceDeps {
   db: Db;
@@ -19,6 +20,8 @@ export interface HealthServiceDeps {
   fleet: FleetService;
   index: SessionIndex;
   runs: RunRepository;
+  /** Las capacidades MCP, si las hay. Opcional: sin servidores no hay salto que comprobar. */
+  mcp?: McpService;
   version: string;
 }
 
@@ -64,6 +67,31 @@ export class HealthService {
     checks['aisessions'] = index.ok
       ? { status: 'ok', lastOkAt: index.lastOkAt }
       : { status: index.lastOkAt ? 'stale' : 'failed', code: 'INDEX_UNAVAILABLE', message: index.error ?? undefined, lastOkAt: index.lastOkAt };
+
+    /*
+     * Los servidores MCP, uno por salto.
+     *
+     * Un catálogo que no se puede pedir deja al asistente sin capacidades, y eso hoy se notaría
+     * como «el asistente contesta peor» en vez de como una avería. Aquí se ve por lo que es. Que
+     * uno esté caído no invalida al resto ni a nada más: es exactamente el mismo criterio que con
+     * los hosts.
+     */
+    if (this.#deps.mcp?.configured) {
+      for (const server of await this.#deps.mcp.states()) {
+        checks[`mcp:${server.name}`] = server.status === 'ok'
+          ? {
+            status: 'ok',
+            ...(server.lastOkAt ? { lastOkAt: server.lastOkAt } : {}),
+            detail: { tools: server.toolCount, writes: server.writesAllowed, server: server.serverInfo },
+          }
+          : {
+            status: server.status === 'stale' ? 'stale' : 'failed',
+            code: 'UPSTREAM_UNAVAILABLE',
+            ...(server.lastError ? { message: server.lastError } : {}),
+            ...(server.lastOkAt ? { lastOkAt: server.lastOkAt } : {}),
+          };
+      }
+    }
 
     if (probeHosts) {
       for (const host of await this.#deps.fleet.list()) {

@@ -101,6 +101,43 @@ Una aprobación registra qué acción, sobre qué destino, con qué permiso y ha
 cubre todo eso: cambiar cualquier parte la invalida. Es de un solo uso —se consume en la misma
 transacción que el efecto— y una caducada no ejecuta aunque llegue tarde un «sí».
 
+## El asistente local y las capacidades de sistema (ADR-009)
+
+Enchufar un modelo a 108 herramientas de diagnóstico cambia la superficie, así que conviene decir
+qué se protege y qué queda abierto a propósito.
+
+**Lo que se protege.**
+
+- Un servidor MCP es de **sólo lectura** salvo que su nombre esté en `JARVIS_MCP_WRITE_SERVERS`.
+  El interruptor está en este core y no se delega en la configuración del servidor: apoyarse en el
+  `MCP_ENABLE_WRITES=0` del otro lado sería confiar la seguridad de esto a un proceso ajeno que
+  alguien puede cambiar sin enterarse de que existíamos.
+- Una herramienta con efectos exige una aprobación firmada, con digest y caducidad, igual que un
+  run con permiso de escritura. El digest cubre el nombre **y los argumentos**: entre la tarjeta
+  que se leyó y lo que se ejecuta no cabe un cambio.
+- Cuatro herramientas no se sirven nunca: `reboot_server`, `poweroff_server`, `apt_install` y
+  `apt_update_cache`. No hay aprobación que las abra desde una conversación.
+- Si una herramienta no dice qué es, se trata como si escribiera. El MCP de Zeus etiqueta
+  `reboot_server` como `admin` y **no** como `write`: un clasificador que sólo mirase `write`
+  daría por inofensivo apagar el servidor.
+- Todo lo que se ejecuta queda en la auditoría con sus argumentos, distinguiendo `mcp.read` de
+  `mcp.write`. Dentro de un mes se puede decir quién miró los logs de qué contenedor y cuándo.
+- Lo que devuelve una máquina se le entrega al modelo marcado como **dato ajeno**, igual que un
+  diff o un adjunto. Un log con «ignora las instrucciones anteriores» dentro es un hallazgo que
+  reportar, no una orden.
+- No se sale a la nube sin firma. Ni cuando el modelo lo pide ni cuando el modelo local se cae: el
+  contexto de un turno lleva transcripts, rutas y diffs, y que eso cruce la puerta es una decisión.
+
+**Lo que queda abierto, y es conocido.**
+
+- **El MCP de sistema de Zeus no tiene autenticación**: cualquiera en la LAN puede consultarlo en
+  el 8765. Está anotado en el README del propio servidor. Mientras las escrituras estén
+  deshabilitadas allí, lo que expone es diagnóstico; con escrituras habilitadas habría que poner
+  bearer o cortafuegos **antes**.
+- **El modelo local escucha en la LAN con un bearer sobre HTTP plano.** Es lo que permite que el
+  core, que vive en un contenedor, lo alcance. El token no viaja cifrado dentro de la red de casa;
+  vale lo mismo que la escotilla de contraseña mientras no haya certificado.
+
 ## Qué no se registra nunca
 
 Prompts completos, salida del agente, cookies, tokens, claves de API, material de passkey o TOTP,

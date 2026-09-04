@@ -18,7 +18,7 @@ import { useRunStream } from '../api/run-stream.js';
 import { Empty, ErrorNote, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
 import { Meter, Sparkbars } from '../ui/charts.jsx';
 import {
-  PERMISSION, RUN_STATUS, runTitle, USAGE_LOW_PERCENT, usageWindowName,
+  PERMISSION, RUN_STATUS, isRunLive, runTitle, USAGE_LOW_PERCENT, usageWindowName,
 } from '../ui/labels.js';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, STATUS_ICON,
@@ -451,7 +451,14 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                 <p className="small muted" style={{ margin: '0 0 8px' }}>
                   Eventos {stream.connected ? '· en directo' : stream.ended ? '· cerrado' : '· reconectando…'}
                 </p>
-                <EventTimeline events={stream.events} limit={40} userMessage={run.promptPreview}
+                {/*
+                  * La `key` es lo que hace que cambiar de trabajo empiece de cero: compacto y
+                  * todo plegado. Sin ella, el detalle desplegado del anterior se quedaba puesto
+                  * —y peor, los tramos se reconocen por su `seq`, que vuelve a empezar en 0 en
+                  * cada run, así que se desplegaba un tramo por parecerse al que se abrió antes.
+                  */}
+                <EventTimeline key={run.id} events={stream.events} limit={40} userMessage={run.promptPreview}
+                  live={isRunLive(run.status)}
                   empty="Este trabajo no llegó a dejar ningún evento. Si terminó mal, el detalle está en su código de error." />
               </div>
             </div>

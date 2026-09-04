@@ -27,6 +27,7 @@ import { formatDuration } from './ui/primitives.jsx';
 import { LoginScreen } from './screens/login.jsx';
 import { EnrollScreen } from './screens/enroll.jsx';
 import { HomeScreen } from './screens/home.jsx';
+import { AssistantScreen } from './screens/assistant.jsx';
 import { ExplorerScreen } from './screens/explorer.jsx';
 import { WorkspaceScreen } from './screens/workspace.jsx';
 import { RunCenterScreen } from './screens/runs.jsx';
@@ -59,10 +60,12 @@ const queryClient = new QueryClient({
 
 const RAIL_KEY = 'jarvis.rail.collapsed';
 
-function Rail({ working, attention, insecure, terminals }: {
+function Rail({ working, attention, insecure, terminals, waitingApproval }: {
   working: number;
   attention: number;
   insecure: boolean;
+  /** Aprobaciones pendientes en toda la casa: planes y conversaciones. */
+  waitingApproval: number;
   /** Terminales abiertas, o null si todavía no se ha contado ninguna vez. */
   terminals: number | null;
 }): JSX.Element {
@@ -92,6 +95,17 @@ function Rail({ working, attention, insecure, terminals }: {
         <Link to="/" aria-current={current('/')}>
           <Glyph icon={NAV_ICON.home} size={17} />
           <span>Inicio</span>
+        </Link>
+        <Link to="/assistant" aria-current={current('/assistant')}>
+          <Glyph icon={NAV_ICON.assistant} size={17} />
+          <span>Asistente</span>
+          {/*
+            * Una aprobación esperando es lo más urgente que puede haber aquí: algo se ha
+            * detenido a la espera de una firma, y hasta que llegue no avanza.
+            */}
+          {waitingApproval > 0 ? (
+            <span className="count attention" title={`${waitingApproval} esperan tu permiso`}>{waitingApproval}</span>
+          ) : null}
         </Link>
         <Link to="/sessions" aria-current={current('/sessions')}>
           <Glyph icon={NAV_ICON.sessions} size={17} />
@@ -195,6 +209,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
   const openTerminals = terminals && terminals.at !== null ? terminals.open : null;
 
   const content = (() => {
+    if (section === 'assistant') return <AssistantScreen />;
     if (section === 'sessions') return <ExplorerScreen />;
     if (section === 'w' && route.segments[1]) return <WorkspaceScreen workspaceId={route.segments[1]} />;
     if (section === 'runs') return <RunCenterScreen runId={route.segments[1] ?? null} />;
@@ -216,7 +231,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
         Saltar al contenido
       </a>
       <Rail working={working} attention={attention} insecure={Boolean(me.insecureLogin)}
-        terminals={openTerminals} />
+        terminals={openTerminals} waitingApproval={waitingApproval} />
 
       <div className="workarea">
         <header className="topbar">

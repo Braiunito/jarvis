@@ -25,7 +25,7 @@ import {
   Minimize2, Paperclip, Pencil,
   Plus, RotateCcw, Search, SendHorizontal, Server, Settings2, ShieldCheck, ShieldOff, Sparkles,
   SlidersHorizontal, SquareTerminal, Timer, TimerOff, TriangleAlert, Wrench, X, Zap, Braces,
-  Code, type LucideIcon,
+  Code, Cloud, HousePlug, Puzzle, Trash2, type LucideIcon,
 } from 'lucide-react';
 import type { PermissionProfile, RunStatus } from '@jarvis/contracts';
 
@@ -110,6 +110,19 @@ export const NAV_ICON = {
   terminal: SquareTerminal,
   health: HeartPulse,
   settings: Settings2,
+  assistant: Bot,
+} as const;
+
+/**
+ * De dónde salió una respuesta.
+ *
+ * Se distinguen por forma y no por color porque es exactamente el dato que alguien puede querer
+ * comprobar de un vistazo antes de fiarse —o antes de mirar la factura—: una casa es el modelo de
+ * casa, una nube es una consulta que salió de aquí.
+ */
+export const SOURCE_ICON = {
+  local: HousePlug,
+  cloud: Cloud,
 } as const;
 
 /**
@@ -158,6 +171,8 @@ export const ACTION_ICON = {
   collapse: ChevronLeft,
   expand: ChevronRight,
   external: ExternalLink,
+  capability: Puzzle,
+  delete: Trash2,
   filter: Filter,
   filters: SlidersHorizontal,
   new: Plus,

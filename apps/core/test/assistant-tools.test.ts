@@ -15,7 +15,8 @@ import { newRunId } from '../src/platform/ids.js';
 import { buildServices, type CoreServices } from '../src/services.js';
 import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
 import {
-  AnthropicModel, OpenAiCompatibleModel, renderContext, type FetchLike,
+  AnthropicModel, cleanSummary, clipToolResult, OpenAiCompatibleModel, renderContext,
+  sanitizeToolCalls, type FetchLike,
 } from '../src/assistant/model.js';
 import type { AssistantToolbox, PlanContext, ToolOutcome } from '../src/assistant/types.js';
 
@@ -705,5 +706,74 @@ describe('A7 · Anthropic pide dos herramientas a la vez', () => {
     expect(decision.kind).toBe('finish');
     // Un turno persiste un checkpoint, no dos: lo que va detrás de la decisión no llega a correr.
     expect(toolbox.calls).toEqual(['finish']);
+  });
+});
+
+
+/**
+ * Lo que se le devuelve al servidor tiene que poder volver a entrar.
+ *
+ * Un modelo pequeño trunca lo que genera, y `arguments` es una cadena JSON por contrato. Se le vio
+ * contestar `"{"` contra el servidor de casa: reenviarlo tal cual hacía que `llama-server`
+ * respondiera 500 y el turno entero moría por un carácter.
+ */
+describe('el eco de una llamada a herramienta', () => {
+  const toolCall = (args: string | undefined) => ({ id: 'c1', function: { name: 'use_capability', arguments: args } });
+
+  it('sustituye por un objeto vacío lo que no es JSON válido', () => {
+    expect(sanitizeToolCalls([toolCall('{')])[0]?.function?.arguments).toBe('{}');
+    expect(sanitizeToolCalls([toolCall('')])[0]?.function?.arguments).toBe('{}');
+    expect(sanitizeToolCalls([toolCall(undefined)])[0]?.function?.arguments).toBe('{}');
+    expect(sanitizeToolCalls([toolCall('no soy json')])[0]?.function?.arguments).toBe('{}');
+  });
+
+  it('no toca lo que sí es válido', () => {
+    expect(sanitizeToolCalls([toolCall('{"name":"memory_pressure"}')])[0]?.function?.arguments)
+      .toBe('{"name":"memory_pressure"}');
+  });
+
+  it('conserva el id, porque a cada llamada le corresponde su resultado', () => {
+    // Descartar la llamada rota descuadraría el historial: la API exige un `tool_result` por cada
+    // `tool_call_id`, y sin él la petición siguiente se rechaza entera.
+    expect(sanitizeToolCalls([toolCall('{')])[0]?.id).toBe('c1');
+    expect(sanitizeToolCalls([toolCall('{')])[0]?.function?.name).toBe('use_capability');
+  });
+});
+
+/** Un resultado enorme se recorta **diciéndolo**: recortar en silencio hace concluir sobre lo que no se vio. */
+describe('el recorte de un resultado de herramienta', () => {
+  it('avisa de cuánto ocupaba', () => {
+    const clipped = clipToolResult({ texto: 'x'.repeat(5000) }, 500);
+    expect(clipped).toContain('[recortado: ocupaba');
+    expect(clipped.length).toBeLessThan(600);
+  });
+
+  it('deja pasar entero lo que cabe', () => {
+    expect(clipToolResult({ ok: true }, 500)).toBe('{"ok":true}');
+  });
+});
+
+
+/**
+ * Cuando el modelo escribe el aspecto de una llamada en vez de hacerla.
+ *
+ * Es lo que hace un modelo pequeño que ha visto muchas: suelta `<finish>` y `summary:` como prosa.
+ * Eso acaba en la pantalla y lo lee una persona.
+ */
+describe('la síntesis de un modelo que contestó con texto', () => {
+  it('quita el remedo de llamada a herramienta y deja la frase', () => {
+    const crudo = 'evidence_run_ids: ["zeus.system_health_snapshot"]\n</finish></think>\n\n'
+      + 'La memoria del servidor tiene 15,37 GiB en total y 9,02 GiB disponibles.\n\n'
+      + 'Fin del plan.\n\n<finish>\nsummary: La memoria del servidor tiene';
+    expect(cleanSummary(crudo)).toBe('La memoria del servidor tiene 15,37 GiB en total y 9,02 GiB disponibles.');
+  });
+
+  it('quita el bloque de razonamiento entero', () => {
+    expect(cleanSummary('<think>a ver, primero miro la ram</think>Van 9 GiB libres.')).toBe('Van 9 GiB libres.');
+  });
+
+  it('no toca una respuesta normal', () => {
+    const limpio = 'Hay 9,02 GiB libres de 15,37 GiB. No hay presión de memoria.';
+    expect(cleanSummary(limpio)).toBe(limpio);
   });
 });

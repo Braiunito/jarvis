@@ -207,30 +207,104 @@ ssh <host> 'cat <spool>/<runId>/status.json'
 Y después, en la consola, **reintentar** —que crea un run nuevo enlazado al anterior— en vez de
 tocar la base a mano.
 
-## Conectar el MCP de sistema de Zeus (pendiente, no integrado)
+## El asistente local y las capacidades de sistema
 
-En Zeus corre un servidor MCP con 108 herramientas de diagnóstico —estado del
-host, servicios, Docker, red, disco, la iGPU y el sistema de cámaras— en
-**http://192.168.1.100:8765/mcp** (Streamable HTTP). Vive fuera de este repo, en
-`/home/zeus/mcp-sistema`, con su propio README.
+Desde ADR-009 el asistente piensa en el bastión y puede consultar la máquina. Son dos piezas
+distintas y se encienden por separado; sin ninguna de las dos, Jarvis funciona como antes.
 
-**Hoy Jarvis no lo consume, y es una decisión, no un olvido.** Este stack no
-tiene cliente MCP: [ADR-004](adr/0004-rest-sse-ws-mcp.md) define MCP como
-*adaptador para modelos externos* —Jarvis lo expone, no lo llama— y el toolbox
-del Assistant exige que una herramienta llame a un caso de uso del core, nunca a
-una API HTTP. Enchufarlo "a lo rápido" desde una tool rompería las dos reglas.
+### El cerebro de casa
 
-Las dos formas legítimas de hacerlo, si algún día hace falta:
+En Zeus corre un `llama-server` con Qwen3-1.7B como unidad `llama-server`:
 
-1. **Un modelo que hable MCP por su cuenta.** Es el caso que ADR-004 contempla:
-   el runtime del modelo (la app Jan, LM Studio, un wrapper del `llama-server`)
-   se conecta al puerto 8765 por configuración. Cero cambios en este repo. Es la
-   vía prevista para Jan-v1-4B cuando pase de los benchmarks a estar servido.
-2. **Un caso de uso en el core.** Un `SystemService` que hable MCP y unas pocas
-   tools en `assistant/toolbox.ts` que lo llamen, igual que las demás. Respeta
-   ADR-004 y la regla del toolbox, pero es una capacidad nueva del core: pide
-   contracts, tests y su propio ADR.
+```bash
+systemctl status llama-server          # en Zeus
+curl -s -H "authorization: Bearer $(cat /home/zeus/llama-api.key)" \
+  http://127.0.0.1:8181/v1/models | jq '.data[0].meta.n_ctx'
+```
 
-Mientras tanto el servidor está corriendo y endurecido (`systemctl status
-mcp-sistema` en Zeus): sirve para diagnosticar la máquina a mano aunque ningún
-modelo lo use todavía.
+Lo que hay que saber para operarlo:
+
+- **La URL que va en el `.env` es la de la LAN, no `127.0.0.1`.** El core vive en un contenedor y
+  ahí `localhost` es el contenedor. Por eso el servidor escucha en la red y exige
+  `Authorization: Bearer`; la clave está en `/home/zeus/llama-api.key`, con permisos 600.
+- **`JARVIS_LOCAL_MODEL_CONTEXT` tiene que coincidir con el `n_ctx` real.** Se consulta con el
+  comando de arriba. Ponerlo por encima de lo que sirve el modelo no degrada las respuestas: las
+  impide, porque el prompt se corta por la mitad.
+- Genera a 7-10 tokens/s, así que un turno son diez o quince segundos. El plazo por defecto son
+  180 s y no es exagerado.
+
+Comprobar que el core llega:
+
+```bash
+docker exec jarvis-next-core-1 sh -c \
+  'curl -s -o /dev/null -w "%{http_code}\n" -H "authorization: Bearer $JARVIS_LOCAL_MODEL_API_KEY" \
+   "$JARVIS_LOCAL_MODEL_BASE_URL/v1/models"'   # 200; sin el bearer, 401
+```
+
+### El MCP de sistema
+
+En Zeus corre un servidor MCP con 108 herramientas de diagnóstico —estado del host, servicios,
+Docker, red, disco, la iGPU y el sistema de cámaras— en **http://192.168.1.100:8765/mcp**
+(Streamable HTTP). Vive fuera de este repo, en `/home/zeus/mcp-sistema`, con su propio README.
+
+Se declara en el `.env` y el core lo consulta a través de `McpService`:
+
+```
+JARVIS_MCP_SERVERS=zeus=http://192.168.1.100:8765/mcp
+JARVIS_MCP_WRITE_SERVERS=            # vacío: nadie escribe
+```
+
+Tres cosas que conviene tener claras antes de tocarlo:
+
+- **Un servidor es de sólo lectura salvo que se le nombre** en `JARVIS_MCP_WRITE_SERVERS`. Con él
+  puesto, el asistente puede *pedir permiso* para reiniciar servicios y contenedores; seguirá
+  pidiéndolo siempre, pero antes ni siquiera podía pedirlo.
+- **Cuatro herramientas no se sirven jamás**: `reboot_server`, `poweroff_server`, `apt_install` y
+  `apt_update_cache`. Lo que se ponga en `JARVIS_MCP_DENY` se **suma** a ésas.
+- **El puerto 8765 no tiene autenticación**: cualquiera en la LAN puede consultarlo. Está anotado
+  en el README del propio servidor y sigue siendo cierto.
+
+Ver qué hay enchufado y cómo está:
+
+```bash
+curl -s localhost:8080/api/capabilities | jq '.servers'
+curl -s localhost:8080/api/health | jq '.checks | with_entries(select(.key|startswith("mcp:")))'
+```
+
+Un servidor MCP caído sale como un salto roto más: deja el catálogo anterior en `stale` y no tumba
+nada. El asistente sigue contestando lo que sepa sin mirar la máquina.
+
+### Comprobar que está enchufado de verdad
+
+El síntoma que más despista, porque no parece una avería: **el asistente contesta con normalidad y
+la carga de `llama` no sube**. Eso no es que el modelo local falle; es que el core no lo está
+usando y sigue pensando en la nube. Pasa cuando el `.env` no tiene las variables o cuando se
+cambiaron sin recrear el contenedor —un ajuste que no llega es peor que uno que no existe—.
+
+```bash
+docker exec jarvis-next-core-1 printenv | grep -c JARVIS_LOCAL_MODEL_BASE_URL   # 1, no 0
+curl -s localhost:8080/api/chat | jq '.capabilities'   # localAvailable y capabilityCount
+```
+
+Con `JARVIS_VERBOSE=true`, el core dice además dónde se va el tiempo de cada vuelta:
+
+```
+[jarvis] modelo local · 24253 ms · prompt 2069 (caché 1902) · generados 105
+```
+
+`caché` es lo que el servidor **no** tuvo que volver a leer. Si en la segunda vuelta de un turno
+ese número es bajo, se está pagando el prompt entero cada vez y el problema está en el servidor de
+inferencia, no en el modelo ni en Jarvis.
+
+### Después de enchufarlo, medir
+
+Enchufarlo cambia las condiciones —más herramientas ofrecidas, más contexto, una capa más— y eso
+puede costar latencia o aciertos sin que se note en una prueba a mano. En Zeus hay un banco de
+pruebas fuera de este repo, `~/harness-ia/`, que ejercita la misma cadena contra el MCP real con
+ocho preguntas de casa; sus números de referencia están en su README y se tomaron **antes** de la
+integración.
+
+Correrlo con el core ya conectado y comparar contra esa referencia es lo que dice si la
+integración añadió espera o se comió aciertos. Una advertencia al comparar: la misma tanda dio
+32,4 s y 46,6 s en dos ejecuciones seguidas sin tocar nada, porque `llama` cede CPU a las cámaras
+(`CPUWeight=30`). Comparar sólo con carga parecida, o dos veces cada configuración.

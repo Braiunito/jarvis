@@ -93,6 +93,102 @@ export const config = {
   maxToolOutputBytes: Number(env['JARVIS_MAX_TOOL_OUTPUT_BYTES'] || 32 * 1024),
   maxEventTextBytes: Number(env['JARVIS_MAX_EVENT_TEXT_BYTES'] || 256 * 1024),
 
+  /**
+   * Servidores MCP que este core **consume** (ADR-009).
+   *
+   * Se declaran con un formato pobre a propósito —`nombre=url`, separados por comas— porque un
+   * JSON dentro de una variable de Compose se escapa mal y el día que le falte una coma el core
+   * arranca sin capacidades y sin decir por qué. La interpretación vive en `mcp/config.ts`.
+   */
+  mcpServers: env['JARVIS_MCP_SERVERS'] || '',
+  mcpTokens: env['JARVIS_MCP_TOKENS'] || '',
+  /**
+   * Qué servidores pueden ejecutar herramientas con efectos. Vacío por defecto, y no por prudencia
+   * decorativa: un MCP de sistema puede parar contenedores y reiniciar servicios.
+   */
+  mcpWriteServers: env['JARVIS_MCP_WRITE_SERVERS'] || '',
+  mcpAllow: env['JARVIS_MCP_ALLOW'] || '',
+  mcpDeny: env['JARVIS_MCP_DENY'] || '',
+  mcpTtlMs: Number(env['JARVIS_MCP_TTL_MS'] || 10 * 60 * 1000),
+  mcpTimeoutMs: Number(env['JARVIS_MCP_TIMEOUT_MS'] || 20_000),
+  /**
+   * Cuánto de una respuesta del MCP llega al modelo.
+   *
+   * Es **el ajuste que más se nota en la conversación**, y no por lo que cuesta traerlo sino por lo
+   * que cuesta leerlo. Medido contra el servidor de casa, una pregunta tarda 32 s de media y se
+   * reparten así: 11,6 s en elegir la herramienta, 1,1 s en ejecutarla y **22,7 s en redactar la
+   * respuesta**, porque ese segundo turno lleva el resultado entero dentro del contexto. El peor
+   * caso fueron 56 s con `camwall_recent_clips`, que devuelve mucho.
+   *
+   * Y hay una segunda medida que lo confirma desde el otro lado: en el servidor de casa, cada
+   * token nuevo de prompt cuesta entre 0,10 y 0,20 s cuando la máquina está ocupada con las
+   * cámaras. Una observación de 1200 caracteres son unos 300 tokens, o sea entre 30 y 60 s de
+   * espera. Duplicarla duplica la espera, y casi nunca duplica lo que se sabe.
+   *
+   * Por eso el valor por defecto es corto y no generoso: subirlo no da mejores respuestas, da las
+   * mismas respuestas más tarde. Quien piense en la nube puede subirlo sin pagar esa latencia.
+   */
+  mcpMaxOutputChars: Number(env['JARVIS_MCP_MAX_OUTPUT_CHARS'] || 1200),
+  /**
+   * El lote que el asistente lleva puesto sin tener que buscarlo.
+   *
+   * Con 108 herramientas detrás de un buscador, la diferencia entre útil e inútil es empezar
+   * sabiendo cinco cosas en vez de ninguna. Son 581 tokens medidos, y cada uno está justificado:
+   *
+   * · `zeus_playbook` — el manual de la casa. Para un modelo que no la conoce vale más que el
+   *   resto junto: le dice qué corre en cada contenedor y qué trampas ya costaron caras.
+   * · `system_health_snapshot` — seis diagnósticos en una llamada. Trae dentro los servicios
+   *   caídos, el disco, los puertos y Docker, así que cargar además `failed_services` y
+   *   `docker_list` sería pagar dos veces por lo mismo.
+   * · `cpu_sampled` — la que mide la CPU **bien**. Está aquí sobre todo para que el modelo no
+   *   acabe en `docker_stats`, que en esta máquina informó de un 22 % donde había un 457 %.
+   * · `memory_pressure` — swap y kswapd, que es como se ve venir el problema que ya hubo.
+   * · `camwall_overview` — porque en esta casa «¿va todo bien?» significa las cámaras, y es la
+   *   pregunta más probable: tenerla puesta ahorra una ronda entera del router en el caso común.
+   */
+  mcpStarter: list(env['JARVIS_MCP_STARTER']).length ? list(env['JARVIS_MCP_STARTER']) : [
+    'zeus_playbook', 'system_health_snapshot', 'cpu_sampled', 'memory_pressure', 'camwall_overview',
+  ],
+
+  /**
+   * El cerebro local: un `llama-server` en el bastión, API compatible con OpenAI.
+   *
+   * Sin esto configurado, el Assistant sigue funcionando como siempre contra la nube. Con esto, la
+   * nube pasa a ser el sitio al que se escala **con permiso**, no el sitio donde se piensa.
+   */
+  localModelBaseUrl: env['JARVIS_LOCAL_MODEL_BASE_URL'] || '',
+  localModelApiKey: env['JARVIS_LOCAL_MODEL_API_KEY'] || '',
+  localModelName: env['JARVIS_LOCAL_MODEL_NAME'] || '',
+  /**
+   * Cuánto contexto tiene de verdad el modelo local.
+   *
+   * No es adorno: es el número con el que se decide cuánta historia y cuántas herramientas caben.
+   * Medido en el despliegue de casa, el catálogo completo del MCP son 8294 tokens contra 4096 de
+   * contexto, así que equivocarse aquí no degrada la respuesta, la impide.
+   */
+  localModelContextTokens: Number(env['JARVIS_LOCAL_MODEL_CONTEXT'] || 4096),
+  /** Un modelo de casa a 7,5 tokens/s necesita más plazo que una API. */
+  localModelTimeoutMs: Number(env['JARVIS_LOCAL_MODEL_TIMEOUT_MS'] || 180_000),
+  /**
+   * Cuánto de un resultado de herramienta ve el modelo local dentro de un turno.
+   *
+   * Distinto de `mcpMaxOutputChars`, que acota lo que devuelve el MCP: esto acota **todo** lo que
+   * devuelve cualquier herramienta, incluidas las del propio Jarvis. El valor heredado eran 60.000
+   * caracteres, pensados para una API con 200k de contexto; aquí son el contexto entero.
+   */
+  localModelToolResultChars: Number(env['JARVIS_LOCAL_MODEL_TOOL_RESULT_CHARS'] || 4000),
+  /**
+   * Cuánto puede generar el modelo local de una vez.
+   *
+   * A 4-7 tokens por segundo, dejarle los 4096 de la nube son diez minutos por respuesta. Y no es
+   * teórico: midiendo una conversación real, generó 546 tokens antes de llamar a una herramienta
+   * —explicando lo que iba a hacer— y eso costó 78 s de los 215 de esa vuelta.
+   *
+   * Con 400 caben de sobra una llamada a herramienta (unos 60) y un párrafo de respuesta (unos
+   * 200). Lo que corta es la divagación, que es justo lo que hay que cortar.
+   */
+  localModelMaxOutputTokens: Number(env['JARVIS_LOCAL_MODEL_MAX_OUTPUT_TOKENS'] || 400),
+
   /** El modelo del Assistant vive en el core: la clave jamás llega al navegador. */
   modelBaseUrl: env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com',
   modelApiKey: env['JARVIS_MODEL_API_KEY'] || '',
@@ -107,6 +203,38 @@ export const config = {
   modelProvider: (env['JARVIS_MODEL_PROVIDER']
     || (/anthropic/i.test(env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com') ? 'anthropic' : 'openai')
   ) as 'anthropic' | 'openai',
+  /**
+   * A dónde se escala cuando el modelo local se queda corto.
+   *
+   * Por defecto **es el modelo de siempre**: quien ya tenía el Assistant funcionando contra su
+   * proveedor no tiene que tocar nada para que ese proveedor pase a ser la escalada. Se puede
+   * separar —`JARVIS_CLOUD_*`— cuando el de la nube deba ser otro distinto del que había.
+   *
+   * Escalar nunca ocurre solo: hace falta una aprobación de la persona, igual que para escribir en
+   * una máquina. Aquí sólo se dice a dónde se iría.
+   */
+  cloudModelBaseUrl: env['JARVIS_CLOUD_MODEL_BASE_URL'] || env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com',
+  cloudModelApiKey: env['JARVIS_CLOUD_MODEL_API_KEY'] || env['JARVIS_MODEL_API_KEY'] || '',
+  cloudModelName: env['JARVIS_CLOUD_MODEL_NAME'] || env['JARVIS_MODEL_NAME'] || 'claude-sonnet-5',
+  cloudModelProvider: (env['JARVIS_CLOUD_MODEL_PROVIDER'] || env['JARVIS_MODEL_PROVIDER']
+    || (/anthropic/i.test(env['JARVIS_CLOUD_MODEL_BASE_URL'] || env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com')
+      ? 'anthropic' : 'openai')
+  ) as 'anthropic' | 'openai',
+
+  /**
+   * La conversación.
+   *
+   * `chatMaxToolCalls` es más generoso que el del plan porque un turno de chat es lo que la
+   * persona está mirando: puede permitirse tres lecturas encadenadas. `chatHistoryMessages` es lo
+   * que se le recuerda al modelo, y es corto por la misma razón de siempre: con 4096 de contexto,
+   * la historia compite con el catálogo y con la respuesta.
+   */
+  chatMaxToolCalls: Number(env['JARVIS_CHAT_MAX_TOOL_CALLS'] || 8),
+  chatHistoryMessages: Number(env['JARVIS_CHAT_HISTORY_MESSAGES'] || 12),
+  /** Con qué autonomía nace una conversación. La persona la cambia desde la interfaz. */
+  chatDefaultAutonomy: (env['JARVIS_CHAT_DEFAULT_AUTONOMY'] || 'manual') as 'manual' | 'auto',
+  chatRetentionDays: Number(env['JARVIS_CHAT_RETENTION_DAYS'] || 90),
+
   /**
    * Un modelo guionizado en vez del de verdad. Existe para desarrollo y pruebas: deja ejercitar
    * la durabilidad de un plan sin red, sin credencial y sin gastar cuota.

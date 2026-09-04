@@ -6,7 +6,7 @@
  * contrato entre ambos —qué se ve, qué se puede decidir— es lo que hace que un plan sea
  * reproducible y auditable. Si esto se mueve, se rompe el histórico.
  */
-import type { PermissionProfile, Provider } from '@jarvis/contracts';
+import type { ModelSource, PermissionProfile, Provider } from '@jarvis/contracts';
 
 /** Lo que el modelo ve de un paso ya ocurrido. Resúmenes y referencias, nunca buffers. */
 export interface PlanHistoryEntry {
@@ -29,7 +29,14 @@ export interface PlanHistoryEntry {
  */
 export interface PlanContext {
   objective: string;
-  workspace: {
+  /**
+   * La sesión sobre la que se trabaja, si la hay.
+   *
+   * Un plan siempre tiene una. Una conversación puede no tenerla —«¿cómo va el servidor?» no exige
+   * haber abierto nada—, y entonces el contexto lo dice en vez de inventarse un workspace vacío,
+   * que es lo que haría que el modelo hablase de una sesión que no existe.
+   */
+  workspace?: {
     id: string;
     host: string;
     provider: Provider;
@@ -38,10 +45,37 @@ export interface PlanContext {
     title: string | null;
   };
   history: PlanHistoryEntry[];
+  /**
+   * El hilo, cuando esto es una conversación y no un plan.
+   *
+   * Va aparte del historial de pasos a propósito: son dos formas distintas de contarle al modelo
+   * lo que ya pasó, y mezclarlas produce un prompt que no es ni una cosa ni la otra. Un plan
+   * enseña checkpoints —«[run/completed] Reunir contexto»—; una conversación enseña lo que se
+   * dijo. A un modelo de 1,7B lo segundo le rinde bastante más.
+   */
+  messages?: Array<{ role: 'user' | 'assistant' | 'tool'; text: string }>;
+  /**
+   * Las capacidades que puede usar sin buscarlas.
+   *
+   * Van **en el contexto** y no detrás de una consulta porque cada ida y vuelta con el modelo de
+   * casa cuesta entre diez y veinte segundos. Medido: la pregunta más común de esta casa —cómo va
+   * la memoria— se resolvía en cinco llamadas al modelo porque la primera se iba en preguntar qué
+   * herramientas había. Con esto puestas, son dos. Cuestan unos 580 tokens y ahorran dos viajes.
+   */
+  capabilities?: Array<{ name: string; summary: string; params: string }>;
   /** Lo que dijo la persona cuando se le preguntó algo, sin usar todavía. */
   pendingInput: string | null;
   /** Aprobaciones vivas de este plan: pedir otra vez lo ya pedido es ruido. */
   pendingApprovals: Array<{ id: string; summary: string; expiresAt: string }>;
+  /**
+   * Con qué cerebro se pide este turno.
+   *
+   * `cloud` sólo llega aquí detrás de una escalada que una persona ya autorizó; por defecto se
+   * piensa en casa. Va en el contexto y no en la configuración del modelo porque es un dato **del
+   * turno**: el mismo plan puede tener un paso pensado localmente y el siguiente en la nube, y el
+   * historial tiene que poder decir cuál fue cuál.
+   */
+  source?: ModelSource;
   /** Los límites se dicen, no se descubren fallando. */
   limits: {
     stepsUsed: number;
@@ -85,6 +119,21 @@ export type AssistantDecision =
   | { kind: 'run'; title: string; prompt: string; permissionProfile: PermissionProfile; rationale: string }
   | { kind: 'approval'; title: string; actionType: string; summary: string; permissionProfile: PermissionProfile; prompt: string }
   | { kind: 'ask'; title: string; question: string }
+  /**
+   * Ejecutar una capacidad MCP con efectos, previa aprobación (ADR-009).
+   *
+   * Sólo la produce la conversación, porque es la única que sabe ejecutarla: el motor de planes
+   * únicamente sabe lanzar runs, y una aprobación que no se puede cumplir es una promesa rota con
+   * pasos de por medio.
+   */
+  | { kind: 'capability'; title: string; capability: string; args: Record<string, unknown>; summary: string }
+  /**
+   * Salir al modelo de la nube.
+   *
+   * El modelo local lo pide; la persona lo concede. Nunca se escala solo: el coste y la privacidad
+   * de mandar el contexto fuera de casa no son decisiones del modelo que se está quedando corto.
+   */
+  | { kind: 'escalate'; reason: string }
   | { kind: 'finish'; summary: string; evidenceRunIds?: string[] };
 
 /** Esquema JSON de la entrada de una herramienta, tal como lo espera la API del modelo. */

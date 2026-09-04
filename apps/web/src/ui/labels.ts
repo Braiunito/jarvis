@@ -54,6 +54,17 @@ export const RUN_STATUS: Record<RunStatus, StatusLabel> = {
   timed_out: { name: 'Sin tiempo', tone: 'danger', help: 'Agotó su plazo y se detuvo.' },
 };
 
+/**
+ * ¿Esto todavía se mueve solo?
+ *
+ * Un trabajo vivo puede cambiar sin que nadie toque nada, y por eso la interfaz tiene derecho a
+ * animarse; uno terminado se quedó como está, y girar un aspa encima sería mentir. Los cinco
+ * estados están aquí y no repartidos por las pantallas para que la respuesta sea la misma en
+ * todas.
+ */
+export const isRunLive = (status: RunStatus): boolean =>
+  ['queued', 'preparing', 'running', 'waiting', 'cancelling'].includes(status);
+
 export const PLAN_STATUS: Record<string, StatusLabel> = {
   ready: { name: 'Listo', tone: 'neutral', help: 'Va a decidir el siguiente paso.' },
   running: { name: 'Pensando', tone: 'running', help: 'Decidiendo qué hacer ahora.' },

@@ -24,7 +24,7 @@ import {
 } from '../ui/bits.jsx';
 import { useAnnounceOnChange } from '../ui/announce.jsx';
 import { AssistantPanel } from '../ui/assistant.jsx';
-import { PERMISSION, PROVENANCE, RUN_STATUS, runTitle } from '../ui/labels.js';
+import { PERMISSION, PROVENANCE, RUN_STATUS, isRunLive, runTitle } from '../ui/labels.js';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVENANCE_ICON, PROVIDER_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
@@ -435,9 +435,12 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                       ) : null}
                     </span>
                   </div>
+                  {/* Cambiar de trabajo empieza de cero: compacto y todo plegado. Ver `runs.tsx`. */}
                   <EventTimeline
+                    key={activeRun.id}
                     events={events}
                     userMessage={activeRun.promptPreview}
+                    live={isRunLive(activeRun.status)}
                     empty="El trabajo ya está lanzado; en cuanto el agente diga algo aparece aquí, y se queda guardado."
                   />
                 </>

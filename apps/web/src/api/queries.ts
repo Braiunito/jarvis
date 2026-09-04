@@ -7,7 +7,8 @@
 import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type {
-  Approval, Attachment, Draft, Health, HostCapabilities, Plan, PlanStep, Run, RunEvent,
+  Approval, Attachment, AutonomyMode, ChatCapabilities, ChatMessage, Conversation, Draft, Health,
+  HostCapabilities, McpCapability, McpServerState, Plan, PlanStep, Run, RunEvent,
   SessionSearchResult, TargetPlan, TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
 import { api, get, post, put } from './client.js';
@@ -65,6 +66,9 @@ export const keys = {
   metrics: (hours: number) => ['metrics', hours] as const,
   plans: (workspaceId: string) => ['plans', workspaceId] as const,
   plan: (planId: string) => ['plan', planId] as const,
+  conversations: (workspaceId: string) => ['conversations', workspaceId] as const,
+  conversation: (id: string) => ['conversation', id] as const,
+  capabilities: ['capabilities'] as const,
 };
 
 export interface SessionQuery {
@@ -590,3 +594,108 @@ export function useRetryRun() {
 }
 
 export type { Run, RunEvent, Workspace };
+
+
+// ---- el asistente conversacional (ADR-009) ---------------------------------
+
+export interface ConversationList {
+  conversations: Conversation[];
+  capabilities: ChatCapabilities;
+}
+
+export interface ConversationDetail {
+  conversation: Conversation;
+  messages: ChatMessage[];
+  approvals: Approval[];
+}
+
+export interface CapabilityCatalog {
+  servers: McpServerState[];
+  areas: Array<{ area: string; count: number }>;
+  capabilities: McpCapability[];
+}
+
+/**
+ * La lista de conversaciones.
+ *
+ * Se refresca sola con poca frecuencia: lo que cambia deprisa dentro de una conversación llega
+ * por su stream, y sondear esto cada pocos segundos sólo serviría para mover la lista bajo el
+ * cursor de quien está leyendo.
+ */
+export const useConversations = (workspaceId?: string | null): UseQueryResult<ConversationList> => useQuery({
+  queryKey: keys.conversations(workspaceId ?? 'all'),
+  queryFn: () => get<ConversationList>(`/api/chat${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ''}`),
+  staleTime: 30_000,
+});
+
+/**
+ * Una conversación con su historial.
+ *
+ * Es la carga inicial; a partir de ahí manda el stream. Por eso no se refresca al enfocar la
+ * ventana: volver a la pestaña no puede reordenar lo que se está leyendo.
+ */
+export const useConversation = (id: string | null): UseQueryResult<ConversationDetail> => useQuery({
+  queryKey: keys.conversation(id ?? 'none'),
+  queryFn: () => get<ConversationDetail>(`/api/chat/${id as string}`),
+  enabled: Boolean(id),
+  refetchOnWindowFocus: false,
+  staleTime: 5_000,
+});
+
+/** Qué capacidades hay enchufadas. Cambian cuando alguien toca la configuración, o sea casi nunca. */
+export const useCapabilityCatalog = (): UseQueryResult<CapabilityCatalog> => useQuery({
+  queryKey: keys.capabilities,
+  queryFn: () => get<CapabilityCatalog>('/api/capabilities'),
+  staleTime: 5 * 60_000,
+});
+
+export function useCreateConversation() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (input: { message?: string; workspaceId?: string | null; autonomy?: AutonomyMode }) =>
+      post<{ conversation: Conversation }>('/api/chat', input),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['conversations'] });
+    },
+  });
+}
+
+/**
+ * Enviar.
+ *
+ * No invalida nada al terminar y es deliberado: el mensaje propio y todo lo que venga detrás
+ * llegan por el stream. Invalidar aquí provocaría que el hilo se repintara entero justo mientras
+ * aparece la respuesta.
+ */
+export function useSendMessage(conversationId: string | null) {
+  return useMutation({
+    retry: 0,
+    mutationFn: (text: string) =>
+      post<{ message: ChatMessage }>(`/api/chat/${conversationId as string}/messages`, { text }),
+  });
+}
+
+export function useSetAutonomy(conversationId: string | null) {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (autonomy: AutonomyMode) =>
+      post<{ conversation: Conversation }>(`/api/chat/${conversationId as string}/autonomy`, { autonomy }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['conversations'] });
+      void client.invalidateQueries({ queryKey: keys.conversation(conversationId ?? 'none') });
+    },
+  });
+}
+
+export function useDeleteConversation() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (id: string) => api<void>(`/api/chat/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['conversations'] });
+    },
+  });
+}

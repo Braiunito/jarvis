@@ -6,6 +6,40 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 
 ### Añadido
 
+- **El asistente piensa en casa** (ADR-009): el cerebro deja de ser una API de pago y pasa a ser el
+  `llama-server` del bastión. Preguntar por el servidor, buscar una sesión o resumir lo que pasó ya
+  no cuesta un céntimo. La nube sigue estando, pero como sitio al que se **escala con permiso**: el
+  modelo local dice «esto se me escapa», enseña una tarjeta con el motivo, y hasta que alguien la
+  firma no sale de aquí ni un token. Tampoco sale solo cuando el modelo local se cae —un servidor
+  reiniciándose no es permiso para gastar— y el permiso vale para un turno, no para siempre.
+- **Sección Asistente**, segunda en el carril. Antes esto vivía dentro de un workspace y sólo
+  servía si ya habías elegido una sesión, que es pedirle el contexto a quien viene a preguntar
+  justo por eso. Ahora es una conversación completa: se ve cada consulta que hace con su nombre
+  real —`zeus.memory_pressure`, desplegable para ver qué devolvió—, de dónde salió cada respuesta
+  (casa o nube) y las tarjetas de permiso dentro del propio hilo.
+- **El asistente sabe mirar la máquina** (ADR-009): el core es ahora cliente de servidores MCP
+  declarados en su configuración, así que puede consultar el estado del host, los servicios, Docker,
+  la red, el disco, la iGPU y las cámaras. Como el catálogo del servidor de casa son 8294 tokens
+  medidos y el modelo local tiene bastante menos contexto, no se le enseña entero: navega por áreas,
+  busca, y lleva puesto un lote de cinco capacidades que cubren lo que se pregunta el 80 % de las
+  veces. Unos 1000 tokens en vez de 8294.
+- **Modo manual y automático**, elegible en la cabecera del hilo. En manual, hasta lanzar un trabajo
+  en modo seguro pasa por una tarjeta; en automático eso va solo. Lo que sigue pidiendo permiso
+  siempre y no se puede apagar: tocar una máquina, los permisos de escritura, parar trabajo que
+  lanzó una persona, y salir a la nube.
+
+### Seguridad
+
+- Un servidor MCP es de **sólo lectura** salvo que se le nombre expresamente, y el interruptor vive
+  en este core en vez de delegarse en la configuración del otro proceso. Cuatro herramientas no se
+  sirven jamás —apagar, reiniciar e instalar paquetes— y lo que se añada a la lista de denegación se
+  **suma** a ésas en vez de sustituirlas.
+- Una herramienta que no declara qué hace se trata como si escribiera. El MCP de casa etiqueta
+  `reboot_server` como `admin` y no como `write`: un clasificador que sólo mirase `write` habría
+  dado por inofensivo apagar el servidor.
+- Lo que devuelve una máquina llega al modelo marcado como dato ajeno, igual que un diff o un
+  adjunto, y cada ejecución queda en la auditoría con sus argumentos.
+
 - **Contratos congelados** (M0): 91 pruebas doradas que fijan lo que la migración promete
   conservar — entrecomillado SSH, allowlist de hosts, estrategias A/B, los tres adaptadores de CLI
   y el protocolo del spool remoto. Corren sin red, sin Docker y sin bastión.

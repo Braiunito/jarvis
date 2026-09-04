@@ -141,6 +141,104 @@ interface AnthropicMessage {
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
+/** Lo que costó una vuelta contra el modelo. `cachedTokens` es lo que NO hubo que volver a leer. */
+export interface ModelTurnUsage {
+  model: string;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  elapsedMs: number;
+}
+
+/**
+ * Por qué falló de verdad una llamada al modelo.
+ *
+ * `fetch` de Node contesta «fetch failed» a casi todo lo que pase por debajo —el socket cerrado
+ * por el otro lado, un DNS que no resuelve, una conexión rechazada— y guarda el motivo real en
+ * `cause`. Sin desenvolverlo, el operador lee «fetch failed» en la pantalla y no puede distinguir
+ * un servidor apagado de uno que corta la conexión a mitad, que son dos averías con dos arreglos
+ * distintos.
+ */
+/**
+ * La respuesta cuando el modelo contesta con texto en vez de llamar a una herramienta.
+ *
+ * Un modelo pequeño imita lo que ha visto: en vez de emitir una llamada, escribe **el aspecto** de
+ * una —`<finish>`, `summary:`, `evidence_run_ids: [...]`, un bloque `<think>`— y lo suelta como
+ * prosa. Eso llega tal cual a la pantalla y lo lee una persona, así que se quita: lo que queda es
+ * lo único que tenía valor ahí dentro, que es la frase.
+ *
+ * No se intenta reconstruir la llamada a partir del texto. Adivinar qué quiso decir un modelo que
+ * ya se equivocó al decirlo es cómo se ejecuta algo que nadie pidió.
+ */
+export function cleanSummary(text: string): string {
+  return text
+    // El razonamiento del modelo no es la respuesta, y a veces se escapa sin cerrar.
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think>/gi, '')
+    // Los remedos de llamada a herramienta, con o sin cierre.
+    .replace(/<\/?(finish|tool_call|function_call|invoke)[^>]*>/gi, '')
+    .replace(/^\s*(summary|evidence_run_ids|arguments|name)\s*:.*$/gim, '')
+    .replace(/^\s*Fin del plan\.?\s*$/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Deja los `tool_calls` en algo que la API acepte de vuelta.
+ *
+ * `arguments` es, por contrato, una cadena con JSON. Un modelo que se queda a medias devuelve
+ * cosas como `"{"`, y un servidor estricto rechaza el mensaje entero cuando se le reenvía
+ * —`llama-server` contesta 500, «Failed to parse tool call arguments as JSON»— y el turno muere
+ * por un carácter. Se sustituye por `{}` en vez de descartar la llamada: la observación ya está
+ * calculada y el historial tiene que seguir cuadrando —a un `tool_call` le corresponde su
+ * `tool_result`—.
+ *
+ * Por qué es intermitente, que es lo que despista al buscarlo: sólo rompe si el corte cae
+ * **dentro** de `arguments`. Un poco antes no hay llamada que reenviar; un poco después está
+ * completa. Barriendo el tope de generación sobre un prompt fijo, esa ventana medía cinco tokens
+ * —falla en 46, 48 y 50; funciona en 44 y en 56—. En producción el tope no cambia, pero sí cambia
+ * cuánto razona el modelo antes de llamar, así que el corte cae donde caiga y de vez en cuando cae
+ * dentro. Reproducirlo a mano exige acertar la ventana; sufrirlo, sólo usarlo.
+ */
+export function sanitizeToolCalls(calls: OpenAiToolCall[]): OpenAiToolCall[] {
+  return calls.map((call) => {
+    const raw = call.function?.arguments;
+    let safe = '{}';
+    if (raw && raw.trim()) {
+      try {
+        JSON.parse(raw);
+        safe = raw;
+      } catch {
+        // Se queda el objeto vacío: es lo que ya se usó para invocar la herramienta.
+      }
+    }
+    return { ...call, function: { ...call.function, arguments: safe } };
+  });
+}
+
+/**
+ * Un resultado de herramienta, acotado y **diciendo** que va acotado (ADR-007).
+ *
+ * El aviso no es cortesía: un modelo al que se le corta la evidencia en silencio concluye sobre lo
+ * que no vio, y lo hace con la misma seguridad que si lo hubiera visto entero.
+ */
+export function clipToolResult(content: unknown, max: number): string {
+  const text = JSON.stringify(content) ?? 'null';
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}… [recortado: ocupaba ${text.length} caracteres]`;
+}
+
+export function describeFetchFailure(error: unknown): string {
+  const message = (error as Error).message ?? String(error);
+  const cause = (error as { cause?: unknown }).cause;
+  if (!cause) return message;
+  const detail = (cause as { code?: string; message?: string }).code
+    ?? (cause as { message?: string }).message
+    ?? String(cause);
+  return `${message} (${detail})`;
+}
+
+
 export interface AnthropicModelOptions {
   apiKey: string;
   baseUrl: string;
@@ -149,6 +247,40 @@ export interface AnthropicModelOptions {
   maxToolCalls?: number;
   timeoutMs?: number;
   fetchImpl?: FetchLike;
+  /**
+   * Cuánto de un resultado de herramienta se le devuelve dentro del turno.
+   *
+   * Estaba fijo en 60.000 caracteres, que para una API son un detalle y para el modelo de casa son
+   * unos 15.000 tokens: el contexto entero por una sola observación. No es teórico —así se colgaba
+   * el tercer turno de una conversación real— y además es la palanca que más se nota en la
+   * latencia, porque el turno que redacta lleva ese texto dentro.
+   */
+  maxToolResultChars?: number;
+  /**
+   * Tope de tokens generados por vuelta.
+   *
+   * Importa mucho más en casa que en la nube: a 4-7 tokens por segundo, dejar que un modelo
+   * divague 4096 tokens son diez minutos de espera por una respuesta que cabía en cuatro líneas.
+   */
+  maxOutputTokens?: number;
+  /**
+   * Dónde se fue el tiempo de una llamada.
+   *
+   * Con un modelo de casa, «el asistente va lento» es la queja que va a llegar siempre, y sin esto
+   * no se puede distinguir la única causa que importa: si se está pagando el prompt entero cada
+   * vuelta —o sea, si el servidor no está reutilizando el prefijo— o si es la generación. Son dos
+   * averías con dos arreglos que no se parecen en nada.
+   */
+  onUsage?: (usage: ModelTurnUsage) => void;
+  /**
+   * Con qué instrucciones se le habla.
+   *
+   * Es configurable porque el mismo adaptador sirve ahora a dos modelos muy distintos, y lo que
+   * ayuda a uno estorba al otro: a un modelo grande se le pueden dar matices —cuándo ofrecer una
+   * terminal, cómo tratar el contenido ajeno— y un 1,7B con 16k de contexto gasta en leerlos el
+   * sitio que necesita para razonar. Ver `LOCAL_SYSTEM_PROMPT`.
+   */
+  systemPrompt?: string;
 }
 
 /**
@@ -167,8 +299,16 @@ export class AnthropicModel implements AssistantModel {
   readonly #maxToolCalls: number;
   readonly #timeoutMs: number;
   readonly #fetch: FetchLike;
+  readonly #systemPrompt: string;
+  readonly #maxToolResultChars: number;
+  readonly #maxOutputTokens: number;
+  readonly #onUsage: ((usage: ModelTurnUsage) => void) | null;
 
   constructor(options: AnthropicModelOptions) {
+    this.#systemPrompt = options.systemPrompt ?? SYSTEM_PROMPT;
+    this.#maxToolResultChars = options.maxToolResultChars ?? 60_000;
+    this.#maxOutputTokens = options.maxOutputTokens ?? 4096;
+    this.#onUsage = options.onUsage ?? null;
     this.#apiKey = options.apiKey;
     this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.#model = options.model;
@@ -191,8 +331,8 @@ export class AnthropicModel implements AssistantModel {
 
       if (!uses.length) {
         // Sin llamada a herramienta no hay decisión que persistir; lo dicho se cierra como síntesis.
-        const text = blocks.find((block) => block.type === 'text')?.text ?? 'el modelo no propuso ningún paso';
-        return { kind: 'finish', summary: text.slice(0, 4000) };
+        const text = cleanSummary(blocks.find((block) => block.type === 'text')?.text ?? '');
+        return { kind: 'finish', summary: (text || 'el modelo no propuso ningún paso').slice(0, 4000) };
       }
 
       /**
@@ -213,7 +353,7 @@ export class AnthropicModel implements AssistantModel {
         results.push({
           type: 'tool_result',
           tool_use_id: use.id ?? '',
-          content: JSON.stringify(outcome.content).slice(0, 60_000),
+          content: clipToolResult(outcome.content, this.#maxToolResultChars),
         });
       }
 
@@ -227,6 +367,7 @@ export class AnthropicModel implements AssistantModel {
   }
 
   async #ask(messages: AnthropicMessage[], tools: ToolDefinition[]): Promise<{ content?: AnthropicContentBlock[] }> {
+    const started = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
     try {
@@ -240,8 +381,8 @@ export class AnthropicModel implements AssistantModel {
         },
         body: JSON.stringify({
           model: this.#model,
-          max_tokens: 4096,
-          system: SYSTEM_PROMPT,
+          max_tokens: this.#maxOutputTokens,
+          system: this.#systemPrompt,
           tools: tools.map((tool) => ({
             name: tool.name,
             description: tool.description,
@@ -255,7 +396,29 @@ export class AnthropicModel implements AssistantModel {
       if (!response.ok) {
         throw new Error(`the model answered ${response.status}: ${(await response.text()).slice(0, 300)}`);
       }
-      return await response.json() as { content?: AnthropicContentBlock[] };
+      const body = await response.json() as {
+        content?: AnthropicContentBlock[];
+        usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
+      };
+      /*
+       * Aquí el dato interesa por otro motivo que en casa.
+       *
+       * En el modelo local se mira para saber por qué tarda; en la nube, para saber qué se gastó
+       * en el turno que alguien acababa de autorizar. Es el mismo número y sirve para las dos
+       * preguntas, así que se reporta igual.
+       */
+      if (this.#onUsage) {
+        this.#onUsage({
+          model: this.#model,
+          promptTokens: body.usage?.input_tokens ?? 0,
+          cachedTokens: body.usage?.cache_read_input_tokens ?? 0,
+          completionTokens: body.usage?.output_tokens ?? 0,
+          elapsedMs: Date.now() - started,
+        });
+      }
+      return body;
+    } catch (error) {
+      throw new Error(describeFetchFailure(error));
     } finally {
       clearTimeout(timer);
     }
@@ -295,8 +458,16 @@ export class OpenAiCompatibleModel implements AssistantModel {
   readonly #maxToolCalls: number;
   readonly #timeoutMs: number;
   readonly #fetch: FetchLike;
+  readonly #systemPrompt: string;
+  readonly #maxToolResultChars: number;
+  readonly #maxOutputTokens: number;
+  readonly #onUsage: ((usage: ModelTurnUsage) => void) | null;
 
   constructor(options: AnthropicModelOptions) {
+    this.#systemPrompt = options.systemPrompt ?? SYSTEM_PROMPT;
+    this.#maxToolResultChars = options.maxToolResultChars ?? 60_000;
+    this.#maxOutputTokens = options.maxOutputTokens ?? 4096;
+    this.#onUsage = options.onUsage ?? null;
     this.#apiKey = options.apiKey;
     this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.#model = options.model;
@@ -308,7 +479,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
 
   async decide(context: PlanContext, toolbox: AssistantToolbox): Promise<AssistantDecision> {
     const messages: OpenAiMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: this.#systemPrompt },
       { role: 'user', content: renderContext(context) },
     ];
 
@@ -319,8 +490,8 @@ export class OpenAiCompatibleModel implements AssistantModel {
       const calls = message.tool_calls ?? [];
 
       if (!calls.length || !calls[0]?.function?.name) {
-        const text = message.content ?? 'el modelo no propuso ningún paso';
-        return { kind: 'finish', summary: text.slice(0, 4000) };
+        const text = cleanSummary(message.content ?? '');
+        return { kind: 'finish', summary: (text || 'el modelo no propuso ningún paso').slice(0, 4000) };
       }
 
       /**
@@ -350,18 +521,45 @@ export class OpenAiCompatibleModel implements AssistantModel {
         answers.push({
           role: 'tool',
           tool_call_id: call.id ?? '',
-          content: JSON.stringify(outcome.content).slice(0, 60_000),
+          content: clipToolResult(outcome.content, this.#maxToolResultChars),
         });
       }
 
-      messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: calls });
+      /*
+       * Los `tool_calls` se le devuelven **saneados**.
+       *
+       * Un modelo pequeño trunca: se le vio contestar `arguments: "{"` al quedarse sin sitio para
+       * generar. Reenviarle eso tal cual hace que `llama-server` conteste 500 —«Failed to parse
+       * tool call arguments as JSON»— y el turno muere entero por un carácter. La API dice que
+       * `arguments` es una cadena JSON, así que lo que no lo sea se sustituye por un objeto vacío:
+       * la herramienta ya se ejecutó con lo que se pudo entender, y lo que hace falta ahora es que
+       * la conversación pueda continuar.
+       */
+      messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: sanitizeToolCalls(calls) });
       messages.push(...answers);
     }
 
     return { kind: 'finish', summary: 'se agotó el presupuesto de consultas de este turno' };
   }
 
+  #report(
+    usage: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } } | undefined,
+    timings: { cache_n?: number } | undefined,
+    started: number,
+  ): void {
+    if (!this.#onUsage) return;
+    this.#onUsage({
+      model: this.#model,
+      promptTokens: usage?.prompt_tokens ?? 0,
+      // `llama-server` lo dice en `timings.cache_n`; una API compatible, en `prompt_tokens_details`.
+      cachedTokens: timings?.cache_n ?? usage?.prompt_tokens_details?.cached_tokens ?? 0,
+      completionTokens: usage?.completion_tokens ?? 0,
+      elapsedMs: Date.now() - started,
+    });
+  }
+
   async #ask(messages: OpenAiMessage[], tools: ToolDefinition[]): Promise<OpenAiMessage> {
+    const started = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
     try {
@@ -372,6 +570,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
         body: JSON.stringify({
           model: this.#model,
           messages,
+          max_tokens: this.#maxOutputTokens,
           tools: tools.map((tool) => ({
             type: 'function',
             function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
@@ -383,8 +582,15 @@ export class OpenAiCompatibleModel implements AssistantModel {
       if (!response.ok) {
         throw new Error(`the model answered ${response.status}: ${(await response.text()).slice(0, 300)}`);
       }
-      const body = await response.json() as { choices?: Array<{ message?: OpenAiMessage }> };
+      const body = await response.json() as {
+        choices?: Array<{ message?: OpenAiMessage }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
+        timings?: { cache_n?: number };
+      };
+      this.#report(body.usage, body.timings, started);
       return body.choices?.[0]?.message ?? { role: 'assistant', content: null };
+    } catch (error) {
+      throw new Error(describeFetchFailure(error));
     } finally {
       clearTimeout(timer);
     }
@@ -398,13 +604,35 @@ export class OpenAiCompatibleModel implements AssistantModel {
  * de este turno, qué límites hay— se pierde dentro de un JSON plano.
  */
 export function renderContext(context: PlanContext): string {
-  const lines = [
-    `Objetivo: ${context.objective}`,
-    '',
-    `Sesión de trabajo: ${context.workspace.provider} en ${context.workspace.host}`
-      + ` (sesión ${context.workspace.sessionId}${context.workspace.cwd ? `, cwd ${context.workspace.cwd}` : ''}).`,
-  ];
-  if (context.workspace.title) lines.push(`El workspace se llama «${context.workspace.title}».`);
+  const lines = [`Objetivo: ${context.objective}`, ''];
+  if (context.workspace) {
+    lines.push(`Sesión de trabajo: ${context.workspace.provider} en ${context.workspace.host}`
+      + ` (sesión ${context.workspace.sessionId}${context.workspace.cwd ? `, cwd ${context.workspace.cwd}` : ''}).`);
+    if (context.workspace.title) lines.push(`El workspace se llama «${context.workspace.title}».`);
+  } else {
+    // Decirlo importa: si no, el modelo propone «sigue en esa sesión» sobre una sesión que no hay.
+    lines.push('Esta conversación no está atada a ninguna sesión de agente: va sobre las máquinas.');
+  }
+
+  if (context.capabilities?.length) {
+    lines.push('', 'Puedes consultar esto directamente con use_capability, sin buscarlo antes:');
+    for (const capability of context.capabilities) {
+      lines.push(`· ${capability.name} — ${capability.summary} [${capability.params}]`);
+    }
+    lines.push('Si necesitas algo que no está aquí, búscalo con search_capabilities.');
+  }
+
+  if (context.messages) {
+    // Una conversación se le enseña como conversación. Nada de «[assistant/completed]».
+    lines.push('', context.messages.length ? 'La conversación hasta ahora:' : 'Es el primer mensaje.');
+    for (const message of context.messages) {
+      const who = message.role === 'user' ? 'Persona' : message.role === 'tool' ? 'Herramienta' : 'Tú';
+      lines.push(`${who}: ${message.text}`);
+    }
+    lines.push('',
+      `Puedes hacer hasta ${context.limits.maxToolCalls} consultas en este turno antes de tener que responder.`);
+    return lines.join('\n');
+  }
 
   lines.push('', context.history.length
     ? `Pasos dados (${context.history.length}):`

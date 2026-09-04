@@ -45,6 +45,11 @@ export const ErrorScope = Type.Partial(Type.Object({
   planId: Type.String(),
   attachmentId: Type.String(),
   field: Type.String(),
+  /** La capacidad MCP y el servidor que la publica (ADR-009). */
+  capability: Type.String(),
+  server: Type.String(),
+  /** La conversación, cuando el fallo ocurre dentro de un turno de chat. */
+  conversationId: Type.String(),
 }));
 export type ErrorScope = Static<typeof ErrorScope>;
 

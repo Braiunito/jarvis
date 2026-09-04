@@ -56,6 +56,14 @@ export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
 export const Approval = Type.Object({
   id: Type.String(),
   planId: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * De qué conversación salió, si salió de una (ADR-009).
+   *
+   * Es exclusivo con `planId` en la práctica: una aprobación pertenece al hilo que la pidió. Se
+   * guarda porque quien la resuelve tiene que poder volver a donde estaba, y porque el motor que
+   * la ejecuta al aprobarla no es el mismo en los dos casos.
+   */
+  conversationId: Type.Union([Type.String(), Type.Null()]),
   runId: Type.Union([Type.String(), Type.Null()]),
   actionType: Type.String(),
   target: Type.Unknown(),

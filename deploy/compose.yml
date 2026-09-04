@@ -95,6 +95,41 @@ services:
       # contenedor, así que el core arrancaba sin él y **todos** los títulos salían del heurístico
       # local: de ahí nombres como «/model model». Un ajuste configurado que no llega es peor que
       # uno ausente, porque nadie vuelve a mirarlo.
+      # --- el cerebro de casa y la puerta a la nube (ADR-009) ---------------
+      #
+      # Con `JARVIS_LOCAL_MODEL_BASE_URL` puesto, el asistente piensa en el `llama-server` del
+      # bastión y la nube pasa a ser el sitio al que se escala **con permiso**. Sin él, todo sigue
+      # exactamente como estaba: el modelo de nube es el que piensa.
+      #
+      # La URL es la de la LAN y no `127.0.0.1` por un motivo que cuesta media hora descubrir: el
+      # core vive en un contenedor, y ahí `localhost` es el propio contenedor. El servidor local
+      # escucha en toda la LAN y exige `Authorization: Bearer`, que es lo que evita que abrirlo
+      # más allá de loopback sea abrirlo a cualquiera.
+      JARVIS_LOCAL_MODEL_BASE_URL: ${JARVIS_LOCAL_MODEL_BASE_URL:-}
+      JARVIS_LOCAL_MODEL_API_KEY: ${JARVIS_LOCAL_MODEL_API_KEY:-}
+      JARVIS_LOCAL_MODEL_NAME: ${JARVIS_LOCAL_MODEL_NAME:-}
+      # Cuánto contexto tiene de verdad. Equivocarse aquí no degrada la respuesta: la impide.
+      JARVIS_LOCAL_MODEL_CONTEXT: ${JARVIS_LOCAL_MODEL_CONTEXT:-4096}
+      JARVIS_LOCAL_MODEL_TIMEOUT_MS: ${JARVIS_LOCAL_MODEL_TIMEOUT_MS:-180000}
+      # A dónde se escala. Por defecto, el modelo de siempre: quien ya lo tenía no toca nada.
+      JARVIS_CLOUD_MODEL_BASE_URL: ${JARVIS_CLOUD_MODEL_BASE_URL:-}
+      JARVIS_CLOUD_MODEL_API_KEY: ${JARVIS_CLOUD_MODEL_API_KEY:-}
+      JARVIS_CLOUD_MODEL_NAME: ${JARVIS_CLOUD_MODEL_NAME:-}
+      JARVIS_CLOUD_MODEL_PROVIDER: ${JARVIS_CLOUD_MODEL_PROVIDER:-}
+
+      # --- capacidades MCP que este core consume (ADR-009) ------------------
+      #
+      # Un servidor declarado aquí es de **sólo lectura** salvo que su nombre esté además en
+      # JARVIS_MCP_WRITE_SERVERS. Y hay cuatro herramientas que no se sirven jamás —apagar,
+      # reiniciar e instalar paquetes—, estén o no en la lista de denegación.
+      JARVIS_MCP_SERVERS: ${JARVIS_MCP_SERVERS:-}
+      JARVIS_MCP_TOKENS: ${JARVIS_MCP_TOKENS:-}
+      JARVIS_MCP_WRITE_SERVERS: ${JARVIS_MCP_WRITE_SERVERS:-}
+      JARVIS_MCP_ALLOW: ${JARVIS_MCP_ALLOW:-}
+      JARVIS_MCP_DENY: ${JARVIS_MCP_DENY:-}
+      JARVIS_MCP_STARTER: ${JARVIS_MCP_STARTER:-}
+      JARVIS_CHAT_DEFAULT_AUTONOMY: ${JARVIS_CHAT_DEFAULT_AUTONOMY:-manual}
+
       JARVIS_TITLE_API_KEY: ${JARVIS_TITLE_API_KEY:-}
       JARVIS_TITLE_BASE_URL: ${JARVIS_TITLE_BASE_URL:-https://api.groq.com/openai}
       JARVIS_TITLE_MODEL: ${JARVIS_TITLE_MODEL:-llama-3.1-8b-instant}

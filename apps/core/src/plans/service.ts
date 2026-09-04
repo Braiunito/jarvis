@@ -25,10 +25,13 @@ import type {
   AssistantModel, EvidenceRef, PlanContext, PlanHistoryEntry,
 } from '../assistant/model.js';
 import { CoreAssistantToolbox, type ToolboxLimits } from '../assistant/toolbox.js';
+import type { McpService } from '../mcp/service.js';
 
 interface PlanRow {
   id: string; workspace_id: string; created_by: string; objective: string; status: string;
   current_step: number; created_at: string; updated_at: string; finished_at: string | null; summary: string | null;
+  /** El ordinal del paso que puede pensarse en la nube, si alguien lo autorizó. Ver `#proposeNext`. */
+  escalate_for_step: number | null;
 }
 
 interface StepRow {
@@ -39,7 +42,7 @@ interface StepRow {
 }
 
 interface ApprovalRow {
-  id: string; plan_id: string | null; run_id: string | null; action_type: string; target_json: string;
+  id: string; plan_id: string | null; conversation_id: string | null; run_id: string | null; action_type: string; target_json: string;
   action_digest: string; summary: string; requested_by: string; requested_at: string; expires_at: string;
   status: string; resolved_by: string | null; resolved_at: string | null; consumed_at: string | null;
 }
@@ -79,6 +82,7 @@ const toStep = (row: StepRow): PlanStep => ({
 const toApproval = (row: ApprovalRow): Approval => ({
   id: row.id,
   planId: row.plan_id,
+  conversationId: row.conversation_id,
   runId: row.run_id,
   actionType: row.action_type,
   target: JSON.parse(row.target_json) as unknown,
@@ -121,6 +125,17 @@ export interface PlanServiceDeps {
   attachments?: AttachmentService;
   evidence?: EvidenceService;
   model: AssistantModel | null;
+  /**
+   * Las capacidades de sistema (ADR-009), de **sólo lectura** en un plan.
+   *
+   * Un plan puede mirar la máquina para decidir mejor —si el host está saturado, si el servicio
+   * está caído—, pero no puede tocarla: aprobar en un plan lanza un run, y ése es el único efecto
+   * que su motor sabe ejecutar. Lo que tenga efectos se pide desde una conversación.
+   */
+  mcp?: McpService;
+  /** Si hay modelo de nube al que escalar. Sin él, la herramienta no se le ofrece al modelo. */
+  canEscalate?: boolean;
+  starterCapabilities?: readonly string[];
   audit: AuditLog;
   approvalTtlMs?: number;
   maxSteps?: number;
@@ -331,6 +346,26 @@ export class PlanService {
         this.#finish(plan.id, 'cancelled', 'la persona no autorizó la acción');
         return false;
       }
+      /*
+       * Una escalada aprobada no ejecuta nada: sólo dice con qué cerebro se piensa el paso
+       * siguiente. Va antes que el camino del run porque comparte tabla y estado con él, y
+       * confundirlos lanzaría un trabajo que nadie pidió a cambio de una consulta a la nube.
+       */
+      if (approval.actionType === 'escalate') {
+        const consumedEscalation = db.prepare(
+          "UPDATE approvals SET status = 'consumed', consumed_at = ? WHERE id = ? AND status = 'approved'",
+        ).run(clock.nowIso(), approval.id);
+        if (consumedEscalation.changes === 0) {
+          this.#completeStep(step.id, 'failed', { error: 'approval already consumed' });
+          this.#finish(plan.id, 'failed', 'esa aprobación ya se había usado');
+          return false;
+        }
+        // El permiso vale para el paso inmediatamente siguiente y para ninguno más.
+        db.prepare('UPDATE plans SET escalate_for_step = ? WHERE id = ?').run(step.ordinal + 1, plan.id);
+        this.#completeStep(step.id, 'completed', { summary: 'se autorizó consultar al modelo de la nube' });
+        return true;
+      }
+
       // Aprobada: se consume y se lanza el run que autorizaba, con la clave del paso.
       const input = step.input as { prompt: string; permissionProfile: PlanStep['kind'] extends never ? never : 'safe' | 'auto' | 'yolo' };
       const consumed = db.prepare("UPDATE approvals SET status = 'consumed', consumed_at = ? WHERE id = ? AND status = 'approved'")
@@ -386,6 +421,11 @@ export class PlanService {
     // otro workspace ni actúa como otra persona.
     const toolbox = new CoreAssistantToolbox({
       plan, workspace, sessions, health, runs, audit, user,
+      ...(this.#deps.mcp ? { mcp: this.#deps.mcp } : {}),
+      // En un plan el MCP es de sólo lectura, y la escalada sólo se ofrece si hay nube.
+      capabilityWrites: false,
+      canEscalate: this.#deps.canEscalate === true,
+      ...(this.#deps.starterCapabilities ? { starterCapabilities: this.#deps.starterCapabilities } : {}),
       // Lo que este plan ha lanzado, que es lo único que puede parar por su cuenta.
       ownRunIds: steps.map((step) => step.runId).filter((id): id is string => Boolean(id)),
       ...(this.#deps.attachments ? { attachments: this.#deps.attachments } : {}),
@@ -467,6 +507,37 @@ export class PlanService {
       return this.require(planId);
     }
 
+    if (decision.kind === 'escalate') {
+      const approvalId = newApprovalId();
+      const target = { model: 'cloud', reason: decision.reason, planId };
+      const digest = createHash('sha256')
+        .update(JSON.stringify({ actionType: 'escalate', target })).digest('hex');
+      db.prepare(`INSERT INTO approvals
+        (id, plan_id, action_type, target_json, action_digest, summary, requested_by, requested_at, expires_at, status)
+        VALUES (?, ?, 'escalate', ?, ?, ?, ?, ?, ?, 'pending')`)
+        .run(approvalId, planId, JSON.stringify(target), digest,
+          `Consultar al modelo de la nube: ${decision.reason}`,
+          plan.createdBy, at, new Date(clock.nowMs() + this.#approvalTtlMs).toISOString());
+      db.prepare(`INSERT INTO plan_steps
+        (id, plan_id, ordinal, kind, status, title, input_json, approval_id, idempotency_key, attempt)
+        VALUES (?, ?, ?, 'approval', 'waiting_approval', ?, ?, ?, ?, 1)`)
+        .run(stepId, planId, ordinal, 'Salir a la nube',
+          JSON.stringify(withOffer({ reason: decision.reason })), approvalId, idempotencyKey);
+      this.#setPlanStatus(planId, 'waiting_approval');
+      audit.record({
+        actorUser: plan.createdBy, eventType: 'assistant.escalation_requested', workspaceId: plan.workspaceId,
+        payload: { planId, approvalId, reason: decision.reason.slice(0, 300) },
+      });
+      return this.require(planId);
+    }
+
+    if (decision.kind === 'capability') {
+      // No se ofrece en un plan y por tanto no debería llegar; si llega, se dice por qué en vez de
+      // caer por el camino del run, que ejecutaría algo que nadie pidió.
+      return this.#finish(planId, 'failed',
+        'el modelo pidió ejecutar una capacidad del sistema, y eso sólo se hace desde una conversación');
+    }
+
     // Un run: se persiste el paso antes de crearlo, para que un reinicio a mitad encuentre el
     // checkpoint y no una ejecución huérfana.
     db.prepare(`INSERT INTO plan_steps
@@ -506,6 +577,16 @@ export class PlanService {
    * costando lo que uno de cuarenta.
    */
   #contextFor(plan: Plan, workspace: Workspace, steps: PlanStep[]): PlanContext {
+    /*
+     * Con qué cerebro se piensa este paso.
+     *
+     * Se lee de la base y no de un campo en memoria porque la autorización puede haberse dado en
+     * otro proceso —o antes de un reinicio— y porque vale exactamente para un ordinal: el paso
+     * siguiente vuelve a casa sin que nadie tenga que apagar nada.
+     */
+    const escalation = this.#deps.db.prepare('SELECT escalate_for_step FROM plans WHERE id = ?')
+      .get(plan.id) as { escalate_for_step: number | null } | undefined;
+    const source: 'local' | 'cloud' = escalation?.escalate_for_step === steps.length ? 'cloud' : 'local';
     const history: PlanHistoryEntry[] = steps.map((step) => ({
       ordinal: step.ordinal,
       kind: step.kind,
@@ -541,6 +622,7 @@ export class PlanService {
       history,
       pendingInput,
       pendingApprovals,
+      source,
       limits: {
         stepsUsed: steps.length,
         maxSteps: this.#maxSteps,

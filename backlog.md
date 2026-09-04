@@ -10,6 +10,48 @@ Convención: `[ ]` pendiente · `[-]` en curso · `[x]` hecho (con fecha, ficher
 
 ---
 
+## Bloque IA · el cerebro en casa (prioridad 1)
+
+Encargo del 2026-09-04: que el asistente deje de pensar en una API de pago y piense en la IA local
+del bastión, con conversación completa, MCP de sistema, y salida a la nube sólo preguntando antes.
+
+### [x] IA-01 · El asistente piensa en casa y sale con permiso
+
+Hecho 2026-09-04 · ADR-009 · `apps/core/src/{mcp,chat}/` (nuevos), `assistant/hybrid.ts`,
+`assistant/toolbox.ts`, `assistant/model.ts`, `plans/service.ts`, `apps/web/src/screens/assistant.tsx`
+· 53 pruebas nuevas (397 en total) + humo contra el `llama-server` y el MCP reales de Zeus
+
+Lo medido durante la implementación, que es lo que explica cada decisión:
+
+| Dato | Valor | Qué obligó a hacer |
+|---|---|---|
+| catálogo MCP completo | 8294 tokens | router de dos pasos, nunca la lista entera |
+| ofrecerle 10 tools / 40 tools | 26 s / 187 s | lotes de 8-10; el límite es el reloj, no la precisión |
+| reparto de un turno | 11,6 s elegir · 1,1 s ejecutar · 22,7 s redactar | acotar la observación, no el modelo |
+| prompt en frío con la máquina cargada | 5-7 tok/s | inyectar el lote de arranque en el contexto |
+| generado antes de llamar a una tool | hasta 546 tokens | tope de 400 y prompt que prohíbe divagar |
+
+De 453 s a 108 s en la misma pregunta y la misma máquina, con la respuesta correcta.
+
+### [ ] IA-02 · El redactor de 1,7B se equivoca al contar lo que ha leído
+
+Salió al probar IA-01 contra el servidor real. Los **datos** que trae son correctos —los saca del
+MCP y se pueden comprobar— pero la frase que los envuelve a veces no: dijo «el 68 % de la memoria
+está en uso» cuando el dato leído decía 38 %, y «60,73 GiB de 15,37 GiB total». No es del
+andamiaje: es el modelo.
+
+Tres salidas, por orden de coste:
+
+1. **Que cite el número tal cual.** Ya se le pide en el prompt («los números, exactos y con sus
+   unidades; no los redondees ni los conviertas») y ha mejorado, pero no lo garantiza.
+2. **Un modelo mayor.** Se descartó en su día por RAM —Jan-4B ocupaba 10,6 GiB y provocaba presión
+   de memoria—, pero con el KV cuantizado la cuenta es otra y merece volver a medirla.
+3. **Escalar cuando la pregunta lleva números que importan.** Es lo que ya sabe hacer, y hoy
+   depende de que el modelo se dé cuenta de que se está equivocando, que es justo lo que no hace.
+
+Mientras tanto, la interfaz enseña la consulta y su resultado desplegable: el número de verdad
+está a un clic de la frase que lo cuenta.
+
 ## Bloque UX · repensar la consola (prioridad 1)
 
 Encargo del 2026-09-02: repensar UI/UX, revisar qué librerías merece la pena incluir, mejorar los

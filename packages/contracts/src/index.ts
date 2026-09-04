@@ -11,3 +11,5 @@ export * from './plans.js';
 export * from './terminal.js';
 export * from './identity.js';
 export * from './import.js';
+export * from './mcp.js';
+export * from './chat.js';

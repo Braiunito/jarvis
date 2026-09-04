@@ -16,6 +16,13 @@ El Assistant **no** es una sexta variante de sesión: es un coordinador que crea
 aprobaciones por los mismos casos de uso que el trabajo directo. La terminal tampoco es un chat:
 es un TTY con su propia entrada.
 
+La **conversación** (ADR-009) tampoco es un plan, y por eso tiene su propia tabla. Un plan es una
+lista de pasos con checkpoint que puede pasarse cuatro horas esperando a que termine un run; una
+conversación es un ida y vuelta que se lee de arriba abajo. Comparten modelo, herramientas,
+aprobaciones y auditoría —una conversación puede acabar creando un plan—, pero meterlas en la
+misma tabla obligaría a que una de las dos fingiera ser la otra. Y una conversación puede no tener
+workspace: preguntar por el servidor no exige haber abierto antes una sesión de agente.
+
 ## Dónde vive la verdad de cada dato
 
 | Dato | Dueño | Persistencia | ¿Reconstruible? |
@@ -26,6 +33,8 @@ es un TTY con su propia entrada.
 | run, eventos de run | core | SQLite del core | parcialmente |
 | proceso del run | host de ejecución | tmux + spool | sí, reconciliable |
 | plan, paso, aprobación | core | SQLite del core | no |
+| conversación y sus mensajes | core | SQLite del core | no |
+| catálogo de capacidades MCP | el servidor MCP | caché con TTL en el core | sí |
 | terminal | host de ejecución | tmux | sí, redescubrible |
 | adjunto | host de ejecución | fichero efímero | no (la metadata sí es durable) |
 | cuota de la cuenta | core | snapshot con TTL | sí |
@@ -64,6 +73,25 @@ Las dos cosas que no se pueden confundir: `remote_cursor_bytes` es **cómo lee e
 **identidad pública** del evento. La primera puede cambiar de implementación; la segunda no se
 reutiliza jamás.
 
+## Dónde piensa el asistente
+
+Desde ADR-009 hay dos cerebros y una puerta entre ellos. El de casa —un `llama-server` en el
+bastión— trabaja; el de la nube se consulta, y sólo si alguien abre la puerta.
+
+```
+turno ─► modelo local ─┬─► decide algo                    → el core lo persiste
+                       └─► «esto se me escapa» (escalate) → aprobación → firma → un turno en la nube
+```
+
+No es «uno barato que reintenta con uno caro»: eso gastaría lo mismo sin que nadie se entere. El
+local se queda corto, **lo dice y espera**. Tampoco sale solo cuando se cae: un `llama-server`
+reiniciándose no es permiso para gastar fuera. Y el permiso vale para un turno, no para el plan.
+
+Lo que hace que esto sea usable con un modelo de 1,7 B no es el modelo: es el **presupuesto de
+contexto**. El catálogo del MCP de sistema son 8294 tokens medidos, así que no se le enseña: se le
+dan tres herramientas para navegarlo —áreas, búsqueda, ejecución— más un lote de arranque de cinco
+capacidades. Unos 1000 tokens en vez de 8294.
+
 ## Un turno del Assistant
 
 El Assistant coordina; el estado lo posee el core. Un turno es corto y siempre acaba en algo que
@@ -73,7 +101,9 @@ se puede guardar:
 contexto (resúmenes + referencias)
   → el modelo consulta lo que le falte      search_sessions · get_session_context · get_health
                                             list_runs · get_run · cancel_run · open_terminal_offer
+                                            list_capabilities · search_capabilities · use_capability
   → decide una acción del core              create_run · request_approval · ask_human · finish
+                                            request_capability · escalate
   → el core persiste el checkpoint y el turno termina
 ```
 
@@ -114,9 +144,11 @@ lo que la auditoría afirma después. No se recalcula al pintar el historial.
 |---|---|---|
 | consultas y comandos | REST JSON | inspeccionable, con códigos de estado y claves de idempotencia |
 | eventos de run | SSE | una sola dirección, reconexión con `Last-Event-ID` |
+| hilo de una conversación | SSE | lo mismo, y por lo mismo: el `seq` del mensaje es el id del evento |
 | terminal | WebSocket | lo único de verdad bidireccional |
 | adjuntos | HTTP binario | streaming, sin acumular en memoria |
 | core ↔ aiSessions | HTTP interno | timeout y último dato bueno visible |
+| core ↔ servidor MCP | Streamable HTTP | lo que hablan los servidores MCP; sesión en cabecera |
 
 El gateway pone plazo a lo que habla con el core (`JARVIS_CORE_TIMEOUT_MS`), pero **sólo hasta las
 cabeceras**: un stream de eventos dura horas por diseño y un WebSocket de terminal puede pasarlas
@@ -129,8 +161,11 @@ Al stream no se le pone plazo porque su latido es contrato del core —`KEEPALIV
 `runs/sse.ts`, hoy 15 s—. Es una dependencia que se rompería en silencio, así que quien cambie ese
 latido tiene que mirar también el proxy.
 
-MCP no es la API de la aplicación: si vuelve, será como adaptador para modelos externos, llamando
-a los mismos casos de uso.
+MCP no es la API de la aplicación —el navegador no lo habla y ninguna pantalla depende de que un
+servidor MCP esté vivo—, pero desde ADR-009 el core sí lo **consume**: los servidores declarados en
+su configuración entran por `McpService`, que es un caso de uso con su allowlist, su auditoría y su
+salud. La regla del toolbox no se relaja: una herramienta sigue llamando a un caso de uso del core
+y nunca a una API HTTP. Lo que cambia es que ahora hay un caso de uso al que llamar.
 
 ## Estructura
 
@@ -143,6 +178,9 @@ packages/agent-adapters   SSH, capacidades, adaptadores de CLI, protocolo del sp
 packages/testkit          ssh falso, índice falso, autenticador falso
 packages/legacy-contract-tests   los contratos congelados de la migración
 ```
+
+Dentro del core, dos verticales nuevos: `mcp/` (cliente de Streamable HTTP y el caso de uso que
+lo gobierna) y `chat/` (la conversación, su stream y sus aprobaciones).
 
 `apps/core/src` se organiza por verticales (`runs/`, `sessions/`, `plans/`…), cada uno con su
 esquema, sus rutas, sus casos de uso y su persistencia juntos. No hay carpetas horizontales de

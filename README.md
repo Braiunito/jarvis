@@ -27,6 +27,9 @@ navegador ─► caddy ─► gateway ─► core ─┬─► SQLite (runs, wor
 - **web** — React sin stores globales: el servidor manda, TanStack Query cachea y la URL guarda
   qué se está mirando.
 
+El asistente piensa en una IA **local** del bastión y sale a la nube sólo con permiso explícito
+([ADR-009]); por el mismo camino consulta el MCP de sistema de la máquina.
+
 Un run no vive en la conexión SSH del core: vive en una sesión tmux del host de ejecución que
 escribe a un spool. Por eso `docker restart core` no interrumpe el trabajo ([ADR-003]).
 
@@ -50,7 +53,7 @@ un doble de todo.
 ## Pruebas
 
 ```bash
-npm run test            # 165 pruebas: contratos, unidad e integración
+npm run test            # 397 pruebas: contratos, unidad e integración
 npm run test:contracts  # sólo los contratos dorados, sin servicios externos
 npm run test:e2e        # los cinco flujos críticos, escritorio y móvil
 npm run check           # typecheck + lint + test
@@ -102,3 +105,4 @@ escotilla se revisa **en cada despliegue** ([docs/security.md](docs/security.md)
 
 [ADR-001]: docs/adr/0001-gateway-core-privilege-boundary.md
 [ADR-003]: docs/adr/0003-remote-runner-tmux-spool.md
+[ADR-009]: docs/adr/0009-local-brain-and-mcp-client.md

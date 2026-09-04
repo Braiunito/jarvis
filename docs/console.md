@@ -11,6 +11,7 @@ El carril lateral no lista secciones por lo que son sino por el orden en que se 
 | | |
 |---|---|
 | **Inicio** | retomar: qué hay abierto, qué corre y qué pide algo de ti |
+| **Asistente** | preguntar: a la casa, a las máquinas, o por dónde seguir |
 | **Sesiones** | encontrar la conversación que existe en alguna máquina |
 | **Trabajo** | vigilar lo que se mandó y cómo acabó |
 | **Terminal** | intervenir a mano |
@@ -18,6 +19,34 @@ El carril lateral no lista secciones por lo que son sino por el orden en que se 
 
 Buscar es una consulta, no una navegación: filtrar en Sesiones no cambia el workspace activo.
 Abrir una sesión es lo único que cambia de contexto, y es atómico.
+
+## El Asistente enseña su trabajo
+
+Va segundo en el carril, justo después de Inicio, porque es por donde se empieza a preguntar
+cuando no se sabe todavía qué se está buscando. Antes esto vivía dentro de un workspace y sólo
+servía si ya habías elegido una sesión, que es pedirle el contexto a quien viene a preguntar
+precisamente por eso.
+
+Tres decisiones que gobiernan la pantalla:
+
+**Cada consulta se ve, con su nombre real.** Cuando el asistente mira la memoria del servidor, en
+el hilo aparece `zeus.memory_pressure` y se puede desplegar para ver qué devolvió. Un asistente
+que consulta seis cosas y contesta una frase sin enseñar de dónde sale es indistinguible de uno
+que se lo inventa. Va plegado porque el hilo lo lee una persona y un volcado de JSON entre dos
+frases lo rompe.
+
+**De dónde salió cada respuesta, en la burbuja.** «Casa» o «nube», con forma propia y no sólo
+color. Es la pregunta que alguien se hace sobre una respuesta concreta —¿esto ha costado dinero?—
+y no sobre la conversación entera, así que va en cada una y no en una leyenda.
+
+**Cuánta cuerda tiene, donde se está usando.** El selector Manual/Automático está en la cabecera
+del hilo y no enterrado en unos ajustes: es la decisión que más cambia lo que va a pasar a
+continuación. En manual, hasta lanzar un trabajo en modo seguro pasa por una tarjeta. Lo que
+`auto` **no** suelta nunca —tocar una máquina, escribir, parar trabajo humano, salir a la nube—
+no se puede apagar desde aquí, porque eso separa «que trabaje solo» de «que decida solo».
+
+Las tarjetas de permiso van dentro del hilo, con el nombre exacto de la capacidad y sus argumentos
+sin recortar. Entre lo que se lee y lo que se ejecuta no cabe un cambio: el digest lo garantiza.
 
 ## Sesión y trabajo no son lo mismo
 
@@ -123,6 +152,7 @@ apps/web/src/ui/              piezas compartidas
   new-session.tsx             estrenar una sesión desde cero
   announce.tsx               la única región `aria-live` de la aplicación
 apps/web/src/api/queries.ts   TanStack Query: los datos del servidor, sin store global
+apps/web/src/api/chat-stream.ts  el hilo del asistente en directo, con el mismo contrato SSE
 ```
 
 Las librerías de interfaz que entran y las que se descartaron, con su coste en bundle, están en
