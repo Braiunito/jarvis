@@ -9,7 +9,7 @@
  * detalle vive al lado para no perder de vista el resto mientras se lee uno.
  */
 import type { JSX } from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Run } from '@jarvis/contracts';
 import {
   useAcknowledgeRun, useCancelRun, useMetrics, useRetryRun, useRun, useRuns,
@@ -29,6 +29,20 @@ import { EventTimeline } from '../ui/event-log.jsx';
 
 type Filter = 'activos' | 'atencion' | 'terminados' | 'todos';
 
+/*
+ * Ventanas de tiempo, en días. Son las que se piden de verdad al mirar trabajo:
+ * «lo de hoy», «esta semana». Una fecha exacta no la busca nadie aquí; para eso
+ * está el identificador.
+ */
+type Recencia = 'hoy' | '3d' | '7d' | 'todo';
+const RECENCIA_LABEL: Record<Recencia, string> = {
+  hoy: 'Hoy',
+  '3d': 'Últimos 3 días',
+  '7d': 'Última semana',
+  todo: 'Todo',
+};
+const RECENCIA_DIAS: Record<Exclude<Recencia, 'todo'>, number> = { hoy: 1, '3d': 3, '7d': 7 };
+
 const ACTIVE = ['queued', 'preparing', 'running', 'cancelling'];
 const ATTENTION = ['waiting', 'failed', 'timed_out'];
 
@@ -45,7 +59,16 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
   const metrics = useMetrics(24);
   const [selected, setSelected] = useState<string | null>(runId);
   const [filter, setFilter] = useState<Filter>('todos');
-  const current = selected ?? runId;
+  // Los mismos ejes que en Sesiones: con muchos trabajos, «todos» no sirve de
+  // nada si no se puede recortar por quién lo hizo, dónde y cuándo.
+  const [provider, setProvider] = useState('');
+  const [host, setHost] = useState('');
+  const [recencia, setRecencia] = useState<Recencia>('todo');
+  // Cerrar la hoja tiene que poder ganarle también al id que viene en la URL: si
+  // no, en estrecho el detalle se queda abierto y no hay forma de volver a la
+  // lista sin navegar a otro sitio.
+  const [cerrado, setCerrado] = useState(false);
+  const current = cerrado ? null : (selected ?? runId);
   const detail = useRun(current);
   const stream = useRunStream(current);
   const cancel = useCancelRun();
@@ -56,10 +79,28 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
   const active = all.filter((run) => ACTIVE.includes(run.status));
   const attention = all.filter((run) => ATTENTION.includes(run.status) && !run.acknowledgedAt);
 
-  const visible = filter === 'activos' ? active
-    : filter === 'atencion' ? attention
-      : filter === 'terminados' ? all.filter((run) => ['completed', 'cancelled'].includes(run.status))
-        : all;
+  const hosts = useMemo(() => [...new Set(all.map((run) => run.executionHost))].sort(), [all]);
+  const providers = useMemo(() => [...new Set(all.map((run) => run.provider))].sort(), [all]);
+
+  // Se aplica DESPUÉS de la pestaña de estado: la pestaña dice qué clase de
+  // trabajo se mira y estos recortan dentro de esa clase.
+  const recorta = (rows: Run[]): Run[] => rows.filter((run) => {
+    if (provider && run.provider !== provider) return false;
+    if (host && run.executionHost !== host) return false;
+    if (recencia !== 'todo') {
+      const desde = Date.now() - RECENCIA_DIAS[recencia] * 24 * 60 * 60 * 1000;
+      if (new Date(run.createdAt).getTime() < desde) return false;
+    }
+    return true;
+  });
+
+  const visible = recorta(
+    filter === 'activos' ? active
+      : filter === 'atencion' ? attention
+        : filter === 'terminados' ? all.filter((run) => ['completed', 'cancelled'].includes(run.status))
+          : all,
+  );
+  const recortando = Boolean(provider || host || recencia !== 'todo');
 
   const run = detail.data?.run;
   // La cuenta que primero va a molestar: las métricas ya las devuelven ordenadas.
@@ -173,6 +214,46 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                 { id: 'terminados', label: 'Terminados', icon: ACTION_ICON.approve },
               ]}
             />
+
+            {/* Los mismos ejes que en Sesiones. Van debajo de las pestañas porque
+                la pestaña elige QUÉ clase de trabajo se mira y esto recorta dentro. */}
+            <div className="row" style={{ flexWrap: 'wrap', gap: 8, padding: '10px 0 2px' }}>
+              <label className="row small">
+                <span className="muted">Agente</span>
+                <select className="select control-sm" value={provider}
+                  onChange={(event) => setProvider(event.target.value)}>
+                  <option value="">Todos</option>
+                  {providers.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </label>
+
+              <label className="row small">
+                <span className="muted">Host</span>
+                <select className="select control-sm" value={host}
+                  onChange={(event) => setHost(event.target.value)}>
+                  <option value="">Todos</option>
+                  {hosts.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </label>
+
+              <label className="row small">
+                <span className="muted">Cuándo</span>
+                <select className="select control-md" value={recencia}
+                  onChange={(event) => setRecencia(event.target.value as Recencia)}>
+                  {Object.entries(RECENCIA_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+
+              {recortando ? (
+                <button type="button" className="btn small ghost"
+                  onClick={() => { setProvider(''); setHost(''); setRecencia('todo'); }}>
+                  <Glyph icon={ACTION_ICON.reject} />
+                  Quitar filtros
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {runs.isLoading ? (
@@ -221,11 +302,12 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                 <tbody>
                   {visible.slice(0, 60).map((item) => (
                     <tr key={item.id} aria-selected={current === item.id} tabIndex={0}
-                      onClick={() => setSelected(item.id)}
+                      onClick={() => { setSelected(item.id); setCerrado(false); }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
                           setSelected(item.id);
+                          setCerrado(false);
                         }
                       }}>
                       <td>
@@ -285,7 +367,24 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
           )}
         </Card>
 
-        <Card title={run ? 'Detalle del trabajo' : 'Nada seleccionado'} icon={ACTION_ICON.session}>
+        {/* En estrecho el velo cierra la hoja tocando fuera, como cualquier modal.
+            En ancho no se pinta: el detalle es la columna lateral de siempre. */}
+        {run ? (
+          <button type="button" className="detail-sheet-backdrop" aria-label="Cerrar el detalle"
+            onClick={() => { setSelected(null); setCerrado(true); }} />
+        ) : null}
+
+        {/* `detail-sheet` saca el detalle del flujo en pantallas estrechas, donde
+            si no quedaba al final de toda la lista y no se veía al pulsar. */}
+        <Card className={run ? 'detail-sheet is-open' : 'detail-sheet'}
+          title={run ? 'Detalle del trabajo' : 'Nada seleccionado'} icon={ACTION_ICON.session}
+          actions={run ? (
+            <button type="button" className="btn small ghost"
+              onClick={() => { setSelected(null); setCerrado(true); }}
+              aria-label="Cerrar el detalle">
+              <Glyph icon={ACTION_ICON.reject} />
+            </button>
+          ) : undefined}>
           {!run ? (
             <p className="small muted" style={{ margin: 0 }}>
               Elige un trabajo de la lista para ver dónde corrió, con qué permiso y qué dijo.

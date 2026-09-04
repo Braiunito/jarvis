@@ -420,6 +420,64 @@ a:hover { text-decoration: underline; }
   .grid.cols-3, .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid.main-side { grid-template-columns: minmax(0, 1fr); }
 }
+
+/*
+ * El panel de detalle, en estrecho, como hoja sobre la pantalla.
+ *
+ * `main-side` se apila en una sola columna, así que el detalle queda DEBAJO de
+ * toda la lista: en un móvil con veinte sesiones hay que recorrerlas enteras
+ * para ver lo que acabas de tocar, y el panel aparece fuera de la vista. Peor
+ * aún, nada indica que haya pasado algo al pulsar.
+ *
+ * Cuando hay algo seleccionado ese panel pasa a ser una hoja anclada abajo, que
+ * es donde llega el pulgar. En ancho no cambia nada: sigue siendo la columna
+ * lateral de siempre.
+ */
+@media (max-width: 1180px) {
+  .card.detail-sheet.is-open {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 70;
+    margin: 0;
+    max-height: min(80vh, 640px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: 0;
+    box-shadow: 0 -14px 44px rgb(0 0 0 / 45%);
+    /* Respeta la barra del sistema en iOS/Android para que el último botón no
+       quede debajo del gesto de inicio. */
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+    animation: detail-sheet-in 160ms ease-out;
+  }
+
+  /* Velo: apaga la lista de detrás para que se entienda que la hoja manda. */
+  .detail-sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 69;
+    background: rgb(0 0 0 / 45%);
+    border: 0;
+    padding: 0;
+    animation: detail-sheet-in 160ms ease-out;
+  }
+}
+
+/* En ancho no hay hoja ni velo: el detalle es la columna lateral de siempre. */
+@media (min-width: 1181px) {
+  .detail-sheet-backdrop { display: none; }
+}
+
+@keyframes detail-sheet-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card.detail-sheet.is-open, .detail-sheet-backdrop { animation: none; }
+}
 @media (max-width: 760px) {
   .grid.cols-3, .grid.cols-2, .grid.cols-4 { grid-template-columns: minmax(0, 1fr); }
 }

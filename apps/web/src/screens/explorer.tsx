@@ -394,8 +394,18 @@ export function ExplorerScreen(): JSX.Element {
           )}
         </Card>
 
-        {/* Vista previa: para no tener que abrir un contexto sólo para mirarlo. */}
-        <Card title={selected ? 'Vista previa' : 'Nada seleccionado'} icon={ACTION_ICON.open}
+        {/* En estrecho el velo cierra la hoja tocando fuera, como cualquier modal.
+            En ancho no se pinta: el detalle es la columna lateral de siempre. */}
+        {selected ? (
+          <button type="button" className="detail-sheet-backdrop" aria-label="Cerrar la vista previa"
+            onClick={() => setSelected(null)} />
+        ) : null}
+
+        {/* Vista previa: para no tener que abrir un contexto sólo para mirarlo.
+            `detail-sheet` la saca del flujo en pantallas estrechas, donde si no
+            quedaba al final de toda la lista y no se veía al pulsar una fila. */}
+        <Card className={selected ? 'detail-sheet is-open' : 'detail-sheet'}
+          title={selected ? 'Vista previa' : 'Nada seleccionado'} icon={ACTION_ICON.open}
           actions={selected ? (
             <button type="button" className="btn small ghost" onClick={() => setSelected(null)}
               aria-label="Cerrar la vista previa">
