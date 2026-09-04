@@ -99,7 +99,21 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
     setUseRecovery(false);
   }
 
-  async function loginWithPasskey(): Promise<void> {
+  /*
+   * `hint` le dice al navegador DÓNDE buscar la llave.
+   *
+   * Sin pista, Chrome y Windows miran primero su propio almacén y ofrecen
+   * «usar una passkey guardada», que pide el PIN del equipo: un cajón donde no
+   * está la llave si se enroló en el móvil. La opción de usar el teléfono existe
+   * —el servidor manda `allowCredentials: []`, o sea acepta cualquiera— pero
+   * queda escondida detrás de un enlace que nadie encuentra.
+   *
+   * Con `hybrid` el navegador va directo al QR y el Bluetooth, que es lo que
+   * hace falta para validar con el móvil desde otro equipo. Es una PISTA, no una
+   * restricción: un navegador que no la entienda la ignora y se comporta como
+   * antes.
+   */
+  async function loginWithPasskey(hint?: 'hybrid'): Promise<void> {
     setBusy(true);
     setError(null);
     try {
@@ -113,7 +127,8 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
           ...publicKey,
           challenge: b64uToBytes(publicKey.challenge as unknown as string),
           allowCredentials: [],
-        },
+          ...(hint ? { hints: [hint] } : {}),
+        } as PublicKeyCredentialRequestOptions,
       }) as PublicKeyCredential | null;
       if (!credential) throw new Error('el autenticador no devolvió nada');
       const response = credential.response as AuthenticatorAssertionResponse;
@@ -227,6 +242,18 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
               <Glyph icon={ACTION_ICON.secure} />
               {busy ? 'Esperando al autenticador…' : 'Entrar con huella'}
             </button>
+
+            {/* La llave puede estar en otro aparato. Sin este botón hay que dar
+                con la opción de «usar otro dispositivo» que el navegador esconde. */}
+            <button type="button" className="btn block" disabled={busy || !passkeySupported}
+              onClick={() => void loginWithPasskey('hybrid')}>
+              <Glyph icon={NAV_ICON.terminal} />
+              Usar el móvil para validar
+            </button>
+            <p className="small muted" style={{ margin: 0 }}>
+              Enseña un código QR: lo escaneas con el teléfono donde registraste la huella.
+              Hace falta Bluetooth encendido en los dos.
+            </p>
             {!passkeySupported ? (
               <p className="small muted" style={{ margin: 0 }}>
                 Este navegador no expone WebAuthn aquí. Las passkeys sólo funcionan en contexto
