@@ -23,6 +23,25 @@ export default tseslint.config(
       'no-console': 'off',
       eqeqeq: ['error', 'smart'],
       'prefer-const': 'error',
+      /*
+       * Nada de HTML crudo, y que lo diga la herramienta.
+       *
+       * El renderizador de markdown del asistente no produce cadenas de HTML a propósito: devuelve
+       * nodos de React, así que no hay nada que sanitizar. Esa propiedad sólo vale si se mantiene,
+       * y el día que alguien la rompa será por un motivo razonable —«es que el informe trae su
+       * propio formato»— con un modelo escribiendo la cadena. Se comprueba con `no-restricted-syntax`
+       * y no con `eslint-plugin-react` porque una regla no justifica un plugin entero.
+       */
+      'no-restricted-syntax': ['error',
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: 'HTML crudo no: el markdown del asistente devuelve nodos de React para que no haya nada que sanitizar.',
+        },
+        {
+          selector: "Property[key.name='dangerouslySetInnerHTML']",
+          message: 'HTML crudo no: el markdown del asistente devuelve nodos de React para que no haya nada que sanitizar.',
+        },
+      ],
     },
   },
   {

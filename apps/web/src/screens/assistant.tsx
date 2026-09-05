@@ -32,6 +32,7 @@ import {
   ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, SOURCE_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
 import { useAskAssistant } from '../ui/ask-assistant.jsx';
+import { Markdown } from '../ui/markdown.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { DataRow, Segmented } from '../ui/primitives.jsx';
 
@@ -335,8 +336,17 @@ function MessageRefs({ message }: { message: ChatMessage }): JSX.Element | null 
   const refs = message.refs;
   const terminals = refs.filter(
     (ref): ref is Extract<ChatRef, { kind: 'terminal' }> => ref.kind === 'terminal');
+  /*
+   * Las pastillas de acción: workspace, sesión y trabajo.
+   *
+   * Se enumeran los tipos en vez de excluir los que no van, y es a propósito. Antes esto era un
+   * «todo lo que no sea terminal» con la sesión de comodín al final, y en cuanto el contrato ganó
+   * la variante `artifact` esa rama empezó a recibir algo que no sabía pintar. Enumerando, el día
+   * que aparezca un tipo nuevo el compilador señala aquí en vez de que la pantalla lo intente.
+   */
   const compact = refs.filter(
-    (ref): ref is Exclude<ChatRef, { kind: 'terminal' }> => ref.kind !== 'terminal');
+    (ref): ref is Extract<ChatRef, { kind: 'workspace' | 'session' | 'run' }> =>
+      ref.kind === 'workspace' || ref.kind === 'session' || ref.kind === 'run');
 
   /*
    * `runIds` es lo que citaban las filas de antes y sigue vivo, así que se pinta igual. Lo que ya
@@ -410,7 +420,15 @@ function MessageBubble({ message }: { message: ChatMessage }): JSX.Element {
           : <span className="tiny faint">tú</span>}
         <span className="tiny faint">{relativeTime(message.createdAt)}</span>
       </div>
-      <div className="chat-bubble-text">{message.text}</div>
+      {/*
+        * Formato sólo en lo que escribe el asistente.
+        *
+        * Lo que escribió la persona se pinta literal: nadie quiere que su propio mensaje cambie de
+        * forma al enviarlo, y un `*` entre asteriscos en una pregunta es un asterisco.
+        */}
+      {message.role === 'assistant'
+        ? <div className="chat-bubble-text"><Markdown source={message.text} /></div>
+        : <div className="chat-bubble-text">{message.text}</div>}
       <MessageRefs message={message} />
     </div>
   );

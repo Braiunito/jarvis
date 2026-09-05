@@ -53,6 +53,24 @@ export default defineConfig({
           setupFiles: ['tests/setup/env.ts'],
         },
       },
+      /*
+       * La web, aparte y no dentro de `unit`.
+       *
+       * `unit` es `environment: 'node'` y así tiene que seguir. Lo que se prueba aquí es el parser
+       * de markdown, que es una función pura de cadena a descriptores y no necesita DOM: por eso
+       * está partido en dos: la parte con casos raros —esquemas de enlace, tope de tamaño, tabla
+       * mal cerrada— se prueba sin navegador y sin una sola dependencia nueva. El día que haga
+       * falta afirmar sobre lo renderizado, este proyecto cambia a jsdom y `unit` no se entera.
+       */
+      {
+        plugins: [tsSources()],
+        resolve: { alias },
+        test: {
+          name: 'web',
+          include: ['apps/web/test/**/*.test.ts'],
+          environment: 'node',
+        },
+      },
       {
         plugins: [tsSources()],
         resolve: { alias },
