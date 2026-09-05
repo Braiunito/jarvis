@@ -279,6 +279,11 @@ const badProvider = (input: Record<string, unknown>): string | null => {
  *
  * Las dos que están aquí son idempotentes por naturaleza: ofrecer una terminal deja una oferta, no
  * la acumula, y abrir un workspace devuelve el mismo. Repetirlas no aporta nada que no estuviera.
+ *
+ * **Esto vale para lo que deja algo puesto, no para lo que lee.** Meter aquí una herramienta de
+ * lectura —`get_session_context`, por ejemplo— haría que pedir más contexto de la misma sesión se
+ * contestara «ya lo preguntaste», y el modelo se quedaría sin poder profundizar sin que nadie se
+ * entere. Hay una prueba que lo fija.
  */
 const MEMO_KEY_FIELDS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   open_terminal_offer: ['host', 'provider', 'sessionId'],
