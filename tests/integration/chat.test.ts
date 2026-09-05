@@ -1112,4 +1112,77 @@ describe('CHAT · la memoria de las sesiones sobrevive al turno', () => {
     expect(terminal).toBeDefined();
     expect(terminal).toMatchObject({ sessionId: 'sid-iod', cwd: '/var/www/landing' });
   });
+  it('sin referencia guardada, el directorio sale del workspace que ya estaba abierto', async () => {
+    /*
+     * El caso de producción, y el que las otras tres no cogían.
+     *
+     * `search_sessions` **no deja referencia** —ocho botones bajo una respuesta no son una
+     * acción—, así que el `cwd` que trae la búsqueda no se guarda en ningún sitio y dos turnos
+     * después no existe. Las pruebas de arriba leen el transcript en el primer turno, y esa
+     * lectura sí deja una ref con directorio: por eso pasaban mientras el caso real seguía
+     * roto. Aquí el turno 1 sólo busca, como buscó de verdad.
+     *
+     * Lo que sí es una fila con directorio y con enlace de vuelta es el workspace.
+     */
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        await toolbox.invoke('search_sessions', { q: 'iod' });
+        return { kind: 'finish', summary: 'la encontré' };
+      },
+      async (toolbox) => {
+        await toolbox.invoke('open_terminal_offer', {
+          reason: 'verlo mientras barre', host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+        });
+        return { kind: 'finish', summary: 'ahí lo tienes' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: conDirectorio() }));
+    // Alguien la abrió antes: es una fila en la base, no algo que este hilo recuerde.
+    const abierto = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-iod' }, cwd: '/var/www/landing' }, user,
+    ).workspace;
+
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'busca lo de iod', user);
+    await settled(services, conversation.id);
+    services.chat.send(conversation.id, 'quiero verlo en vivo', user);
+    await settled(services, conversation.id);
+
+    const mensajes = services.chat.messages(conversation.id).filter((message) => message.role === 'assistant');
+    const terminal = mensajes.at(-1)?.refs.find((ref) => ref.kind === 'terminal');
+    expect(terminal).toMatchObject({ cwd: '/var/www/landing', workspaceId: abierto.id });
+  });
+
+  it('y si nunca se abrió, la terminal sale sin directorio: es el límite, no un fallo', async () => {
+    /*
+     * Una sesión que nadie abrió como workspace y cuya búsqueda quedó en otro turno no tiene de
+     * dónde sacar el directorio: arranca en el home, que es lo que ha hecho siempre.
+     *
+     * Se prueba para que el día que cambie se vea. Un límite conocido y escrito no es lo mismo
+     * que uno que se descubre en producción, que es como se descubrió éste.
+     */
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        await toolbox.invoke('search_sessions', { q: 'iod' });
+        return { kind: 'finish', summary: 'la encontré' };
+      },
+      async (toolbox) => {
+        await toolbox.invoke('open_terminal_offer', {
+          reason: 'mirarlo', host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+        });
+        return { kind: 'finish', summary: 'sin más' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: conDirectorio() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'busca lo de iod', user);
+    await settled(services, conversation.id);
+    services.chat.send(conversation.id, 'quiero verlo en vivo', user);
+    await settled(services, conversation.id);
+
+    const mensajes = services.chat.messages(conversation.id).filter((message) => message.role === 'assistant');
+    const terminal = mensajes.at(-1)?.refs.find((ref) => ref.kind === 'terminal');
+    // La oferta se hace igual: sin directorio sigue siendo útil, y decir que no se sabe es honesto.
+    expect(terminal).toMatchObject({ sessionId: 'sid-iod', cwd: null });
+  });
 });
