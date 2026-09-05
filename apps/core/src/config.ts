@@ -174,14 +174,6 @@ export const config = {
     || env['JARVIS_LOCAL_MODEL_MAX_TOKENS_PARAM'] || 'max_tokens',
   localModelReasoningEffort: env['JARVIS_ASSISTANT_MODEL_REASONING_EFFORT']
     || env['JARVIS_LOCAL_MODEL_REASONING_EFFORT'] || '',
-  /**
-   * Cuánto contexto tiene de verdad el modelo local.
-   *
-   * No es adorno: es el número con el que se decide cuánta historia y cuántas herramientas caben.
-   * Medido en el despliegue de casa, el catálogo completo del MCP son 8294 tokens contra 4096 de
-   * contexto, así que equivocarse aquí no degrada la respuesta, la impide.
-   */
-  localModelContextTokens: Number(env['JARVIS_LOCAL_MODEL_CONTEXT'] || 4096),
   /** Un modelo de casa a 7,5 tokens/s necesita más plazo que una API. */
   localModelTimeoutMs: Number(env['JARVIS_ASSISTANT_MODEL_TIMEOUT_MS'] || env['JARVIS_LOCAL_MODEL_TIMEOUT_MS'] || 120_000),
   /**
@@ -194,16 +186,15 @@ export const config = {
   localModelToolResultChars: Number(env['JARVIS_ASSISTANT_MODEL_TOOL_RESULT_CHARS']
     || env['JARVIS_LOCAL_MODEL_TOOL_RESULT_CHARS'] || 40_000),
   /**
-   * Cuánto puede generar el modelo local de una vez.
+   * Cuánto puede generar el asistente de una vez.
    *
-   * A 4-7 tokens por segundo, dejarle los 4096 de la nube son diez minutos por respuesta. Y no es
-   * teórico: midiendo una conversación real, generó 546 tokens antes de llamar a una herramienta
-   * —explicando lo que iba a hacer— y eso costó 78 s de los 215 de esa vuelta.
-   *
-   * Con 400 caben de sobra una llamada a herramienta (unos 60) y un párrafo de respuesta (unos
-   * 200). Lo que corta es la divagación, que es justo lo que hay que cortar.
+   * Generoso a propósito, y por un motivo que no es el de siempre: en un modelo que razona **lo
+   * que piensa cuenta contra este tope**. Con 400 —que era el valor de cuando esto era un modelo
+   * local lento— gpt-5-nano gastaba los 400 razonando y devolvía la respuesta **vacía**: ni
+   * herramienta ni texto. Un tope corto sólo es seguro con `reasoning_effort: minimal`.
    */
-  localModelMaxOutputTokens: Number(env['JARVIS_LOCAL_MODEL_MAX_OUTPUT_TOKENS'] || 400),
+  localModelMaxOutputTokens: Number(env['JARVIS_ASSISTANT_MODEL_MAX_OUTPUT_TOKENS']
+    || env['JARVIS_LOCAL_MODEL_MAX_OUTPUT_TOKENS'] || 4000),
   /**
    * Temperatura del modelo local.
    *

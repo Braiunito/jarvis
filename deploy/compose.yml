@@ -122,7 +122,6 @@ services:
       JARVIS_LOCAL_MODEL_API_KEY: ${JARVIS_LOCAL_MODEL_API_KEY:-}
       JARVIS_LOCAL_MODEL_NAME: ${JARVIS_LOCAL_MODEL_NAME:-}
       # Cuánto contexto tiene de verdad. Equivocarse aquí no degrada la respuesta: la impide.
-      JARVIS_LOCAL_MODEL_CONTEXT: ${JARVIS_LOCAL_MODEL_CONTEXT:-4096}
       JARVIS_LOCAL_MODEL_TIMEOUT_MS: ${JARVIS_LOCAL_MODEL_TIMEOUT_MS:-180000}
       # A dónde se escala. Por defecto, el modelo de siempre: quien ya lo tenía no toca nada.
       JARVIS_CLOUD_MODEL_BASE_URL: ${JARVIS_CLOUD_MODEL_BASE_URL:-}
