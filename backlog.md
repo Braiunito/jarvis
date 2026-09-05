@@ -39,7 +39,20 @@ rompió y lo que quedó pendiente está en
 [`evidence/2026-09-04-asistente-local.md`](evidence/2026-09-04-asistente-local.md); la taxonomía de
 en qué capa se arregla cada clase de fallo, en [ADR-009](docs/adr/0009-local-brain-and-mcp-client.md).
 
-### [ ] IA-02 · El redactor de 1,7B se equivoca al contar lo que ha leído
+### [x] IA-02 · El redactor de 1,7B se equivoca al contar lo que ha leído
+
+Cerrado 2026-09-05 **por reemplazo, no por arreglo**: el modelo local se retiró y su sitio lo ocupa
+`gpt-5-nano`, que contesta en 8 s y no garabatea los números. De las tres salidas que se anotaban
+abajo se tomó la segunda —un modelo mayor—, sólo que fuera de casa en vez de dentro. El coste pasó
+de 0 € y 2,9 GiB de RAM a unas dos diezmilésimas de dólar por pregunta.
+
+Queda escrito porque el diagnóstico sigue valiendo para el día que alguien vuelva a probar un
+modelo pequeño: los datos que traía eran correctos y comprobables; lo que fallaba era la frase que
+los envolvía.
+
+<details><summary>El análisis original</summary>
+
+### IA-02 (original) · El redactor de 1,7B se equivoca al contar lo que ha leído
 
 Salió al probar IA-01 contra el servidor real. Los **datos** que trae son correctos —los saca del
 MCP y se pueden comprobar— pero la frase que los envuelve a veces no: dijo «el 68 % de la memoria
@@ -57,6 +70,8 @@ Tres salidas, por orden de coste:
 
 Mientras tanto, la interfaz enseña la consulta y su resultado desplegable: el número de verdad
 está a un clic de la frase que lo cuenta.
+
+</details>
 
 ## Bloque UX · repensar la consola (prioridad 1)
 

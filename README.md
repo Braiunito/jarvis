@@ -27,8 +27,9 @@ navegador ─► caddy ─► gateway ─► core ─┬─► SQLite (runs, wor
 - **web** — React sin stores globales: el servidor manda, TanStack Query cachea y la URL guarda
   qué se está mirando.
 
-El asistente piensa en una IA **local** del bastión y sale a la nube sólo con permiso explícito
-([ADR-009]); por el mismo camino consulta el MCP de sistema de la máquina.
+El asistente piensa en un modelo barato —hoy `gpt-5-nano`— y sale al grande sólo con permiso
+explícito ([ADR-009]); por el mismo camino consulta el MCP de sistema de la máquina y lleva la
+cuenta de lo que gasta, porque el proveedor no la da.
 
 Un run no vive en la conexión SSH del core: vive en una sesión tmux del host de ejecución que
 escribe a un spool. Por eso `docker restart core` no interrumpe el trabajo ([ADR-003]).

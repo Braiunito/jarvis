@@ -1,6 +1,33 @@
 # ADR-009 · El cerebro vive en casa; MCP también se consume, detrás de un caso de uso
 
-Fecha: 2026-09-04 · Estado: aceptado · Amplía a [ADR-004](0004-rest-sse-ws-mcp.md)
+Fecha: 2026-09-04 · Estado: aceptado, **con la premisa enmendada el 2026-09-05** · Amplía a
+[ADR-004](0004-rest-sse-ws-mcp.md)
+
+> ## Enmienda · 2026-09-05 · el primer escalón deja de vivir en casa
+>
+> **Lo que cambia**: el modelo local se retira y su sitio lo ocupa `gpt-5-nano`. **Lo que no
+> cambia**: absolutamente todo lo demás —dos escalones, escalada con permiso, aprobaciones,
+> autonomía, cliente MCP, router—. Por eso esto es una enmienda y no un ADR nuevo: la estructura
+> que decidió este documento resultó ser la buena; lo que falló fue el modelo que se puso dentro.
+>
+> **Por qué**: un Qwen3 de 1,7B tardaba entre dos y seis minutos por pregunta y se equivocaba al
+> contar los números que acababa de leer (era el IA-02 del backlog). `gpt-5-nano` contesta lo mismo
+> en **ocho segundos** por unas **dos diezmilésimas de dólar**, con 400.000 de contexto. La
+> intuición de que un modelo local sería más barato era cierta en dinero y falsa en todo lo demás.
+>
+> **Lo que la enmienda enseña sobre el diseño**: que era el correcto. Cambiar de cerebro fueron
+> cinco variables de entorno y ningún cambio en el motor de conversación, en las aprobaciones ni en
+> el MCP. Un diseño que sobrevive a que su premisa central se caiga es lo que se quería.
+>
+> **Y una cosa que sí mejoró con el modelo nuevo**: el catálogo MCP se le da como **herramientas
+> propias** en vez de detrás del router. La API sólo acepta los nombres que se le declararon, así
+> que el modelo ya no puede inventarse una capacidad: esa clase de fallo desaparece en vez de
+> gestionarse. El router sigue ahí y entra solo cuando el catálogo pasa de 128 funciones, que es
+> donde la API contesta 400.
+>
+> Los nombres `local` y `cloud` se quedan en el código y en la base por compatibilidad, pero ya no
+> significan dónde vive el modelo: significan **qué escalón es**. La interfaz dejó de decir «casa»
+> y «nube» y dice el nombre del modelo, porque lo otro era mentira en cada mensaje.
 
 ## Contexto
 

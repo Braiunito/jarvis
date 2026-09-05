@@ -196,3 +196,31 @@ inventara argumentos.
 - El banco de pruebas de `~/harness-ia/` (fuera de este repositorio) tiene los números de
   referencia **anteriores** a la integración. Correrlo ahora y comparar dice si enchufarlo añadió
   espera o se comió aciertos.
+
+
+## Epílogo · 2026-09-05 · el modelo local se retira
+
+Braian dio el experimento por fallido, y con razón. Todo lo de arriba funcionaba, y aun así ocho
+segundos contra dos-a-seis minutos no es una diferencia de grado.
+
+`gpt-5-nano` ocupa su sitio. Medido contra el stack desplegado, las mismas preguntas:
+
+| Pregunta | Qwen3-1.7B local | gpt-5-nano |
+|---|---|---|
+| «Hola» | 12 s (tras arreglarlo; antes >8 min) | 8 s |
+| «¿cómo va la memoria?» | 108-343 s | **8 s** |
+| «¿qué tal las cámaras?» | no llegaba a contestar | 8 s |
+| Números de la respuesta | a veces inventados | correctos |
+| Coste | 0 € y 2,9 GiB de RAM en el bastión | ~0,0002 $ |
+
+Lo que la API obligó a cambiar, comprobado contra ella y no supuesto: `max_tokens` da 400 —hay que
+usar `max_completion_tokens`—, la temperatura sólo admite la suya, y `reasoning_effort: low` es el
+punto bueno: con `minimal` no delibera lo suficiente para decidir que ya tiene el dato y repite la
+misma consulta hasta agotar el turno.
+
+**Lo que se conserva de esta campaña, y es lo que la hace valer**: todo lo que se aprendió aquí
+sigue en pie. Los topes de reloj y de consultas, el saneo de argumentos, el ajuste al esquema, el
+memo por turno, la limpieza de respuestas, el recorte que se anuncia. Nada de eso era del modelo
+pequeño: era de tener un modelo delante. Y el diseño de dos escalones aguantó que se le cayera la
+premisa central —cambiar de cerebro fueron cinco variables de entorno—, que es lo que se le pide a
+un diseño.

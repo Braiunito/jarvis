@@ -75,22 +75,29 @@ reutiliza jamás.
 
 ## Dónde piensa el asistente
 
-Desde ADR-009 hay dos cerebros y una puerta entre ellos. El de casa —un `llama-server` en el
-bastión— trabaja; el de la nube se consulta, y sólo si alguien abre la puerta.
+Desde ADR-009 hay dos escalones y una puerta entre ellos. El primero contesta siempre y es barato;
+al segundo se le consulta, y sólo si alguien abre la puerta.
 
 ```
-turno ─► modelo local ─┬─► decide algo                    → el core lo persiste
-                       └─► «esto se me escapa» (escalate) → aprobación → firma → un turno en la nube
+turno ─► primer escalón ─┬─► decide algo                    → el core lo persiste
+                         └─► «esto se me escapa» (escalate) → aprobación → firma → un turno arriba
 ```
 
 No es «uno barato que reintenta con uno caro»: eso gastaría lo mismo sin que nadie se entere. El
-local se queda corto, **lo dice y espera**. Tampoco sale solo cuando se cae: un `llama-server`
-reiniciándose no es permiso para gastar fuera. Y el permiso vale para un turno, no para el plan.
+primero se queda corto, **lo dice y espera**. Tampoco sale solo cuando se cae: un modelo que no
+responde no es permiso para gastar en el caro. Y el permiso vale para un turno, no para el plan.
 
-Lo que hace que esto sea usable con un modelo de 1,7 B no es el modelo: es el **presupuesto de
-contexto**. El catálogo del MCP de sistema son 8294 tokens medidos, así que no se le enseña: se le
-dan tres herramientas para navegarlo —áreas, búsqueda, ejecución— más un lote de arranque de cinco
-capacidades. Unos 1000 tokens en vez de 8294.
+Los dos escalones son hoy `gpt-5-nano` y `gpt-5`, y la diferencia es de veinticinco veces el
+precio. Durante un día el primero fue un `llama-server` en el propio bastión; la enmienda de
+ADR-009 cuenta por qué se retiró y, sobre todo, que cambiarlo fueron cinco variables de entorno.
+Los nombres `local` y `cloud` que quedan en el código significan **qué escalón**, no dónde vive.
+
+**El catálogo de capacidades se ofrece de dos formas**, y la elige el core solo. Si cabe bajo el
+tope de funciones por petición —128 en la API de OpenAI—, cada capacidad va como herramienta
+propia: el modelo la llama por su nombre y **no puede inventarse uno**, porque la API sólo acepta
+los declarados. Si no cabe, se vuelve al router: tres herramientas para navegar áreas, buscar y
+ejecutar. El segundo modo nació para un modelo al que el catálogo no le cabía en el contexto, y se
+queda porque el catálogo sigue creciendo.
 
 ## Un turno del Assistant
 
