@@ -1185,4 +1185,55 @@ describe('CHAT · la memoria de las sesiones sobrevive al turno', () => {
     // La oferta se hace igual: sin directorio sigue siendo útil, y decir que no se sabe es honesto.
     expect(terminal).toMatchObject({ sessionId: 'sid-iod', cwd: null });
   });
+  it('una referencia guardada sin directorio no impide ir a buscarlo al workspace', async () => {
+    /*
+     * El caso que cerró la cadena, y el que las dos de arriba no cogían.
+     *
+     * Una ref `session` guardada lleva la sesión pero puede no llevar el directorio: si nadie lo
+     * supo cuando se escribió, va en `null`. Con eso, el hilo siembra el turno siguiente con una
+     * entrada que **existe y está vacía**, y mirar «¿hay entrada?» en vez de «¿hay dato?» daba por
+     * resuelto lo que no lo estaba: la consulta al workspace no llegaba a hacerse.
+     *
+     * Mis dos pruebas anteriores pasaban porque su fixture no sembraba nada, así que la entrada no
+     * existía y el camino de respaldo sí se tomaba. Recordar mal y no recordar no se prueban igual.
+     */
+    const local = new ScriptedBrain('local', [
+      // Turno 1: lee sin haber buscado, así que la ref `session` sale sin directorio.
+      async (toolbox) => {
+        await toolbox.invoke('get_session_context', {
+          host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+        });
+        return { kind: 'finish', summary: 'era el timeout' };
+      },
+      async (toolbox) => {
+        await toolbox.invoke('open_terminal_offer', {
+          reason: 'verlo mientras barre', host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+        });
+        return { kind: 'finish', summary: 'ahí lo tienes' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: conDirectorio() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'de qué iba lo de iod', user);
+    await settled(services, conversation.id);
+
+    /*
+     * El workspace se abre **entre** los dos turnos, que es como pasa: la persona lee la respuesta
+     * y pulsa. Si se abriera antes, el primer turno ya encontraría el directorio y la referencia
+     * saldría con él —y entonces esto no probaría nada, que es lo que me pasó al escribirla—.
+     */
+    const abierto = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-iod' }, cwd: '/var/www/landing' }, user,
+    ).workspace;
+
+    services.chat.send(conversation.id, 'quiero verlo en vivo', user);
+    await settled(services, conversation.id);
+
+    const mensajes = services.chat.messages(conversation.id).filter((message) => message.role === 'assistant');
+    // La ref del primer turno va sin directorio: es la premisa de la prueba, no un descuido.
+    expect(mensajes[0]?.refs.find((ref) => ref.kind === 'session')).toMatchObject({ cwd: null });
+    // Y aun así la terminal lo encuentra, porque se mira campo a campo.
+    expect(mensajes.at(-1)?.refs.find((ref) => ref.kind === 'terminal'))
+      .toMatchObject({ cwd: '/var/www/landing', workspaceId: abierto.id });
+  });
 });

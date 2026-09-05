@@ -1313,3 +1313,84 @@ describe('SES · el turno recuerda las sesiones que ya vio', () => {
     expect(toolbox.terminalOffer?.cwd).toBe('/otro/sitio');
   });
 });
+
+/**
+ * Qué identifica una consulta repetida: la pregunta, no cómo está escrita.
+ *
+ * Medido contra producción: tres `open_terminal_offer` seguidas en el mismo turno, misma máquina,
+ * misma sesión, mismo perfil, y sólo cambiaba la frase del motivo. El memo comparaba los
+ * argumentos enteros, así que las tres pasaron y se llevaron **la mitad de las consultas del
+ * hilo**. Y la métrica decía «0 repetidas»: el bucle de antes con otra ropa, y el número que
+ * teníamos para verlo no lo veía.
+ */
+describe('SES · el memo mira la pregunta, no la prosa', () => {
+  const conWorkspaces = (): CoreAssistantToolbox => new CoreAssistantToolbox({
+    sessions: services.sessions, workspaces: services.workspaces, health: services.health,
+    runs: services.runs, audit: services.audit, user,
+  });
+
+  const sesion = { host: 'bastion', provider: 'claude', sessionId: 'sid-1' };
+
+  it('tres ofertas de terminal con tres motivos distintos son una sola consulta', async () => {
+    const toolbox = conWorkspaces();
+    const primera = content(await toolbox.invoke('open_terminal_offer', {
+      ...sesion, reason: 'queremos inspeccionar la sesión en vivo para continuar',
+    }));
+    expect(primera['ok']).toBe(true);
+
+    // Las otras dos, tal como salieron en producción: la misma petición con otras palabras.
+    for (const reason of ['abrir terminal en la sesión para inspección en vivo', 'objetivo: ábremela en vivo']) {
+      const otra = content(await toolbox.invoke('open_terminal_offer', { ...sesion, reason }));
+      // El `ok` primero: si esto se rompe, se lee «se sirvió una repetición» y no un TypeError.
+      expect(otra['ok']).toBe(false);
+      expect((otra['error'] as Record<string, string>)['code']).toBe('ALREADY_ASKED');
+    }
+
+    // Una consulta gastada de las tres pedidas: ofrecer una terminal deja una oferta, no las suma.
+    expect(toolbox.observations).toBe(1);
+    expect(toolbox.refs.filter((ref) => ref.kind === 'terminal')).toHaveLength(1);
+    /*
+     * Y consta que se pidió tres veces.
+     *
+     * Es la mitad que impide que el arreglo se vuelva un escondite: sin el contador, «ya no se
+     * repite» y «se repite y no se ve» dan el mismo número, que es exactamente el problema que
+     * tenía la métrica de la base.
+     */
+    expect(toolbox.repeats).toBe(2);
+  });
+
+  it('abrir el mismo workspace con otro título tampoco cuenta dos veces', async () => {
+    const toolbox = conWorkspaces();
+    const primera = content(await toolbox.invoke('open_workspace', { ...sesion, title: 'iod' }));
+    const otra = content(await toolbox.invoke('open_workspace', { ...sesion, title: 'iod, renombrado' }));
+
+    expect(primera['ok']).toBe(true);
+    expect(otra['ok']).toBe(false);
+    expect((otra['error'] as Record<string, string>)['code']).toBe('ALREADY_ASKED');
+    expect(toolbox.observations).toBe(1);
+  });
+
+  it('el orden en que se escriban los argumentos no hace dos preguntas de una', async () => {
+    const toolbox = conWorkspaces();
+    expect(content(await toolbox.invoke('search_sessions', { q: 'pool', limit: 5 }))['ok']).toBe(true);
+    // La misma pregunta con las claves al revés: el modelo las escribe como le salen.
+    const otra = content(await toolbox.invoke('search_sessions', { limit: 5, q: 'pool' }));
+    expect(otra['ok']).toBe(false);
+    expect((otra['error'] as Record<string, string>)['code']).toBe('ALREADY_ASKED');
+  });
+
+  it('pero pedir más mensajes de los que se pidió antes sí es otra consulta', async () => {
+    const toolbox = conWorkspaces();
+    await toolbox.invoke('search_sessions', { q: 'pool' });
+    expect(content(await toolbox.invoke('get_session_context', { ...sesion, last: 5 }))['ok']).toBe(true);
+    /*
+     * El contraejemplo, y hace falta.
+     *
+     * Agrupar por sesión vale para las herramientas que dejan algo puesto —una oferta, un
+     * workspace— y no para las que leen: `last: 5` y `last: 20` son dos lecturas distintas de la
+     * misma sesión, y confundirlas dejaría al modelo sin poder pedir más contexto.
+     */
+    expect(content(await toolbox.invoke('get_session_context', { ...sesion, last: 20 }))['ok']).toBe(true);
+    expect(toolbox.observations).toBe(3);
+  });
+});
