@@ -167,10 +167,12 @@ describe('las herramientas hablan con los casos de uso del core', () => {
       runs: services.runs, audit: services.audit, user, maxObservations: 2,
     });
 
-    await toolbox.invoke('list_runs', {});
-    await toolbox.invoke('list_runs', {});
+    // Tres consultas **distintas**: una repetida no gastaría presupuesto —la corta el memo— y
+    // entonces esto no probaría el freno, sino el memo.
+    await toolbox.invoke('list_runs', { limit: 1 });
+    await toolbox.invoke('list_runs', { limit: 2 });
     // La tercera lectura no se sirve aunque el modelo insista: el freno es del servidor.
-    const spent = content(await toolbox.invoke('list_runs', {}));
+    const spent = content(await toolbox.invoke('list_runs', { limit: 3 }));
     expect((spent['error'] as Record<string, string>)['code']).toBe('BUDGET_SPENT');
     expect((spent['error'] as Record<string, string>)['hint']).toContain('finish');
     expect(toolbox.observations).toBe(2);
@@ -902,5 +904,412 @@ describe('una vuelta que no devuelve nada', () => {
     expect(decision).toEqual({ kind: 'finish', summary: 'el modelo no llegó a proponer ningún paso en este turno' });
     // Dos vueltas y para: insistir con un modelo que no contesta es gastar sin aprender nada.
     expect(bodies).toHaveLength(2);
+  });
+});
+
+/**
+ * TEC-12: encontrar una sesión y no poder hacer nada con ella.
+ *
+ * Braian buscó una sesión de Claude, Jarvis la encontró, y al preguntarle de qué trataba le
+ * **resumió el título**: leer el transcript estaba marcado como herramienta de workspace, así que
+ * en una conversación suelta ni se le ofrecía. Y a «ábreme ese workspace» contestó dónde estaba,
+ * porque no tenía con qué abrirlo.
+ *
+ * Lo que se fija aquí es que una sesión encontrada se pueda **leer, abrir y continuar** sin haber
+ * entrado antes por un workspace. El título es un nombre; el contenido está en el transcript, y
+ * confundirlos es responder de una conversación que no se ha leído.
+ */
+describe('SES · una sesión encontrada se puede leer y abrir', () => {
+  /** El caso que fallaba: una conversación suelta, sin sesión de trabajo detrás. */
+  const sinWorkspace = (): CoreAssistantToolbox => new CoreAssistantToolbox({
+    sessions: services.sessions,
+    workspaces: services.workspaces,
+    health: services.health,
+    runs: services.runs,
+    audit: services.audit,
+    user,
+  });
+
+  /** La sesión ajena: existe en el índice, no es la del workspace, y tiene contenido propio. */
+  const conTranscriptDeSid2 = (): void => {
+    index.transcripts.set('sid-2', [
+      { role: 'user', at: NOW, text: 'el pool de pgbouncer se satura en cada despliegue' },
+      { role: 'assistant', at: NOW, text: 'subo pool_size a 40 y lo vuelvo a medir' },
+    ]);
+  };
+
+  it('sin workspace se ofrecen igual las herramientas que hablan de una sesión', () => {
+    const nombres = sinWorkspace().definitions().map((tool) => tool.name);
+    // Son la respuesta a «¿de qué trataba?» y a «ábremela». Sin ellas encuentra y no puede seguir.
+    expect(nombres).toContain('get_session_context');
+    expect(nombres).toContain('open_workspace');
+    expect(nombres).toContain('open_terminal_offer');
+    // Lo que sí es de un workspace concreto sigue fuera: prometer «los trabajos de esta sesión»
+    // sin sesión es un catálogo que miente, y ése era el motivo de la regla original.
+    expect(nombres).not.toContain('list_runs');
+    expect(nombres).not.toContain('create_run');
+  });
+
+  it('lee el transcript de una sesión que no es la del workspace', async () => {
+    conTranscriptDeSid2();
+    const result = content(await toolboxFor(openWorkspace('sid-1')).invoke('get_session_context', {
+      host: 'bastion', provider: 'codex', sessionId: 'sid-2',
+    }));
+
+    expect(result['ok']).toBe(true);
+    expect(result['session']).toMatchObject({ provider: 'codex', sessionId: 'sid-2' });
+    // Lo que vuelve es lo que se dijo en esa sesión, no su título ni el transcript de la de al lado.
+    const dicho = (result['messages'] as Array<{ text: string }>).map((message) => message.text).join(' ');
+    expect(dicho).toContain('pgbouncer');
+    expect(dicho).not.toContain('se queda sin conexiones');
+  });
+
+  it('la lee también sin workspace ninguno, que es el caso que falló', async () => {
+    conTranscriptDeSid2();
+    const result = content(await sinWorkspace().invoke('get_session_context', {
+      host: 'bastion', provider: 'codex', sessionId: 'sid-2',
+    }));
+
+    expect(result['ok']).toBe(true);
+    expect((result['messages'] as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it('no le presta a una sesión ajena el directorio de la del workspace', async () => {
+    conTranscriptDeSid2();
+    const propio = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-1' }, cwd: '/srv/app' }, user,
+    ).workspace;
+    const result = content(await toolboxFor(propio).invoke('get_session_context', {
+      host: 'bastion', provider: 'codex', sessionId: 'sid-2',
+    }));
+
+    // Prestarle el `cwd` de otra es como se acaba abriendo una terminal en el sitio equivocado.
+    expect(result['cwd']).toBeNull();
+  });
+
+  it('sin argumentos y sin workspace dice que no sabe de qué sesión se habla', async () => {
+    const result = content(await sinWorkspace().invoke('get_session_context', {}));
+    const error = result['error'] as Record<string, string>;
+    expect(result['ok']).toBe(false);
+    expect(error['code']).toBe('NO_SESSION');
+    // Y dice con qué se arregla, que es lo que separa un error útil de uno que sólo se queja.
+    expect(error['hint']).toContain('sessionId');
+  });
+
+  it('el transcript de otra máquina se explica en vez de fallar en seco', async () => {
+    index.failWith = 'index responded 501 Not Implemented';
+    const result = content(await toolboxFor(openWorkspace('sid-1')).invoke('get_session_context', {
+      host: 'zeus', provider: 'claude', sessionId: 'sid-9',
+    }));
+    const error = result['error'] as Record<string, string>;
+
+    expect(result['ok']).toBe(false);
+    // No es un fallo pasajero: es una decisión del índice, y repetirla no la arregla.
+    expect(error['code']).toBe('INDEX_UNAVAILABLE');
+    // El mensaje del core llega tal cual: de qué máquina se hablaba y qué sí sigue funcionando.
+    expect(error['message']).toContain('zeus');
+    expect(error['message']).toContain('aisessions export');
+  });
+});
+
+/**
+ * Abrir el workspace de una sesión encontrada, y no dos.
+ *
+ * Es lo que faltaba para que «ábreme ese workspace» tuviera respuesta. Abrirlo lo puede hacer el
+ * asistente porque es un marcador —no toca ninguna máquina—, a diferencia de una terminal viva.
+ */
+describe('SES · abrir el workspace de una sesión', () => {
+  const abrir = (toolbox: CoreAssistantToolbox, extra: Record<string, unknown> = {}) => toolbox.invoke(
+    'open_workspace',
+    { host: 'bastion', provider: 'codex', sessionId: 'sid-2', title: 'migrar el pool a pgbouncer', ...extra },
+  );
+
+  const conWorkspaces = (): CoreAssistantToolbox => new CoreAssistantToolbox({
+    sessions: services.sessions, workspaces: services.workspaces, health: services.health,
+    runs: services.runs, audit: services.audit, user,
+  });
+
+  it('devuelve el workspace abierto y dice que lo acaba de crear', async () => {
+    const result = content(await abrir(conWorkspaces()));
+
+    expect(result['ok']).toBe(true);
+    expect(result['created']).toBe(true);
+    expect(typeof result['workspaceId']).toBe('string');
+    // El id sirve de verdad: es el que la pantalla va a abrir.
+    expect(services.workspaces.require(String(result['workspaceId'])).ref.sessionId).toBe('sid-2');
+  });
+
+  it('en otro turno, la misma sesión devuelve el mismo workspace y no crea otro', async () => {
+    const primero = content(await abrir(conWorkspaces()));
+    // Otro toolbox es otro turno: el memo no vale de nada aquí y el caso de uso decide solo.
+    const segundo = content(await abrir(conWorkspaces()));
+
+    expect(segundo['workspaceId']).toBe(primero['workspaceId']);
+    expect(segundo['created']).toBe(false);
+    expect(services.workspaces.recent().filter((w) => w.ref.sessionId === 'sid-2')).toHaveLength(1);
+  });
+
+  it('sin el caso de uso detrás no se ofrece, en vez de fallar al llamarla', () => {
+    const nombres = new CoreAssistantToolbox({
+      sessions: services.sessions, health: services.health, runs: services.runs,
+      audit: services.audit, user,
+    }).definitions().map((tool) => tool.name);
+    expect(nombres).not.toContain('open_workspace');
+  });
+});
+
+/**
+ * El memo: repetir una consulta no cuesta presupuesto, cuesta que se lo digan.
+ *
+ * Vivía dentro de `use_capability`, así que cubría las capacidades del MCP y ninguna herramienta
+ * propia. En la conversación que falló eso salió caro: **12 de 25 consultas fueron repeticiones
+ * exactas**, cinco de ellas la misma búsqueda de sesiones, y entre unas y otras se llevaron el
+ * turno por delante sin aportar un dato nuevo.
+ */
+describe('SES · una consulta repetida no se sirve dos veces', () => {
+  it('devuelve lo que ya se había traído, y lo dice', async () => {
+    const toolbox = toolboxFor(openWorkspace('sid-1'));
+    const primera = content(await toolbox.invoke('search_sessions', { q: 'pool' }));
+    expect(primera['ok']).toBe(true);
+
+    const otra_vez = content(await toolbox.invoke('search_sessions', { q: 'pool' }));
+    const error = otra_vez['error'] as Record<string, string>;
+    expect(otra_vez['ok']).toBe(false);
+    expect(error['code']).toBe('ALREADY_ASKED');
+    // Con el resultado de antes: negarse sin devolverlo obliga a repetir para recordarlo.
+    expect(otra_vez['previousResult']).toEqual(primera);
+    // Y se le dice qué hacer en vez de insistir.
+    expect(error['hint']).toContain('finish');
+  });
+
+  it('la repetición no gasta una consulta del turno', async () => {
+    const workspace = openWorkspace('sid-1');
+    const toolbox = new CoreAssistantToolbox({
+      plan: planOn(workspace), workspace, sessions: services.sessions, health: services.health,
+      runs: services.runs, audit: services.audit, user, maxObservations: 2,
+    });
+
+    await toolbox.invoke('search_sessions', { q: 'pool' });
+    await toolbox.invoke('search_sessions', { q: 'pool' });
+    await toolbox.invoke('search_sessions', { q: 'pool' });
+    // Tres llamadas, una sola consulta: lo que se cobra es aprender algo, no preguntar.
+    expect(toolbox.observations).toBe(1);
+
+    // Y como no se gastó, todavía queda turno para preguntar algo distinto.
+    const distinta = content(await toolbox.invoke('search_sessions', { q: 'pgbouncer' }));
+    expect(distinta['ok']).toBe(true);
+  });
+
+  it('un argumento distinto es una consulta distinta: el memo no la corta', async () => {
+    const toolbox = toolboxFor(openWorkspace('sid-1'));
+    expect(content(await toolbox.invoke('search_sessions', { q: 'pool' }))['ok']).toBe(true);
+    expect(content(await toolbox.invoke('search_sessions', { q: 'migrar' }))['ok']).toBe(true);
+  });
+
+  it('lo que falló se puede reintentar: sólo se memoriza lo que salió bien', async () => {
+    const toolbox = toolboxFor(openWorkspace('sid-1'));
+    index.failWith = 'el índice no responde';
+    const primera = content(await toolbox.invoke('search_sessions', { q: 'pool' }));
+    expect(primera['stale']).toBe(true);
+
+    // Un fallo puede ser pasajero, así que insistir es legítimo y no se contesta ALREADY_ASKED.
+    index.failWith = null;
+    const segunda = content(await toolbox.invoke('search_sessions', { q: 'pool' }));
+    expect((segunda['error'] as Record<string, string> | undefined)?.['code']).not.toBe('ALREADY_ASKED');
+  });
+});
+
+/**
+ * La oferta de terminal, sobre cualquier sesión.
+ *
+ * Una terminal viva levanta una tmux en un servidor, así que la abre una persona: el asistente
+ * sólo deja el botón preparado. Lo que cambia es sobre qué puede prepararlo.
+ */
+describe('SES · ofrecer terminal sobre una sesión encontrada', () => {
+  it('sin workspace, la oferta sale con la sesión que se le dijo', async () => {
+    const toolbox = new CoreAssistantToolbox({
+      sessions: services.sessions, workspaces: services.workspaces, health: services.health,
+      runs: services.runs, audit: services.audit, user,
+    });
+    const result = content(await toolbox.invoke('open_terminal_offer', {
+      reason: 'hay que ver el pool en vivo mientras despliega',
+      host: 'bastion', provider: 'codex', sessionId: 'sid-2',
+    }));
+
+    expect(result['ok']).toBe(true);
+    expect(toolbox.terminalOffer).toMatchObject({
+      host: 'bastion', provider: 'codex', sessionId: 'sid-2',
+    });
+    expect(toolbox.terminalOffer?.reason).toContain('en vivo');
+  });
+
+  it('sigue sin abrir nada por su cuenta: deja la oferta y ya', async () => {
+    const toolbox = toolboxFor(openWorkspace('sid-1'));
+    const outcome = await toolbox.invoke('open_terminal_offer', { reason: 'mirarlo en vivo' });
+    // Es una observación, no una decisión: nadie levanta una tmux hasta que alguien la pulsa.
+    expect(outcome.type).toBe('observation');
+    expect(toolbox.terminalOffer).not.toBeNull();
+  });
+});
+
+/**
+ * El tope de 128 herramientas, y quién se come el hueco.
+ *
+ * El catálogo va directo —cada capacidad como función declarada— sólo si cabe entero bajo el tope;
+ * si no, se repliega al router. Cada herramienta propia que se añade estrecha ese hueco, y
+ * `open_workspace` se llevó uno. La regresión que esto vigila no es un error: es que un día el
+ * catálogo de la casa deje de caber y el modo directo se apague **sin que nadie lo note**, porque
+ * el repliegue funciona y no se queja.
+ */
+describe('SES · lo que cabe bajo el tope después de añadir open_workspace', () => {
+  const capacidades = (cuantas: number) => Array.from({ length: cuantas }, (_, indice) => ({
+    definition: {
+      name: `mcp__zeus__cap_${indice}`, description: 'una capacidad cualquiera',
+      inputSchema: { type: 'object', properties: {} }, decides: false,
+    },
+    capability: { server: 'zeus', name: `cap_${indice}` },
+  })) as never;
+
+  /**
+   * Una conversación con workspace: el catálogo más ancho que se sirve, y el que aprieta.
+   *
+   * `comoEnCasa` pone los extras que hay puestos en producción —escrituras de capacidad y
+   * escalada—, porque el borde depende de ellos y el número que decide cuándo se apaga el modo
+   * directo es el de la casa, no el de un toolbox de laboratorio.
+   */
+  const conversacion = (
+    cuantas: number,
+    { workspace = openWorkspace(), comoEnCasa = false }: { workspace?: Workspace; comoEnCasa?: boolean } = {},
+  ): CoreAssistantToolbox => new CoreAssistantToolbox({
+    workspace, sessions: services.sessions, workspaces: services.workspaces,
+    health: services.health, runs: services.runs, audit: services.audit, user,
+    mcp: { configured: true } as never,
+    ...(comoEnCasa ? { capabilityWrites: true, canEscalate: true } : {}),
+    ...(cuantas > 0 ? { capabilityTools: capacidades(cuantas) } : {}),
+  });
+
+  /** El mayor catálogo que el modo directo todavía acepta, buscado y no calculado. */
+  const borde = (opciones: { workspace?: Workspace; comoEnCasa?: boolean }): number => {
+    for (let cuantas = 130; cuantas > 0; cuantas -= 1) {
+      if (conversacion(cuantas, opciones).directCapabilities === cuantas) return cuantas;
+    }
+    return 0;
+  };
+
+  it('el catálogo de la casa entero sigue yendo directo con un workspace abierto', () => {
+    // 108 son las que hay hoy en el MCP de sistema. Si esto se pone rojo, el modo directo se
+    // apagó para la casa entera y lo que se está sirviendo es el router.
+    expect(conversacion(108).directCapabilities).toBe(108);
+  });
+
+  it('el tope es del total: lo que se le enseña al modelo nunca pasa de 128', () => {
+    const workspace = openWorkspace();
+    const cabe = borde({ workspace });
+    expect(cabe).toBeGreaterThanOrEqual(108);
+
+    /*
+     * Cuántas se le enseñan de verdad en ese borde.
+     *
+     * `open_workspace` no vive en `TOOL_DEFINITIONS` —se añade sólo en la conversación— y el hueco
+     * llegó a calcularse sobre `TOOL_DEFINITIONS` a secas: se ofrecía sin descontarse, así que en
+     * el borde le llegaban al modelo 129 con el tope en 128. Un tope que no cuenta todo lo que
+     * sirve no es un tope, y falla en silencio: pasarse de 128 lo rechaza la API, no el core.
+     */
+    expect(conversacion(cabe, { workspace }).definitions().length).toBeLessThanOrEqual(128);
+  });
+
+  it('en la configuración de la casa el margen es más estrecho, y es el que manda', () => {
+    /*
+     * Con las escrituras de capacidad y la escalada puestas —como está producción— se ofrecen dos
+     * herramientas más, y el borde baja. Es el número que decide el día que el modo directo se
+     * apague solo, así que es el que hay que mirar: el del laboratorio da margen de más.
+     */
+    const enCasa = borde({ comoEnCasa: true });
+    const enLaboratorio = borde({});
+    expect(enCasa).toBeLessThan(enLaboratorio);
+
+    // Las 108 de hoy siguen cabiendo, pero por poco. Ese «por poco» es el aviso.
+    expect(enCasa).toBeGreaterThanOrEqual(108);
+    expect(enCasa - 108).toBeLessThanOrEqual(5);
+    expect(conversacion(enCasa, { comoEnCasa: true }).definitions().length).toBeLessThanOrEqual(128);
+  });
+});
+
+/**
+ * Lo que el turno ya vio no hay que volver a decírselo.
+ *
+ * `search_sessions` devuelve el directorio y el título de cada sesión, y el modelo **no los
+ * reenvía** cuando después pide abrirla o dejar una terminal: escribe el id y poco más. Sin
+ * memoria, la oferta salía sin `cwd` —terminal en el home, sin camino de vuelta— y el título se
+ * perdía. Se vio en la corrida contra producción, no en una prueba.
+ */
+describe('SES · el turno recuerda las sesiones que ya vio', () => {
+  const conWorkspaces = (): CoreAssistantToolbox => new CoreAssistantToolbox({
+    sessions: services.sessions, workspaces: services.workspaces, health: services.health,
+    runs: services.runs, audit: services.audit, user,
+  });
+
+  it('la terminal se ofrece con el directorio que trajo la búsqueda, sin repetirlo', async () => {
+    const toolbox = conWorkspaces();
+    // El índice ya dijo dónde vive `sid-1`: `/srv/app`.
+    await toolbox.invoke('search_sessions', { q: 'pool' });
+
+    // Y el modelo pide la terminal como la pide de verdad: con el id y el motivo, nada más.
+    const result = content(await toolbox.invoke('open_terminal_offer', {
+      reason: 'quiero ver el pool mientras despliega', sessionId: 'sid-1',
+    }));
+
+    expect(result['ok']).toBe(true);
+    // Sin esto la tmux arranca en el home, que es media oferta.
+    expect(toolbox.terminalOffer).toMatchObject({ sessionId: 'sid-1', cwd: '/srv/app' });
+  });
+
+  it('«esa sesión» con sólo el id se resuelve con lo que ya se vio', async () => {
+    const toolbox = conWorkspaces();
+    index.transcripts.set('sid-2', [
+      { role: 'user', at: NOW, text: 'el pool de pgbouncer se satura al desplegar' },
+    ]);
+    await toolbox.invoke('search_sessions', { q: 'migrar' });
+
+    // Ni host ni provider: es como el modelo escribe «de qué iba esa».
+    const result = content(await toolbox.invoke('get_session_context', { sessionId: 'sid-2' }));
+    expect(result['ok']).toBe(true);
+    expect(result['session']).toMatchObject({ sessionId: 'sid-2' });
+  });
+
+  it('un id que no se ha visto no se inventa: dice que no sabe de qué sesión se habla', async () => {
+    const result = content(await conWorkspaces().invoke('get_session_context', { sessionId: 'sid-que-no-existe' }));
+    expect(result['ok']).toBe(false);
+    expect((result['error'] as Record<string, string>)['code']).toBe('NO_SESSION');
+  });
+
+  it('la terminal sobre una sesión ya abierta lleva su workspace', async () => {
+    const toolbox = conWorkspaces();
+    await toolbox.invoke('search_sessions', { q: 'pool' });
+    const abierto = content(await toolbox.invoke('open_workspace', {
+      host: 'bastion', provider: 'claude', sessionId: 'sid-1',
+    }));
+
+    await toolbox.invoke('open_terminal_offer', { reason: 'seguirlo en vivo', sessionId: 'sid-1' });
+
+    /*
+     * El camino de vuelta va en la referencia, no en la oferta.
+     *
+     * `TerminalOffer` es lo que se ejecuta al pulsar —host, sesión, directorio, perfil— y el
+     * workspace no hace falta para levantar la tmux: hace falta para volver. Por eso se comprueba
+     * en la ref, que es lo que se pinta y lo que se pulsa.
+     */
+    const terminal = toolbox.refs.find((ref) => ref.kind === 'terminal');
+    expect(terminal).toMatchObject({ sessionId: 'sid-1', workspaceId: abierto['workspaceId'] });
+  });
+
+  it('lo que dice la llamada manda sobre lo recordado', async () => {
+    const toolbox = conWorkspaces();
+    await toolbox.invoke('search_sessions', { q: 'pool' });
+    await toolbox.invoke('open_terminal_offer', {
+      reason: 'mirarlo', host: 'bastion', provider: 'claude', sessionId: 'sid-1', cwd: '/otro/sitio',
+    });
+    // Recordar es rellenar huecos, no corregir a quien sí trae el dato.
+    expect(toolbox.terminalOffer?.cwd).toBe('/otro/sitio');
   });
 });

@@ -116,12 +116,21 @@ interface Harness {
   local: ScriptedBrain;
   cloud: ScriptedBrain;
   restarts: string[];
+  index: FakeSessionIndex;
 }
 
-function harness({ local, cloud, writable = false, directCapabilities = false }: {
+function harness({ local, cloud, writable = false, directCapabilities = false, index }: {
   local: ScriptedBrain;
   cloud?: ScriptedBrain;
   writable?: boolean;
+  /**
+   * El índice de sesiones, cuando la prueba necesita más de una o transcripts propios.
+   *
+   * Por defecto una sola sesión, que es lo que basta para casi todo. Se puede pasar otro porque
+   * «leer la sesión que acabo de encontrar» sólo se prueba de verdad con dos: con una sola, leer
+   * la equivocada da el mismo resultado que leer la correcta.
+   */
+  index?: FakeSessionIndex;
   /**
    * Directo = el catálogo va como herramientas propias; router = detrás de list/search/use.
    *
@@ -133,9 +142,10 @@ function harness({ local, cloud, writable = false, directCapabilities = false }:
 }): Harness {
   const nube = cloud ?? new ScriptedBrain('nube', []);
   const mcp = fakeMcp({ writable });
+  const sessionIndex = index ?? new FakeSessionIndex([indexRow()]);
   const services = buildServices({
     db: openDatabase({ path: ':memory:' }),
-    index: new FakeSessionIndex([indexRow()]) as never,
+    index: sessionIndex as never,
     model: new HybridModel({ local, cloud: nube }),
     mcp: mcp.service,
     config: {
@@ -146,7 +156,7 @@ function harness({ local, cloud, writable = false, directCapabilities = false }:
       chatDirectCapabilities: directCapabilities,
     },
   });
-  return { services, local, cloud: nube, restarts: mcp.restarts };
+  return { services, local, cloud: nube, restarts: mcp.restarts, index: sessionIndex };
 }
 
 /**
@@ -193,7 +203,7 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
     expect(messages.map((message) => message.seq)).toEqual([0, 1, 2]);
   });
 
-  it('sin sesión de trabajo no se ofrecen las herramientas que hablan de una sesión', async () => {
+  it('sin sesión de trabajo se puede leer una sesión, pero no alcanzar el trabajo de un workspace', async () => {
     let offered: string[] = [];
     const local = new ScriptedBrain('local', [
       (toolbox) => {
@@ -207,8 +217,17 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
     await settled(services, conversation.id);
 
     // Un catálogo que promete «los trabajos de esta sesión» sin sesión es un catálogo que miente.
-    expect(offered).not.toContain('get_session_context');
     expect(offered).not.toContain('create_run');
+    expect(offered).not.toContain('list_runs');
+    /*
+     * Pero leer una sesión que se acaba de encontrar no exige haber abierto un workspace antes, y
+     * negarlo era justo lo que rompía la conversación: el modelo encontraba la sesión, no tenía
+     * con qué leerla, y resumía el título como si fuera el contenido. Abrirla y ofrecer terminal
+     * van con ella por lo mismo: hallar algo y no poder actuar sobre ello no es haberlo hallado.
+     */
+    expect(offered).toContain('get_session_context');
+    expect(offered).toContain('open_workspace');
+    expect(offered).toContain('open_terminal_offer');
     // Lo que sí tiene sentido sin sesión sigue estando.
     expect(offered).toContain('use_capability');
     expect(offered).toContain('search_sessions');
@@ -688,5 +707,293 @@ describe('CHAT · durabilidad', () => {
     const messages = second.chat.messages(conversation.id);
     expect(messages.map((message) => message.text)).toEqual(['recuérdame esto', 'apuntado']);
     expect(second.chat.require(conversation.id).status).toBe('idle');
+  });
+});
+
+/**
+ * TEC-12, de punta a punta: encontrar una sesión y poder seguir.
+ *
+ * Es la conversación que falló, tal cual. Braian pidió una sesión de Claude sobre iod, Jarvis la
+ * encontró, y a «¿de qué trataba?» le devolvió **el título resumido**: no tenía con qué leerla,
+ * porque leer el transcript estaba marcado como cosa de workspace y allí no había ninguno. A
+ * «ábreme ese workspace» contestó dónde estaba y nada más.
+ *
+ * Las tres promesas que se fijan aquí son las tres cosas que fallaron: se lee el contenido, se
+ * abre lo encontrado, y no se pregunta dos veces lo mismo.
+ */
+describe('CHAT · una sesión encontrada se lee y se puede continuar', () => {
+  /** Cuenta lo que se le pide al índice: sin esto, «no se repitió» no se puede comprobar. */
+  class CountingIndex extends FakeSessionIndex {
+    listCalls = 0;
+    transcriptCalls = 0;
+
+    override async list(query: Parameters<FakeSessionIndex['list']>[0]): ReturnType<FakeSessionIndex['list']> {
+      this.listCalls += 1;
+      return super.list(query);
+    }
+
+    override async transcript(ref: Parameters<FakeSessionIndex['transcript']>[0]): ReturnType<FakeSessionIndex['transcript']> {
+      this.transcriptCalls += 1;
+      return super.transcript(ref);
+    }
+  }
+
+  /**
+   * Dos sesiones y un transcript propio.
+   *
+   * Con una sola no se probaría nada: leer la equivocada daría el mismo resultado que leer la
+   * correcta, que es exactamente el fallo que se quiere descartar.
+   */
+  const dosSesiones = (): CountingIndex => {
+    const index = new CountingIndex([
+      indexRow(),
+      indexRow({
+        session_key: 'local:claude:sid-iod', session_id: 'sid-iod',
+        title: 'iod: el escáner se queda a medias',
+        preview: 'llevo dos días con el escáner de iod',
+      }),
+    ]);
+    index.transcripts.set('sid-iod', [
+      { role: 'user', at: '2026-08-31T09:00:00.000Z', text: 'el escáner de iod se para al llegar a los ficheros grandes' },
+      { role: 'assistant', at: '2026-08-31T09:04:00.000Z', text: 'era el timeout del lector: lo subí a 30s y terminó de barrer' },
+    ]);
+    return index;
+  };
+
+  it('a «¿de qué trataba?» contesta con lo que se dijo dentro, no con el título', async () => {
+    let encontrada: Record<string, string> | undefined;
+    let leido = '';
+    const local = new ScriptedBrain('local', [
+      // Turno 1: la busca. Esto ya funcionaba.
+      async (toolbox) => {
+        const outcome = await toolbox.invoke('search_sessions', { q: 'iod' }) as {
+          content: { sessions: Array<Record<string, string>> };
+        };
+        encontrada = outcome.content.sessions.find((session) => session['sessionId'] === 'sid-iod');
+        return { kind: 'finish', summary: `la tengo: ${encontrada?.['title']}` };
+      },
+      // Turno 2: «¿de qué trataba?». Con la referencia que trajo la búsqueda, no con su título.
+      async (toolbox) => {
+        const outcome = await toolbox.invoke('get_session_context', {
+          host: encontrada?.['host'], provider: encontrada?.['provider'], sessionId: encontrada?.['sessionId'],
+        }) as { content: { ok: boolean; messages?: Array<{ text: string }> } };
+        leido = (outcome.content.messages ?? []).map((message) => message.text).join(' ');
+        return { kind: 'finish', summary: 'era el timeout del lector del escáner' };
+      },
+    ]);
+    // Sin workspace: una conversación suelta, como la que falló.
+    const { services } = track(harness({ local, index: dosSesiones() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'busca una sesión de Claude sobre iod', user);
+    await settled(services, conversation.id);
+    services.chat.send(conversation.id, '¿de qué trataba?', user);
+    await settled(services, conversation.id);
+
+    // Lo que leyó es lo que se dijo dentro, no el título ni la primera línea.
+    expect(leido).toContain('timeout del lector');
+    expect(leido).not.toBe('');
+    // Y consta que fue a leerla: la consulta quedó escrita con su nombre, como cualquier otra.
+    const tools = services.chat.messages(conversation.id).filter((message) => message.role === 'tool');
+    const lectura = tools.find((message) => message.toolName === 'get_session_context');
+    expect(lectura).toBeDefined();
+    expect(lectura?.toolOk).toBe(true);
+  });
+
+  it('a «ábremela» abre el workspace y deja la referencia para pulsarla', async () => {
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        await toolbox.invoke('open_workspace', {
+          host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+          title: 'iod: el escáner se queda a medias',
+        });
+        return { kind: 'finish', summary: 'te la dejo abierta' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: dosSesiones() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'ábreme ese workspace', user);
+    await settled(services, conversation.id);
+
+    /*
+     * Decir dónde está no es abrirla. Lo que convierte el hallazgo en algo que se puede pulsar es
+     * la referencia, y por eso se comprueba en el mensaje y no en la base: si no viaja al hilo, la
+     * pantalla no tiene qué pintar y la respuesta vuelve a ser una dirección postal.
+     */
+    const assistant = services.chat.messages(conversation.id).find((message) => message.role === 'assistant');
+    const ref = assistant?.refs?.find((candidate) => candidate.kind === 'workspace');
+    expect(ref).toBeDefined();
+    // Y el id lleva a algún sitio: es el workspace de la sesión que se pidió, no uno cualquiera.
+    const abierto = services.workspaces.require((ref as { workspaceId: string }).workspaceId);
+    expect(abierto.ref.sessionId).toBe('sid-iod');
+  });
+
+  it('ofrecer terminal sobre una sesión suelta deja la referencia con esa sesión', async () => {
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        await toolbox.invoke('open_terminal_offer', {
+          reason: 'el escáner hay que verlo mientras corre',
+          host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+        });
+        return { kind: 'finish', summary: 'te dejo el botón' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: dosSesiones() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'quiero verlo en vivo', user);
+    await settled(services, conversation.id);
+
+    const assistant = services.chat.messages(conversation.id).find((message) => message.role === 'assistant');
+    const ref = assistant?.refs?.find((candidate) => candidate.kind === 'terminal');
+    expect(ref).toMatchObject({ host: 'bastion', provider: 'claude', sessionId: 'sid-iod' });
+    // Ofrecida, no abierta: la tmux la levanta quien pulse, como siempre.
+    expect((ref as { reason: string }).reason).toContain('mientras corre');
+  });
+
+  it('el modelo que insiste con la misma consulta no la ejecuta dos veces', async () => {
+    let repetidas = 0;
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        await toolbox.invoke('search_sessions', { q: 'iod' });
+        await toolbox.invoke('search_sessions', { q: 'iod' });
+        await toolbox.invoke('search_sessions', { q: 'iod' });
+        repetidas = toolbox.repeats;
+        return { kind: 'finish', summary: 'ya lo tengo' };
+      },
+    ]);
+    const { services, index } = track(harness({ local, index: dosSesiones() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'busca lo de iod', user);
+    await settled(services, conversation.id);
+
+    /*
+     * La repetición no deja fila en el hilo, y aun así se sabe que ocurrió.
+     *
+     * Una fila `tool` afirma «miré esto»; si el memo cortó la llamada antes de salir, no se miró
+     * nada y la fila mentiría —además de dejar en la base justo las repeticiones que este trabajo
+     * venía a quitar—. Que no deje rastro no puede significar que no se sepa: por eso se cuentan
+     * aparte, y por eso se comprueban las dos cosas juntas. Sin el contador, «arreglé el bucle» y
+     * «lo escondí» se ven igual desde fuera.
+     */
+    const consultas = services.chat.messages(conversation.id)
+      .filter((message) => message.role === 'tool' && message.toolName === 'search_sessions');
+    expect(consultas).toHaveLength(1);
+    expect(repetidas).toBe(2);
+
+    /*
+     * Una sola consulta al índice, no tres.
+     *
+     * En la conversación de verdad **12 de 25 consultas fueron repeticiones exactas**, cinco de
+     * ellas esta misma búsqueda. Lo que se recupera cortándolas no es tiempo de índice —es barato—
+     * sino el turno: cada repetición gastaba una de las consultas que el modelo tenía para
+     * averiguar algo.
+     */
+    expect(index.listCalls).toBe(1);
+  });
+});
+
+/**
+ * Lo encontrado sobrevive al turno, y la oferta sobrevive al tope.
+ *
+ * Dos fallos que sólo se ven con el hilo puesto: el título de una sesión se perdía al volver a
+ * nombrarla, y la oferta de terminal se caía de la lista de acciones cuando el turno seguía
+ * mirando cosas. Ninguno rompe nada de forma visible —por eso hacen falta pruebas— y los dos
+ * vacían de sentido lo que se acababa de construir.
+ */
+describe('CHAT · lo que el hilo recuerda y lo que la pantalla enseña', () => {
+  const variasSesiones = (): FakeSessionIndex => {
+    const filas = ['iod', 'pool', 'cámaras', 'backup', 'dns'].map((tema, indice) => indexRow({
+      session_key: `local:claude:sid-${tema}`, session_id: `sid-${tema}`,
+      title: `${tema}: lo que quedó a medias`, preview: `estábamos con ${tema}`,
+    }));
+    const index = new FakeSessionIndex(filas);
+    for (const fila of filas) {
+      index.transcripts.set(fila.session_id, [
+        { role: 'user', at: '2026-08-31T09:00:00.000Z', text: `el asunto de ${fila.session_id} sigue abierto` },
+      ]);
+    }
+    return index;
+  };
+
+  it('el título de una sesión no se pierde al ofrecer una terminal sobre ella', async () => {
+    const local = new ScriptedBrain('local', [
+      /*
+       * Turno 1, en el orden en que pasa de verdad: buscar —de ahí sale el título—, leer, y
+       * ofrecer la terminal. La ref `session` de la lectura lleva título; la `terminal` no.
+       */
+      async (toolbox) => {
+        await toolbox.invoke('search_sessions', { q: 'iod' });
+        await toolbox.invoke('get_session_context', { host: 'bastion', provider: 'claude', sessionId: 'sid-iod' });
+        await toolbox.invoke('open_terminal_offer', { reason: 'verlo en vivo', sessionId: 'sid-iod' });
+        return { kind: 'finish', summary: 'te dejo las dos cosas' };
+      },
+      () => ({ kind: 'finish', summary: 'ya' }),
+    ]);
+    const { services } = track(harness({ local, index: variasSesiones() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'mira lo de iod', user);
+    await settled(services, conversation.id);
+    services.chat.send(conversation.id, '¿y qué era?', user);
+    await settled(services, conversation.id);
+
+    /*
+     * El contexto del segundo turno tiene que decir de qué iba la sesión, no sólo dónde está.
+     *
+     * El orden natural es encontrarla y **después** ofrecer la terminal en ella; si lo segundo
+     * sobrescribe a lo primero, al modelo le llega «hay una sesión en bastion» sin más, que es lo
+     * contrario de para lo que existe este bloque.
+     */
+    const encontradas = local.lastContext?.found ?? [];
+    expect(encontradas.find((sesion) => sesion.sessionId === 'sid-iod')?.title).toContain('iod');
+  });
+
+  it('la oferta de terminal no se cae de las acciones aunque el turno siga mirando', async () => {
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        // Se ofrece pronto...
+        await toolbox.invoke('open_terminal_offer', {
+          reason: 'hay que verlo mientras corre',
+          host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+        });
+        // ...y después el turno mira cuatro sesiones más, cada una con su referencia.
+        for (const tema of ['pool', 'cámaras', 'backup', 'dns']) {
+          await toolbox.invoke('get_session_context', { host: 'bastion', provider: 'claude', sessionId: `sid-${tema}` });
+        }
+        return { kind: 'finish', summary: 'mirado todo' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: variasSesiones() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'repasa lo que hay', user);
+    await settled(services, conversation.id);
+
+    const assistant = services.chat.messages(conversation.id).find((message) => message.role === 'assistant');
+    /*
+     * Caben cuatro, y una tiene que ser la terminal.
+     *
+     * Es la única que explica **por qué** conviene mirar, y el motivo vive dentro de la propia
+     * referencia: si se cae, no queda ni rastro de que llegó a ofrecerse. Las otras tres son
+     * pastillas intercambiables; ésta no.
+     */
+    expect(assistant?.refs).toHaveLength(4);
+    expect(assistant?.refs.filter((ref) => ref.kind === 'terminal')).toHaveLength(1);
+  });
+
+  it('el mismo sitio no se ofrece dos veces por haber cambiado de nombre', async () => {
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        await toolbox.invoke('open_workspace', { host: 'bastion', provider: 'claude', sessionId: 'sid-iod', title: 'iod' });
+        // Otra vez la misma sesión: mismo workspace, y el memo devuelve lo de antes.
+        await toolbox.invoke('open_workspace', { host: 'bastion', provider: 'claude', sessionId: 'sid-iod', title: 'iod, renombrado' });
+        return { kind: 'finish', summary: 'abierta' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: variasSesiones() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'ábreme lo de iod', user);
+    await settled(services, conversation.id);
+
+    // Dos botones al mismo sitio son un botón: la identidad es el workspace, no el objeto entero.
+    const assistant = services.chat.messages(conversation.id).find((message) => message.role === 'assistant');
+    expect(assistant?.refs.filter((ref) => ref.kind === 'workspace')).toHaveLength(1);
   });
 });
