@@ -268,6 +268,32 @@ const badProvider = (input: Record<string, unknown>): string | null => {
   return provider && !(PROVIDERS as readonly string[]).includes(provider) ? provider : null;
 };
 
+/**
+ * Qué argumentos identifican una consulta, cuando no son todos.
+ *
+ * El memo compara los argumentos enteros, y para casi todo está bien: `last: 5` y `last: 20` son
+ * dos lecturas distintas. Pero hay herramientas donde parte de los argumentos es **prosa** y no
+ * cambia lo que se hace. Medido: tres `open_terminal_offer` en el mismo turno sobre la misma
+ * sesión, con tres motivos redactados distinto, se llevaron la mitad del presupuesto — y como los
+ * objetos eran distintos, el contador de repeticiones tampoco las veía.
+ *
+ * Las dos que están aquí son idempotentes por naturaleza: ofrecer una terminal deja una oferta, no
+ * la acumula, y abrir un workspace devuelve el mismo. Repetirlas no aporta nada que no estuviera.
+ */
+const MEMO_KEY_FIELDS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  open_terminal_offer: ['host', 'provider', 'sessionId'],
+  open_workspace: ['host', 'provider', 'sessionId'],
+});
+
+const memoKey = (name: string, input: Record<string, unknown>): string => {
+  const fields = MEMO_KEY_FIELDS[name];
+  const shape = fields
+    ? fields.map((field) => `${field}=${asString(input[field]) ?? ''}`).join('|')
+    // Las claves ordenadas: `{a,b}` y `{b,a}` son la misma pregunta escrita de dos maneras.
+    : JSON.stringify(Object.keys(input).sort().map((key) => [key, input[key]]));
+  return `tool:${name}:${shape}`;
+};
+
 const asProfile = (value: unknown, fallback: PermissionProfile): PermissionProfile =>
   (PROFILES as readonly string[]).includes(String(value)) ? value as PermissionProfile : fallback;
 
@@ -770,8 +796,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
        * argumentos. Dos memos con claves distintas sobre el mismo mapa, sin pisarse.
        */
       if (name !== 'use_capability' && !this.#direct.has(name)) {
-        const memo = `tool:${name}:${JSON.stringify(input)}`;
-        const previous = this.#alreadyAsked.get(memo);
+        const previous = this.#alreadyAsked.get(memoKey(name, input));
         if (previous !== undefined) {
           this.#repeats += 1;
           return {
@@ -815,7 +840,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         && name !== 'use_capability' && !this.#direct.has(name)) {
         const served = outcome.content as { ok?: unknown; stale?: unknown } | null;
         if (served?.ok !== false && served?.stale !== true) {
-          this.#alreadyAsked.set(`tool:${name}:${JSON.stringify(input)}`, outcome.content);
+          this.#alreadyAsked.set(memoKey(name, input), outcome.content);
         }
       }
       return outcome;
