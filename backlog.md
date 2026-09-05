@@ -75,10 +75,10 @@ está a un clic de la frase que lo cuenta.
 
 ### [x] IA-02b · El asistente encontraba las cosas y no podía hacer nada con ellas
 
-Hecho 2026-09-05 · `d19c527`, `2796caa` y `0ac018c` · `apps/core/src/assistant/{toolbox,model,types}.ts`,
+Hecho 2026-09-05 · `d19c527`, `2796caa`, `0ac018c`, `f716dbd`, `a088bf2`, `b3602a4` y `5682a88` · `apps/core/src/assistant/{toolbox,model,types}.ts`,
 `chat/{service,repository}.ts`, `platform/migrations.ts` (migración 13 · `chat_refs`),
 `workspaces/use-cases.ts`, `packages/contracts/src/chat.ts` · ADR-009 enmendado y
-`docs/architecture.md` al día · 456 pruebas en verde en el árbol
+`docs/architecture.md` al día · 469 pruebas en verde en el árbol
 
 La primera conversación de trabajo real lo dejó ver entero: buscó una sesión de Claude, la
 encontró, y al preguntarle de qué trataba **resumió el título** en vez del contenido. A «ábremela»
@@ -114,9 +114,12 @@ Medido contra producción, la misma pregunta antes y después:
 | | Consultas | Repetidas | Qué hizo |
 |---|---|---|---|
 | antes | 25 | 12 | resumió el título; «ábremela» → `MCP_READ_ROOTS` |
-| ahora | 4 | 0 | leyó el transcript y abrió el workspace `ws3d03pt1c8m0k090` |
+| ahora | 3 | 0 | leyó el transcript, abrió el workspace `ws3d03pt1c8m0k090` y ofreció la terminal |
 
-Los tres turnos del «ahora»: 9 s, 12 s y 15 s.
+Los tres turnos: 6 s, 12 s y 12 s, con una sola consulta cada uno. Y la referencia de terminal
+completa por primera vez —`workspaceId: ws3d03pt1c8m0k090`, `cwd: /var/www/vhosts/landingIODaApp/
+Landing IODApp`—, que es lo que hace que el botón de IA-03 llegue con su `from` y la terminal
+arranque donde debe en vez de en el home.
 
 `open_workspace` se añadía al catálogo sin descontarse del tope de 128 funciones. La cuenta vive
 ahora en `directCapacity()`, que usan el toolbox y la pantalla. En producción: 108 capacidades
@@ -124,8 +127,8 @@ enchufadas de un cupo de 111, o sea **tres huecos** antes de que el modelo tenga
 vez de llamarlas por su nombre. El repliegue al router sólo se notaba como lentitud, y por eso el
 modo se sirve ahora en `/api/chat`.
 
-Tres fallos salieron de revisar el diff con la mitad de interfaz delante, y los tres eran del tipo
-que sólo se ve desde el otro lado:
+Cuatro fallos salieron de revisar el diff con la mitad de interfaz delante, y eran del tipo que
+sólo se ve desde el otro lado:
 
 - **`#foundIn` perdía el título de la sesión** en el camino normal, no en un caso raro:
   `get_session_context` empuja la ref `session` con el `preview` y `open_terminal_offer` empuja
@@ -144,11 +147,35 @@ que sólo se ve desde el otro lado:
   salta con tres huecos o menos, así que recibiendo 111 no habría saltado nunca: el repliegue al
   router seguía siendo silencioso, que es justo lo que se estaba arreglando.
 
-Merece la pena quedarse con el patrón, porque los dos peores del día son el mismo: **un campo
-documentado de una manera e implementado de otra** —el título en `#foundIn` y `capabilityRoom`—. Ni
-uno ni otro rompen nada al ejecutar, ninguna prueba los ve, y los dos se cazaron leyendo el código
-con la otra mitad del sistema delante. Cuando el que documenta y el que consume son la misma
-persona, la contradicción no aparece; aquí apareció porque el consumidor la leyó desde fuera.
+Y otros cuatro no se cazaron leyendo: hizo falta medir contra producción, una vez por cada uno.
+Los tres primeros son **el mismo fallo, subiendo una capa cada vez**, y las pruebas estaban en
+verde las tres:
+
+1. La memoria de las sesiones vivía en el toolbox, que dura **un turno** (`f716dbd`). Al turno
+   siguiente no había nada que recordar.
+2. Subida al hilo, el dato que quería recordarse **nunca llegaba a guardarse**, porque se había
+   decidido que la búsqueda no emitiera referencias (`a088bf2`).
+3. Como última red, el workspace ya abierto —pero la comprobación era un `??` sobre la entrada
+   entera, y la entrada **existía** con los campos a `null`, así que la consulta no llegaba a
+   hacerse nunca (`b3602a4`).
+
+El cuarto lo midió jarvis-f9: tres ofertas de terminal idénticas en un mismo turno esquivaban el
+memo porque cambiaba **la frase del motivo**, se llevaban la mitad del presupuesto, y la métrica
+seguía diciendo «0 repetidas» (`5682a88`). Un contador que no cuenta lo que se escapa es peor que
+no tenerlo: dice que el problema está resuelto.
+
+Dos patrones para llevarse, y son distintos:
+
+- **Un campo documentado de una manera e implementado de otra** —el título en `#foundIn` y
+  `capabilityRoom`—. No rompen nada al ejecutar y ninguna prueba los ve. Se cazaron leyendo el
+  código desde el lado que lo **consume**: cuando quien documenta y quien consume son la misma
+  persona, la contradicción no aparece.
+- **Un `??` o un `if` que comprueba el contenedor y no el contenido.** Es el tercero de la lista de
+  arriba, y es el que explica por qué el mismo fallo sobrevivió a dos arreglos: cada capa nueva
+  parecía cubrir el hueco, y ninguna prueba distinguía «no hay entrada» de «hay entrada vacía».
+  Sólo lo separó medir contra la máquina de verdad.
+
+El límite conocido que quedó abierto está en IA-04.
 
 ### [x] IA-03 · Lo que el asistente encuentra ya se puede pulsar
 
@@ -228,6 +255,21 @@ reproduce nada de esto.
    haya camino de vuelta al workspace— y que una ref de sesión sin workspace lo cree y entre.
 
 Y de paso: que el distintivo de capacidades salga en ámbar con `108 · quedan 3`.
+
+### [ ] IA-04 · La terminal de una sesión sin workspace arranca en el home
+
+Límite conocido y medido al cerrar IA-02b, no un fallo nuevo. Una sesión **sin workspace** que se
+buscó en un turno anterior se ofrece con la terminal sin directorio, así que arranca en el home en
+vez de en la carpeta del trabajo. Pasa **una de cada dos veces**, y la mitad no es aleatoria:
+depende de que el modelo se acuerde de pasar el `cwd` que ya vio.
+
+La salida sería que `open_workspace` resolviera el `cwd` del índice en vez de fiarlo a que el
+modelo lo reenvíe —es el mismo criterio que ya se aplicó al `workspaceId` en `a088bf2`, una capa
+más—. No se metió porque cambia lo que el asistente hace por su cuenta con una sesión que la
+persona no ha abierto, y esa frontera la decide Braian, no nosotros.
+
+Mientras tanto el botón funciona: se abre la terminal en la máquina correcta y en la sesión
+correcta, sólo que en el directorio equivocado.
 
 ## Bloque UX · repensar la consola (prioridad 1)
 
