@@ -14,6 +14,7 @@
 import type { JSX } from 'react';
 import type { Health, Run, Workspace } from '@jarvis/contracts';
 import { useHealth, useMetrics, useRuns, useWorkspaces } from '../api/queries.js';
+import { terminalHref } from '../api/links.js';
 import { Empty, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
 import { Donut, Meter, Sparkbars, SERIES_COLORS } from '../ui/charts.jsx';
 import {
@@ -98,7 +99,13 @@ function ResumeCard({ workspace, lastRun }: { workspace: Workspace; lastRun: Run
                 <Glyph icon={ACTION_ICON.open} />
                 Abrir workspace
               </Link>
-              <Link to={`/terminal?host=${encodeURIComponent(workspace.ref.host)}&provider=${workspace.ref.provider}&sessionId=${encodeURIComponent(workspace.ref.sessionId)}&from=${encodeURIComponent(workspace.id)}`}
+              <Link
+                to={terminalHref({
+                  host: workspace.ref.host,
+                  provider: workspace.ref.provider,
+                  sessionId: workspace.ref.sessionId,
+                  from: workspace.id,
+                })}
                 className="btn">
                 <Glyph icon={NAV_ICON.terminal} />
                 Abrir terminal

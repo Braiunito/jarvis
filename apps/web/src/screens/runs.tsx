@@ -23,6 +23,7 @@ import {
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
+import { AskAssistantButton } from '../ui/ask-assistant.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { Card, DataRow, Stat, Tabs, formatDuration } from '../ui/primitives.jsx';
 import { EventTimeline } from '../ui/event-log.jsx';
@@ -418,6 +419,22 @@ export function RunCenterScreen({ runId }: { runId: string | null }): JSX.Elemen
                     Reintentar
                   </button>
                 )}
+                {/*
+                  * Reintentar es la respuesta cuando ya se sabe qué pasó. Cuando no se sabe, lo
+                  * que hace falta es alguien que mire los eventos y la máquina, y eso está a un
+                  * botón: se le da el identificador del trabajo y el error, no una captura.
+                  */}
+                {['failed', 'timed_out'].includes(run.status) ? (
+                  <AskAssistantButton
+                    workspaceId={run.workspaceId}
+                    prompt={`El trabajo ${run.id} acabó en «${RUN_STATUS[run.status].name}». `
+                      + (run.errorCode ? `El código es ${run.errorCode}. ` : '')
+                      + (run.errorMessage ? `Dice: ${run.errorMessage}. ` : '')
+                      + '¿Qué pasó?'}
+                  >
+                    Pregúntale qué pasó
+                  </AskAssistantButton>
+                ) : null}
               </div>
               <ErrorNote error={cancel.error ?? retry.error ?? acknowledge.error}
                 onRetry={() => void detail.refetch()} />

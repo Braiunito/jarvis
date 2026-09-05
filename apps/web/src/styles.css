@@ -1674,6 +1674,29 @@ a:hover { text-decoration: underline; }
   .page { padding: 12px; }
 
   /*
+   * En una conversación, la ventana la manda.
+   *
+   * `.shell` crece con su contenido, que es lo correcto en una pantalla de tarjetas: se apilan y
+   * se desplaza la página. Pero un hilo no se lee así. Al crecer, el compositor se iba fuera de la
+   * ventana y el final de la última respuesta quedaba **debajo de la barra de navegación** —justo
+   * donde va la oferta de terminal, que es lo que hay que pulsar—. Con el alto fijado, el que se
+   * desplaza es `.chat-messages`, que ya sabía hacerlo y nunca llegaba a tener que hacerlo.
+   *
+   * Va con `:has()` y no en `.assistant-page` porque quien crecía era el armazón, y una restricción
+   * puesta en el hijo no impide que el padre siga estirándose.
+   */
+  .shell:has(.assistant-page) {
+    height: 100dvh;
+    /*
+     * Y la fila también, que si no da igual el alto del armazón: una pista `auto` se estira hasta
+     * caber el contenido y vuelve a desbordar por dentro. Aquí el carril es una barra fija —está
+     * fuera del flujo— así que la única fila en flujo es el área de trabajo.
+     */
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .shell:has(.assistant-page) .workarea { min-height: 0; }
+
+  /*
    * La cabecera del teléfono es opaca, no translúcida.
    *
    * En una pantalla ancha el desenfoque queda bien; en uno estrecho la cabecera ocupa un tercio
@@ -1876,6 +1899,15 @@ a:hover { text-decoration: underline; }
 .chat-bubble-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 /* La respuesta puede traer saltos de línea y hay que respetarlos, pero no desbordar por un log. */
 .chat-bubble-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/*
+ * Lo que la respuesta encontró, pulsable.
+ *
+ * Va dentro de la burbuja y no debajo del hilo: lo que el asistente encontró es parte de lo que
+ * contestó, no un pie de página. En rejilla porque una oferta de terminal ocupa su propio bloque
+ * —lleva escrito el motivo— mientras que los botones cortos comparten fila.
+ */
+.chat-refs { display: grid; gap: 8px; margin-top: 8px; }
 
 .chat-tool { align-self: flex-start; max-width: 46rem; width: 100%; }
 

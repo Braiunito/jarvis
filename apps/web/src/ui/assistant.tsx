@@ -11,6 +11,7 @@ import type { Approval, Plan, PlanStep } from '@jarvis/contracts';
 import {
   useAnswerPlan, useCancelPlan, useCreatePlan, usePlan, usePlans, useResolveApproval,
 } from '../api/queries.js';
+import { terminalHref } from '../api/links.js';
 import { Empty, ErrorNote, Link, relativeTime } from './bits.jsx';
 import { useAnnounceOnChange } from './announce.jsx';
 
@@ -51,10 +52,9 @@ function TerminalOfferButton({ offer, workspaceId }: {
   offer: TerminalOffer;
   workspaceId: string;
 }): JSX.Element {
-  const href = `/terminal?host=${encodeURIComponent(offer.host)}`
-    + `&provider=${offer.provider}`
-    + `&sessionId=${encodeURIComponent(offer.sessionId)}`
-    + `&from=${encodeURIComponent(workspaceId)}`;
+  const href = terminalHref({
+    host: offer.host, provider: offer.provider, sessionId: offer.sessionId, from: workspaceId,
+  });
   return (
     <div className="note">
       <Glyph icon={NAV_ICON.terminal} size={16} />

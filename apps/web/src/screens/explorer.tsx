@@ -15,6 +15,7 @@ import {
   useMetrics, useOpenWorkspace, useRuns, useSessions,
 } from '../api/queries.js';
 import { navigate } from '../router.js';
+import { terminalHref } from '../api/links.js';
 import { Empty, ErrorNote, Link, Loading, RunStatusBadge, StaleNote, relativeTime } from '../ui/bits.jsx';
 import { Donut, Meter, SERIES_COLORS } from '../ui/charts.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, STATUS_ICON } from '../ui/icons.jsx';
@@ -452,8 +453,12 @@ export function ExplorerScreen(): JSX.Element {
                   {open.isPending ? 'Abriendo…' : selected.workspaceId ? 'Ir al workspace' : 'Abrir workspace'}
                 </button>
                 <Link className="btn"
-                  to={`/terminal?host=${encodeURIComponent(selected.ref.host)}&provider=${selected.ref.provider}&sessionId=${encodeURIComponent(selected.ref.sessionId)}`
-                    + (selected.workspaceId ? `&from=${encodeURIComponent(selected.workspaceId)}` : '')}>
+                  to={terminalHref({
+                    host: selected.ref.host,
+                    provider: selected.ref.provider,
+                    sessionId: selected.ref.sessionId,
+                    from: selected.workspaceId,
+                  })}>
                   <Glyph icon={NAV_ICON.terminal} />
                   Terminal
                 </Link>

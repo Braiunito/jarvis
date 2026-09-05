@@ -18,16 +18,20 @@
  */
 import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import type { Approval, AutonomyMode, ChatMessage } from '@jarvis/contracts';
+import type { Approval, AutonomyMode, ChatMessage, ChatRef } from '@jarvis/contracts';
 import type { SpendSummary } from '@jarvis/contracts';
 import {
-  useCapabilityCatalog, useConversation, useConversations, useCreateConversation,
-  useDeleteConversation, useResolveApproval, useSendMessage, useSetAutonomy, useSpend,
+  useCapabilityCatalog, useConversation, useConversations, useDeleteConversation,
+  useOpenWorkspace, useResolveApproval, useSendMessage, useSetAutonomy, useSpend,
 } from '../api/queries.js';
 import { useChatStream } from '../api/chat-stream.js';
-import { useRoute } from '../router.js';
-import { Empty, ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
-import { ACTION_ICON, Glyph, NAV_ICON, SOURCE_ICON, STATUS_ICON } from '../ui/icons.jsx';
+import { terminalHref } from '../api/links.js';
+import { navigate, useRoute } from '../router.js';
+import { Empty, ErrorNote, Link, Loading, relativeTime } from '../ui/bits.jsx';
+import {
+  ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, SOURCE_ICON, STATUS_ICON,
+} from '../ui/icons.jsx';
+import { useAskAssistant } from '../ui/ask-assistant.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { DataRow, Segmented } from '../ui/primitives.jsx';
 
@@ -236,6 +240,142 @@ function SpendBadge({ spend }: { spend: SpendSummary }): JSX.Element | null {
   );
 }
 
+/** Un título de sesión puede ser un párrafo. En un botón cabe una línea. */
+const short = (text: string, max = 56): string =>
+  (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/**
+ * Una sesión citada.
+ *
+ * Es la única referencia que no es un enlace: una sesión que el asistente encontró en el índice
+ * puede no tener workspace todavía, así que abrirla es crearlo y entrar. Se hace con la misma
+ * llamada que usa el explorador, no con una copia.
+ */
+function SessionRef({ target }: { target: Extract<ChatRef, { kind: 'session' }> }): JSX.Element {
+  const open = useOpenWorkspace();
+  return (
+    <>
+      <button
+        type="button"
+        className="btn small"
+        disabled={open.isPending}
+        title={`${target.provider} · ${target.host} · ${target.sessionId}`}
+        onClick={() => open.mutate(
+          {
+            ref: { host: target.host, provider: target.provider, sessionId: target.sessionId },
+            title: target.title,
+          },
+          { onSuccess: (result) => navigate(`/w/${result.workspace.id}`) },
+        )}
+      >
+        <Glyph icon={PROVIDER_ICON[target.provider] ?? ACTION_ICON.session} />
+        {open.isPending ? 'Abriendo…' : short(target.title ?? target.sessionId)}
+      </button>
+      {open.error ? (
+        <span style={{ flex: '1 1 100%' }}><ErrorNote error={open.error} /></span>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * La terminal que el asistente propone.
+ *
+ * Lleva el motivo escrito, y no es adorno: sin él es un botón que manda a una máquina sin decir a
+ * qué. Es el mismo trato que la oferta del panel de planes, que es donde se aprendió.
+ */
+function TerminalRef({ target }: { target: Extract<ChatRef, { kind: 'terminal' }> }): JSX.Element {
+  return (
+    <div className="note">
+      <Glyph icon={NAV_ICON.terminal} size={16} />
+      <span>
+        <span className="small">{target.reason}</span>
+        <span className="row tight" style={{ marginTop: 8 }}>
+          <Link
+            to={terminalHref({
+              host: target.host,
+              provider: target.provider,
+              sessionId: target.sessionId,
+              from: target.workspaceId,
+            })}
+            className="btn small"
+          >
+            <Glyph icon={NAV_ICON.terminal} />
+            Abrir terminal en {target.host}
+          </Link>
+          <span className="tiny faint mono">{target.cwd ?? target.sessionId}</span>
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Lo que encontró, en forma de acción.
+ *
+ * Un asistente que contesta «esa sesión está en zeus, en /srv/app» y te deja ahí ha hecho la
+ * mitad del trabajo: quien pregunta quiere abrirla. Por eso cada referencia se pinta como algo
+ * que se pulsa y vive dentro de la burbuja —es parte de la respuesta, no una lista aparte—.
+ */
+function MessageRefs({ message }: { message: ChatMessage }): JSX.Element | null {
+  const refs = message.refs;
+  const terminals = refs.filter(
+    (ref): ref is Extract<ChatRef, { kind: 'terminal' }> => ref.kind === 'terminal');
+  const compact = refs.filter(
+    (ref): ref is Exclude<ChatRef, { kind: 'terminal' }> => ref.kind !== 'terminal');
+
+  /*
+   * `runIds` es lo que citaban las filas de antes y sigue vivo, así que se pinta igual. Lo que ya
+   * viene como referencia no se repite: el mismo trabajo dos veces en la misma burbuja se lee
+   * como dos trabajos.
+   */
+  const cited = new Set(compact
+    .filter((ref): ref is Extract<ChatRef, { kind: 'run' }> => ref.kind === 'run')
+    .map((ref) => ref.runId));
+  const legacyRuns = message.runIds.filter((runId) => !cited.has(runId));
+
+  if (!compact.length && !terminals.length && !legacyRuns.length) return null;
+
+  return (
+    <div className="chat-refs">
+      {compact.length || legacyRuns.length ? (
+        <div className="row tight">
+          {compact.map((ref, index) => {
+            if (ref.kind === 'workspace') {
+              return (
+                <Link key={`w:${index}:${ref.workspaceId}`} to={`/w/${ref.workspaceId}`}
+                  className="btn small" title="Abrir el workspace de esta sesión">
+                  <Glyph icon={ACTION_ICON.open} />
+                  {short(ref.title ?? 'Abrir workspace')}
+                </Link>
+              );
+            }
+            if (ref.kind === 'run') {
+              return (
+                <Link key={`r:${index}:${ref.runId}`} to={`/runs/${ref.runId}`}
+                  className="btn small" title="Ver el trabajo y lo que dejó">
+                  <Glyph icon={NAV_ICON.runs} />
+                  {short(ref.title ?? 'Ver el trabajo')}
+                </Link>
+              );
+            }
+            return <SessionRef key={`s:${index}:${ref.sessionId}`} target={ref} />;
+          })}
+          {legacyRuns.map((runId) => (
+            <Link key={runId} to={`/runs/${runId}`} className="btn small">
+              <Glyph icon={NAV_ICON.runs} />
+              Ver el trabajo
+            </Link>
+          ))}
+        </div>
+      ) : null}
+      {terminals.map((ref, index) => (
+        <TerminalRef key={`t:${index}:${ref.sessionId}`} target={ref} />
+      ))}
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }): JSX.Element {
   if (message.role === 'tool') return <ToolTrace message={message} />;
 
@@ -257,16 +397,7 @@ function MessageBubble({ message }: { message: ChatMessage }): JSX.Element {
         <span className="tiny faint">{relativeTime(message.createdAt)}</span>
       </div>
       <div className="chat-bubble-text">{message.text}</div>
-      {message.runIds.length ? (
-        <div className="row tight" style={{ marginTop: 6 }}>
-          {message.runIds.map((runId) => (
-            <a key={runId} className="btn small" href={`/runs/${runId}`}>
-              <Glyph icon={NAV_ICON.runs} />
-              Ver el trabajo
-            </a>
-          ))}
-        </div>
-      ) : null}
+      <MessageRefs message={message} />
     </div>
   );
 }
@@ -275,12 +406,21 @@ export function AssistantScreen(): JSX.Element {
   usePageMeta({ title: 'Asistente', subtitle: 'El modelo de casa, con las máquinas delante' });
   const route = useRoute();
   const active = route.segments[1] ?? null;
+  /**
+   * De qué workspace se viene.
+   *
+   * Una conversación sin workspace es sobre la casa; con él alcanza el trabajo de esa sesión y
+   * sabe en qué carpeta vive, que es lo que decide si la terminal que acabe ofreciendo abre donde
+   * está el problema o en el home. Venía en la URL y se tiraba, así que entrar desde un workspace
+   * daba exactamente la misma conversación que entrar desde el menú.
+   */
+  const fromWorkspace = route.query.get('workspace');
 
   const list = useConversations();
   const detail = useConversation(active);
   const catalog = useCapabilityCatalog();
   const stream = useChatStream(active);
-  const create = useCreateConversation();
+  const ask = useAskAssistant();
   const send = useSendMessage(active);
   const setAutonomy = useSetAutonomy(active);
   const remove = useDeleteConversation();
@@ -339,10 +479,9 @@ export function AssistantScreen(): JSX.Element {
       send.mutate(text);
       return;
     }
-    // Sin conversación abierta, el primer mensaje crea una y navega a ella.
-    create.mutate({ message: text }, {
-      onSuccess: ({ conversation: created }) => route.navigate(`/assistant/${created.id}`),
-    });
+    // Sin conversación abierta, el primer mensaje crea una y navega a ella. Por el mismo camino
+    // que los accesos del resto de pantallas, y por eso hereda el workspace del que se viene.
+    ask.ask({ prompt: text, workspaceId: fromWorkspace });
   }
 
   const thinking = status === 'thinking';
@@ -467,10 +606,30 @@ export function AssistantScreen(): JSX.Element {
                 {shortModel(capabilities.cloudModel)}
               </span>
             ) : null}
+            {/*
+              * Cuántas capacidades, y **cómo** se le ofrecen.
+              *
+              * El repliegue al router es silencioso: pasado el tope de funciones de la API, el
+              * modelo deja de elegir a la primera y tiene que buscarlas antes, lo que cuesta una
+              * vuelta más por consulta. Hasta ahora eso sólo se notaba porque el asistente iba
+              * más lento, y nadie tenía por qué relacionarlo con las cuatro herramientas que
+              * alguien enchufó ayer en otra máquina. Por eso el aviso llega antes de caer: con
+              * tres huecos o menos, el distintivo ya lo dice.
+              */}
             {capabilities?.capabilityCount ? (
-              <span className="badge neutral tiny">
+              <span
+                className={`badge tiny ${capabilities.capabilityMode === 'router' ? 'warn'
+                  : capabilities.capabilityRoom <= 3 ? 'warn' : 'neutral'}`}
+                title={capabilities.capabilityMode === 'router'
+                  ? 'No caben todas como herramientas del modelo, así que las busca antes de usarlas: '
+                    + 'una vuelta más por consulta.'
+                  : `Se le ofrecen todas de golpe. Caben ${capabilities.capabilityRoom} más antes `
+                    + 'de que tenga que buscarlas.'}
+              >
                 <Glyph icon={ACTION_ICON.capability} />
                 {capabilities.capabilityCount}
+                {capabilities.capabilityMode === 'router' ? ' · las busca'
+                  : capabilities.capabilityRoom <= 3 ? ` · quedan ${capabilities.capabilityRoom}` : ''}
               </span>
             ) : null}
             {spend.data ? <SpendBadge spend={spend.data} /> : null}
@@ -525,6 +684,9 @@ export function AssistantScreen(): JSX.Element {
             />
           ))}
 
+          {/* Si crear la conversación falla, el composer se queda quieto y parece que no responde. */}
+          <ErrorNote error={ask.error} />
+
           {thinking ? (
             <div className="chat-thinking">
               <Glyph icon={STATUS_ICON.activity} size={14} className="spin" />
@@ -553,7 +715,7 @@ export function AssistantScreen(): JSX.Element {
           <button
             type="submit"
             className="btn primary chat-send"
-            disabled={!draft.trim() || send.isPending || create.isPending}
+            disabled={!draft.trim() || send.isPending || ask.pending}
             aria-label="Enviar"
           >
             <Glyph icon={ACTION_ICON.send} />

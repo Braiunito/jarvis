@@ -10,8 +10,11 @@
 import type { JSX } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { Command } from 'cmdk';
-import { useHosts, useOpenWorkspace, useSessions, useWorkspaces } from '../api/queries.js';
+import {
+  useConversations, useHosts, useOpenWorkspace, useSessions, useWorkspaces,
+} from '../api/queries.js';
 import { navigate } from '../router.js';
+import { terminalHref } from '../api/links.js';
 import { relativeTime } from './bits.jsx';
 import { openNewSession } from './new-session.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON } from './icons.jsx';
@@ -26,6 +29,7 @@ export function CommandPalette(): JSX.Element | null {
   const [query, setQuery] = useState('');
   const workspaces = useWorkspaces();
   const hosts = useHosts();
+  const conversations = useConversations();
   const openWorkspace = useOpenWorkspace();
   // Buscar en el índice sólo cuando hay algo escrito: cada pulsación no puede costar una consulta.
   const sessions = useSessions(query.length >= 3 ? { q: query } : {});
@@ -98,6 +102,41 @@ export function CommandPalette(): JSX.Element | null {
               ))}
             </Command.Group>
 
+            {/*
+              * El asistente, que hasta ahora no estaba aquí.
+              *
+              * Una conversación es un contexto al que se vuelve igual que un workspace —lo que se
+              * le preguntó ayer sigue arriba— y el atajo del producto es justo eso. La entrada de
+              * abrirlo va la última del grupo: preguntar algo nuevo es lo raro cuando ya hay hilos
+              * a los que volver, y lo primero cuando no hay ninguno.
+              */}
+            <Command.Group heading="Asistente">
+              {(conversations.data?.conversations ?? []).slice(0, 5).map((conversation) => (
+                <Command.Item
+                  key={conversation.id}
+                  value={`asistente ${conversation.title}`}
+                  onSelect={() => go(`/assistant/${conversation.id}`)}
+                >
+                  <span className="row" style={{ gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
+                    <Glyph icon={NAV_ICON.assistant} />
+                    <span className="palette-label">{conversation.title}</span>
+                  </span>
+                  <span className="palette-hint">
+                    {relativeTime(conversation.lastMessageAt ?? conversation.createdAt)}
+                    {conversation.status === 'waiting_approval' ? ' · espera tu permiso' : ''}
+                  </span>
+                </Command.Item>
+              ))}
+              <Command.Item value="asistente preguntar a la casa nueva conversacion"
+                onSelect={() => go('/assistant')}>
+                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                  <Glyph icon={ACTION_ICON.delegate} />
+                  Preguntarle al asistente
+                </span>
+                <span className="palette-hint">sabe mirar las máquinas y las sesiones</span>
+              </Command.Item>
+            </Command.Group>
+
             {query.length >= 3 ? (
               <Command.Group heading="Sesiones del índice">
                 {(sessions.data?.sessions ?? [])
@@ -137,7 +176,7 @@ export function CommandPalette(): JSX.Element | null {
                 <Command.Item
                   key={host.host}
                   value={`terminal ${host.host}`}
-                  onSelect={() => go(`/terminal?host=${encodeURIComponent(host.host)}`)}
+                  onSelect={() => go(terminalHref({ host: host.host }))}
                 >
                   <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
                     <Glyph icon={NAV_ICON.terminal} />

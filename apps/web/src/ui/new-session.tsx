@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { PermissionProfile, Provider } from '@jarvis/contracts';
 import { useHosts, useStartSession } from '../api/queries.js';
+import { terminalHref } from '../api/links.js';
 import { navigate } from '../router.js';
 import { ErrorNote } from './bits.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, STATUS_ICON } from './icons.jsx';
@@ -138,7 +139,7 @@ export function NewSessionDialog(): JSX.Element | null {
     });
     close();
     if (created.mode === 'terminal') {
-      navigate(`/terminal?host=${encodeURIComponent(created.terminal.host)}&provider=${provider}`);
+      navigate(terminalHref({ host: created.terminal.host, provider }));
     } else {
       navigate(`/w/${created.workspace.id}`);
     }

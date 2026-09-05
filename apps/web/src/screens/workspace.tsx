@@ -19,11 +19,13 @@ import {
   useUploadAttachment, useUsage, useWorkspace,
 } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
+import { terminalHref } from '../api/links.js';
 import {
   Empty, ErrorNote, Link, Loading, RunStatusBadge, StaleNote, TargetChip, relativeTime,
 } from '../ui/bits.jsx';
 import { useAnnounceOnChange } from '../ui/announce.jsx';
 import { AssistantPanel } from '../ui/assistant.jsx';
+import { AskAssistantButton } from '../ui/ask-assistant.jsx';
 import { PERMISSION, PROVENANCE, RUN_STATUS, isRunLive, runTitle } from '../ui/labels.js';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVENANCE_ICON, PROVIDER_ICON, STATUS_ICON,
@@ -235,10 +237,12 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
   }
 
   const events = stream.events;
-  const terminalHref = `/terminal?host=${encodeURIComponent(workspace.ref.host)}`
-    + `&provider=${workspace.ref.provider}`
-    + `&sessionId=${encodeURIComponent(workspace.ref.sessionId)}`
-    + `&from=${encodeURIComponent(workspace.id)}`;
+  const terminal = terminalHref({
+    host: workspace.ref.host,
+    provider: workspace.ref.provider,
+    sessionId: workspace.ref.sessionId,
+    from: workspace.id,
+  });
   const attention = runs.filter((run) => ['failed', 'timed_out', 'waiting'].includes(run.status));
   const messages = transcript.data?.messages ?? [];
 
@@ -354,7 +358,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
           </div>
 
           <div className="row">
-            <Link to={terminalHref} className="btn">
+            <Link to={terminal} className="btn">
               <Glyph icon={NAV_ICON.terminal} />
               Abrir terminal
             </Link>
@@ -749,6 +753,24 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
         </div>
 
         <div className="stack" style={{ gap: 14 }}>
+          {/*
+            * La otra puerta al asistente.
+            *
+            * El panel de abajo delega un objetivo y devuelve un plan; esto abre una conversación
+            * sobre esta sesión, que es lo que se quiere cuando la pregunta es «¿de qué iba esto?».
+            * Va con el workspace pegado: sin él la conversación es sobre la casa, no alcanza el
+            * trabajo de aquí y la terminal que acabe ofreciendo abriría en el home.
+            */}
+          <div className="row">
+            <AskAssistantButton
+              className="btn"
+              workspaceId={workspaceId}
+              prompt={'¿De qué va esta sesión y en qué punto está? Léela entera, no te quedes en el título.'}
+            >
+              Pregúntale sobre esta sesión
+            </AskAssistantButton>
+          </div>
+
           <AssistantPanel workspaceId={workspaceId} />
 
           <Card title="Trabajos de este workspace" icon={NAV_ICON.runs} count={runs.length}

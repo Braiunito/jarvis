@@ -12,6 +12,7 @@ import { Empty, ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
 import { Meter } from '../ui/charts.jsx';
 import { checkName, HEALTH } from '../ui/labels.js';
 import { ACTION_ICON, Glyph, HEALTH_ICON, NAV_ICON, STATUS_ICON } from '../ui/icons.jsx';
+import { AskAssistantButton } from '../ui/ask-assistant.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { Card, Stat, formatDuration } from '../ui/primitives.jsx';
 
@@ -113,8 +114,25 @@ export function HealthScreen(): JSX.Element {
                   </span>
                 </span>
               </span>
-              <span className="tiny faint nowrap">
-                {check.lastOkAt ? `último ok ${relativeTime(check.lastOkAt)}` : 'sin ok conocido'}
+              <span className="row tight nowrap">
+                <span className="tiny faint nowrap">
+                  {check.lastOkAt ? `último ok ${relativeTime(check.lastOkAt)}` : 'sin ok conocido'}
+                </span>
+                {/*
+                  * Un salto en rojo dice qué falla y desde cuándo, nunca por qué: eso está en la
+                  * máquina y el asistente sabe mirarla. Se le pasa el nombre y el código, que es
+                  * lo que aquí se sabe y lo que uno copiaría a mano para preguntarle.
+                  */}
+                {check.status !== 'ok' ? (
+                  <AskAssistantButton
+                    prompt={`¿Por qué está en «${HEALTH[check.status]?.name ?? check.status}» `
+                      + `la comprobación ${checkName(name).title} (${name})?`
+                      + (check.code ? ` El código es ${check.code}.` : '')
+                      + (check.message ? ` Dice: ${check.message}` : '')}
+                  >
+                    Pregúntale por qué
+                  </AskAssistantButton>
+                ) : null}
               </span>
             </div>
           ))}
