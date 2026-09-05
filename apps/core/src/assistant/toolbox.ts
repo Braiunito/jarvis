@@ -240,22 +240,12 @@ const asInt = (value: unknown, fallback: number, max: number): number => {
  * el arreglo: buscar una sesión y no poder leerla es lo que hacía que resumiera el título y lo
  * llamara contenido.
  */
-function refFrom(
-  input: Record<string, unknown>,
-  workspace: Workspace | undefined,
-): { ref: { host: string; provider: Provider; sessionId: string }; cwd: string | null } | null {
-  const host = asString(input['host']);
-  const provider = asString(input['provider']);
-  const sessionId = asString(input['sessionId']);
-
-  if (host && provider && sessionId) {
-    // El provider ya se validó antes de llegar aquí, con su propio error: ver `badProvider`.
-    if (!(PROVIDERS as readonly string[]).includes(provider)) return null;
-    // El `cwd` es del workspace y una sesión ajena no lo tiene: se dice que no se sabe en vez de
-    // prestarle el de otra, que es como se acaba abriendo una terminal en el sitio equivocado.
-    return { ref: { host, provider: provider as Provider, sessionId }, cwd: null };
-  }
-  return workspace ? { ref: workspace.ref, cwd: workspace.cwd } : null;
+/** Una sesión de la que ya se sabe algo en este turno. */
+interface SeenSession {
+  ref: { host: string; provider: Provider; sessionId: string };
+  title: string | null;
+  cwd: string | null;
+  workspaceId: string | null;
 }
 
 /**
@@ -656,6 +646,15 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   readonly #deadline: number | null;
   #terminalOffer: TerminalOffer | null = null;
   readonly #refs: ChatRef[] = [];
+  /**
+   * Las sesiones que este turno ya ha visto pasar, por `sessionId`.
+   *
+   * Existe para no depender de que el modelo reenvíe lo que ya se le dijo. `search_sessions`
+   * devuelve el `cwd` y el título de cada sesión; si luego pide abrirla o dejar una terminal y no
+   * los repite —y no los repite—, se rellenan desde aquí. Sin esto, la terminal que ofrecía salía
+   * sin directorio y arrancaba en el home, que es la mitad de una oferta.
+   */
+  readonly #seen = new Map<string, SeenSession>();
   #repeats = 0;
   #observations = 0;
   /**
@@ -821,6 +820,48 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     }
   }
 
+  /**
+   * De qué sesión se habla en esta llamada.
+   *
+   * Tres orígenes, en este orden: lo que dice la llamada, lo que este turno ya vio, y el workspace
+   * de la conversación. El segundo es el que arregla los dos fallos de verdad: que el modelo diga
+   * «esa sesión» con sólo el id, y que pida una terminal sin el `cwd` que se le dio dos consultas
+   * antes.
+   */
+  #target(input: Record<string, unknown>, fallback: Workspace | undefined): SeenSession | null {
+    const host = asString(input['host']);
+    const provider = asString(input['provider']);
+    const sessionId = asString(input['sessionId']);
+
+    if (sessionId) {
+      const seen = this.#seen.get(sessionId);
+      // El provider ya se validó antes de llegar aquí, con su propio error: ver `badProvider`.
+      if (host && provider && (PROVIDERS as readonly string[]).includes(provider)) {
+        return {
+          ref: { host, provider: provider as Provider, sessionId },
+          title: clip(asString(input['title']), 120).text || seen?.title || null,
+          cwd: asString(input['cwd']) || seen?.cwd || null,
+          workspaceId: seen?.workspaceId ?? null,
+        };
+      }
+      // Sólo el id: se resuelve con lo que ya se vio, que es como el modelo lo escribe de verdad.
+      return seen ?? null;
+    }
+    if (!fallback) return null;
+    return { ref: fallback.ref, title: fallback.title, cwd: fallback.cwd, workspaceId: fallback.id };
+  }
+
+  /** Apunta lo que se sabe de una sesión, sin perder lo que ya se sabía. */
+  #remember(entry: SeenSession): void {
+    const previous = this.#seen.get(entry.ref.sessionId);
+    this.#seen.set(entry.ref.sessionId, {
+      ref: entry.ref,
+      title: entry.title ?? previous?.title ?? null,
+      cwd: entry.cwd ?? previous?.cwd ?? null,
+      workspaceId: entry.workspaceId ?? previous?.workspaceId ?? null,
+    });
+  }
+
   /** En modo directo, qué capacidades se le están ofreciendo. Para Salud y para la pantalla. */
   get directCapabilities(): number { return this.#direct.size; }
 
@@ -881,6 +922,15 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       preview: clip(session.preview, 240).text,
       workspaceId: session.workspaceId,
     }));
+    // Lo que se acaba de decir se recuerda: es lo que evita pedirle al modelo que lo repita.
+    for (const session of result.sessions.slice(0, limit)) {
+      this.#remember({
+        ref: session.ref,
+        title: session.title,
+        cwd: session.cwd,
+        workspaceId: session.workspaceId,
+      });
+    }
     return {
       type: 'observation',
       content: {
@@ -904,12 +954,13 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     if (wrong) {
       return toolError('BAD_INPUT', `provider desconocido: ${wrong}`, `los válidos son ${PROVIDERS.join(', ')}`);
     }
-    const target = refFrom(input, this.#deps.workspace);
+    const target = this.#target(input, this.#deps.workspace);
     if (!target) {
       return toolError('NO_SESSION', 'no sé de qué sesión hablas',
         'dime host, provider y sessionId —los devuelve search_sessions— o entra desde un workspace');
     }
     const transcript = await this.#deps.sessions.transcript(target.ref, { last });
+    this.#remember({ ...target, title: target.title ?? transcript.preview });
     let clipped = false;
     const messages = transcript.messages.slice(-last).map((message) => {
       const text = clip(message.text, this.#limits.maxTextChars);
@@ -928,7 +979,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         host: target.ref.host,
         provider: target.ref.provider,
         sessionId: target.ref.sessionId,
-        title: transcript.preview,
+        title: target.title ?? transcript.preview,
       });
     }
     return {
@@ -1082,7 +1133,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     if (wrong) {
       return toolError('BAD_INPUT', `provider desconocido: ${wrong}`, `los válidos son ${PROVIDERS.join(', ')}`);
     }
-    const target = refFrom(input, this.#deps.workspace);
+    const target = this.#target(input, this.#deps.workspace);
     if (!target) {
       return toolError('NO_SESSION', 'no sé sobre qué sesión ofrecer la terminal',
         'dime host, provider y sessionId —los devuelve search_sessions— o entra desde un workspace');
@@ -1100,7 +1151,9 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       host: target.ref.host,
       provider: target.ref.provider,
       sessionId: target.ref.sessionId,
-      workspaceId: this.#workspaceId,
+      // El del workspace que el propio turno acaba de abrir, si abrió uno: sin él la terminal no
+      // tiene camino de vuelta y arranca donde no es.
+      workspaceId: target.workspaceId ?? this.#workspaceId,
       cwd: target.cwd,
       reason: this.#terminalOffer.reason,
     });
@@ -1125,18 +1178,24 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     if (wrong) {
       return toolError('BAD_INPUT', `provider desconocido: ${wrong}`, `los válidos son ${PROVIDERS.join(', ')}`);
     }
-    const target = refFrom(input, undefined);
+    const target = this.#target(input, undefined);
     if (!target) {
       return toolError('BAD_INPUT', 'no sé qué sesión abrir',
         'dime host, provider y sessionId — los devuelve search_sessions');
     }
-    const title = clip(asString(input['title']), 120).text || null;
-    const cwd = asString(input['cwd']) || null;
+    /*
+     * El título y el directorio salen de lo que ya se vio si el modelo no los repite.
+     *
+     * Y no los repite: en la conversación medida llamó con título inventado y sin `cwd`, y el
+     * titulador automático vive en la ruta HTTP, no en el caso de uso, así que un workspace abierto
+     * desde aquí sin título nacería con un hash.
+     */
     const { workspace, created } = workspaces.open({
       ref: target.ref,
-      ...(cwd ? { cwd } : {}),
-      ...(title ? { title } : {}),
+      ...(target.cwd ? { cwd: target.cwd } : {}),
+      ...(target.title ? { title: target.title } : {}),
     }, this.#deps.user);
+    this.#remember({ ...target, workspaceId: workspace.id });
     /*
      * La auditoría la escribe `WorkspaceService.open`, pero sólo cuando crea.
      *

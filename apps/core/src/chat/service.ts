@@ -754,24 +754,39 @@ export class ChatService {
   #foundIn(history: readonly ChatMessage[]): NonNullable<PlanContext['found']> {
     const byId = new Map<string, NonNullable<PlanContext['found']>[number]>();
     const workspaceOf = new Map<string, string>();
+    const openedIds: string[] = [];
     for (const message of history) {
       for (const ref of message.refs) {
         if (ref.kind === 'session' || ref.kind === 'terminal') {
+          /*
+           * Lo que se sabía no se pierde al volver a nombrar la sesión.
+           *
+           * Una referencia `terminal` no lleva título, y el orden natural es encontrar la sesión
+           * y **después** ofrecer la terminal en ella: sobrescribir sin más dejaba el contexto
+           * diciendo «hay una sesión en zeus» sin decir de qué iba, que es justo lo que se vino a
+           * arreglar. Se borra antes de insertar para que la más nombrada quede la última: un
+           * `Map` conserva el orden de la primera inserción, y `set` sobre una clave que ya está
+           * no la mueve.
+           */
+          const previous = byId.get(ref.sessionId);
+          byId.delete(ref.sessionId);
           byId.set(ref.sessionId, {
             host: ref.host,
             provider: ref.provider,
             sessionId: ref.sessionId,
-            title: ref.kind === 'session' ? ref.title : null,
+            title: (ref.kind === 'session' ? ref.title : null) ?? previous?.title ?? null,
             workspaceId: null,
           });
         }
         if (ref.kind === 'terminal' && ref.workspaceId) workspaceOf.set(ref.sessionId, ref.workspaceId);
-        if (ref.kind === 'workspace') {
-          // El workspace se apunta aparte: la referencia no lleva la sesión, la lleva la base.
-          const opened = this.#deps.workspaces.find(ref.workspaceId);
-          if (opened) workspaceOf.set(opened.ref.sessionId, opened.id);
-        }
+        // El workspace se apunta aparte: la referencia no lleva la sesión, la lleva la base. Se
+        // recogen los ids y se resuelven de una vez, en lugar de consultar dentro del bucle.
+        if (ref.kind === 'workspace') openedIds.push(ref.workspaceId);
       }
+    }
+    for (const workspaceId of new Set(openedIds)) {
+      const opened = this.#deps.workspaces.find(workspaceId);
+      if (opened) workspaceOf.set(opened.ref.sessionId, opened.id);
     }
     return [...byId.values()]
       .map((session) => ({ ...session, workspaceId: workspaceOf.get(session.sessionId) ?? null }))
@@ -903,11 +918,28 @@ class RecordingToolbox implements AssistantToolbox {
  */
 const MAX_MESSAGE_REFS = 4;
 
+/** La identidad de una referencia, que no es el objeto entero: el mismo workspace con dos títulos
+ *  distintos —antes y después de renombrarlo— son dos botones al mismo sitio. */
+const refKey = (ref: ChatRef): string => (ref.kind === 'workspace' ? `workspace:${ref.workspaceId}`
+  : ref.kind === 'run' ? `run:${ref.runId}`
+    : `${ref.kind}:${ref.host}|${ref.provider}|${ref.sessionId}`);
+
 function pickRefs(refs: readonly ChatRef[]): ChatRef[] {
   const seen = new Set<string>();
   const unique: ChatRef[] = [];
-  for (const ref of [...refs].reverse()) {
-    const key = JSON.stringify(ref);
+  /*
+   * La oferta de terminal tiene sitio reservado.
+   *
+   * Las cuatro clases no pesan igual en pantalla: un workspace, una sesión o un trabajo son una
+   * pastilla en una fila; la terminal es un bloque con el motivo escrito, y es la única que
+   * explica **por qué** conviene mirar. Sin reserva, un turno que ofrece pronto y luego mira
+   * cuatro sesiones más la empuja fuera del tope, y como el motivo vive dentro de la propia
+   * referencia no queda ni rastro de que llegó a ofrecerla.
+   */
+  const ordered = [...refs].reverse();
+  const terminal = ordered.find((ref) => ref.kind === 'terminal');
+  for (const ref of terminal ? [terminal, ...ordered] : ordered) {
+    const key = refKey(ref);
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(ref);
