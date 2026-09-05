@@ -29,7 +29,9 @@ export function CommandPalette(): JSX.Element | null {
   const [query, setQuery] = useState('');
   const workspaces = useWorkspaces();
   const hosts = useHosts();
-  const conversations = useConversations();
+  // Sólo con la paleta abierta: montada está siempre, y la lista trae el catálogo de capacidades
+  // detrás. Es la misma regla que ya seguía la búsqueda en el índice.
+  const conversations = useConversations(null, { enabled: open });
   const openWorkspace = useOpenWorkspace();
   // Buscar en el índice sólo cuando hay algo escrito: cada pulsación no puede costar una consulta.
   const sessions = useSessions(query.length >= 3 ? { q: query } : {});

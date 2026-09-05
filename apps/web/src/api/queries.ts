@@ -623,10 +623,25 @@ export interface CapabilityCatalog {
  * por su stream, y sondear esto cada pocos segundos sólo serviría para mover la lista bajo el
  * cursor de quien está leyendo.
  */
-export const useConversations = (workspaceId?: string | null): UseQueryResult<ConversationList> => useQuery({
+export const useConversations = (
+  workspaceId?: string | null,
+  /**
+   * `enabled` para quien lo pide sin estar enseñándolo.
+   *
+   * Lo caro de esta respuesta no son los campos de `capabilities` —el modo y el cupo son
+   * aritmética— sino que para contar las capacidades hay que **traer el catálogo de cada servidor
+   * MCP**. Con la caché caliente no se nota; en frío es una vuelta por servidor, y el día que uno
+   * esté lento lo paga quien abrió una pantalla que no tenía nada que ver.
+   *
+   * Vale la pena en la pantalla del asistente, que es donde se mira. No vale la pena en la paleta,
+   * que está montada en todas y casi nunca se abre.
+   */
+  options: { enabled?: boolean } = {},
+): UseQueryResult<ConversationList> => useQuery({
   queryKey: keys.conversations(workspaceId ?? 'all'),
   queryFn: () => get<ConversationList>(`/api/chat${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ''}`),
   staleTime: 30_000,
+  enabled: options.enabled ?? true,
 });
 
 /**
