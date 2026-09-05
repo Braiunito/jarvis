@@ -125,7 +125,9 @@ máquina, con la respuesta correcta.
 11. **Una conversación podía quedarse «pensando» para siempre.** El turno vive en memoria, así que
     un reinicio a mitad dejaba la fila en `thinking` y la pantalla diciendo «pensando…»
     indefinidamente. Ahora se reconcilian al arrancar: se cierran diciendo qué pasó, sin fingir que
-    se reanudan.
+    se reanudan. *Nota honesta*: la conversación que hizo ver esto no estaba muerta —su turno seguía
+    vivo y acabó ofreciendo escalada al agotar su plazo—, así que la reconciliación no llegó a
+    dispararse en producción. Está cubierta por una prueba que sí mata el proceso a mitad.
 12. **La copia de seguridad salió a medias** al desplegar: sólo el volumen del core, sin
    `jarvis-auth` —usuarios, passkeys y claves de sesión, que es la mitad que no se reconstruye—.
    No es un defecto del código: `bin/jarvis backup` ya hacía las dos mitades y falla si sale
@@ -166,6 +168,17 @@ Se quitó la inyección. El catálogo sigue estando —se pide con `list_capabil
 que existe el router— y cuesta una vuelta cuando hace falta, en vez de torcer todas las
 conversaciones en las que no hacía falta. La temperatura se queda en 0.1: no arregló el problema,
 pero hace el comportamiento reproducible, que es lo que permitió medir el A/B de arriba.
+
+**Verificado en producción**, contra el stack desplegado y no contra un doble:
+
+| Pregunta | Antes | Después |
+|---|---|---|
+| «Hola» | >8 min, 9 consultas, sin responder | **12-16 s, 0 consultas**, 3 de 3 |
+| «¿cómo va la memoria del servidor?» | 108 s, 2 consultas | 148-177 s, 2 consultas, datos correctos |
+
+La pregunta de máquina se paga una vuelta más cara —el catálogo hay que pedirlo— y es el cambio
+justo: cuesta unos segundos en el caso que ya funcionaba, a cambio de que el caso que no funcionaba
+pase de ocho minutos a doce segundos.
 
 **La lección, que es la de siempre en este proyecto**: lo que se le pone delante al modelo pesa más
 que lo que se le pide. Ya había pasado con `[sin parámetros]`, que estaba escrito y no impidió que
