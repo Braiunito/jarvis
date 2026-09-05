@@ -1394,3 +1394,74 @@ describe('SES · el memo mira la pregunta, no la prosa', () => {
     expect(toolbox.observations).toBe(3);
   });
 });
+
+/**
+ * Un id de workspace donde iba el de la sesión.
+ *
+ * Visto en producción, y no en un turno raro: `search_sessions` devuelve el `sessionId` y el
+ * `workspaceId` en la misma línea, y el modelo llamó a `open_terminal_offer` con el del workspace.
+ * La oferta salía igual, apuntando a una sesión que no existe — un botón que no lleva a ninguna
+ * parte, que es peor que no ofrecer ninguno.
+ *
+ * Salió en uno de dos hilos medidos. El otro fue impecable, así que con una sola corrida esto se
+ * habría quedado dentro.
+ */
+/** El `sessionId` sobre el que quedó la oferta, tal como lo devuelve la herramienta. */
+const toolboxSessionId = (result: Record<string, unknown>): string =>
+  String((result['offered'] as Record<string, unknown>)['sessionId']);
+
+describe('SES · el id que llega no siempre es el que dice ser', () => {
+  const conWorkspaces = (): CoreAssistantToolbox => new CoreAssistantToolbox({
+    sessions: services.sessions, workspaces: services.workspaces, health: services.health,
+    runs: services.runs, audit: services.audit, user,
+  });
+
+  const abrirConDirectorio = () => services.workspaces.open(
+    { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-1' }, cwd: '/srv/app' }, user,
+  ).workspace;
+
+  it('con el id del workspace en vez del de la sesión, la oferta apunta a la sesión buena', async () => {
+    const workspace = abrirConDirectorio();
+    const toolbox = conWorkspaces();
+
+    // Tal cual llegó de producción: el id del workspace en el campo de la sesión.
+    const result = content(await toolbox.invoke('open_terminal_offer', {
+      reason: 'mirar en vivo', host: 'bastion', provider: 'claude', sessionId: workspace.id,
+    }));
+
+    expect(result['ok']).toBe(true);
+    // Corregido a la sesión que el workspace dice, y con lo suyo: directorio y camino de vuelta.
+    expect(toolbox.terminalOffer).toMatchObject({ sessionId: 'sid-1', cwd: '/srv/app' });
+    expect(toolbox.refs.find((ref) => ref.kind === 'terminal'))
+      .toMatchObject({ sessionId: 'sid-1', workspaceId: workspace.id });
+  });
+
+  it('un id que no es de nadie sigue sin inventarse', async () => {
+    abrirConDirectorio();
+    const result = content(await conWorkspaces().invoke('open_terminal_offer', {
+      reason: 'mirar', host: 'bastion', provider: 'claude', sessionId: 'ws-que-no-existe',
+    }));
+
+    /*
+     * Se acepta porque el workspace exista, no porque el id tenga pinta de workspace. Adivinar por
+     * la forma del identificador convertiría una corrección en otra fuente de ofertas rotas.
+     *
+     * La oferta sale —el `host` y el `provider` bastan para nombrar una sesión— pero sin
+     * inventarse a cuál pertenece: el id llega tal como vino.
+     */
+    expect(result['ok']).toBe(true);
+    expect(toolboxSessionId(result)).toBe('ws-que-no-existe');
+  });
+
+  it('un id que ya se vio como sesión no se corrige: es una sesión', async () => {
+    const toolbox = conWorkspaces();
+    // Se busca primero, así que `sid-1` consta como sesión antes de que exista confusión posible.
+    await toolbox.invoke('search_sessions', { q: 'pool' });
+    abrirConDirectorio();
+
+    await toolbox.invoke('open_terminal_offer', {
+      reason: 'mirar', host: 'bastion', provider: 'claude', sessionId: 'sid-1',
+    });
+    expect(toolbox.terminalOffer?.sessionId).toBe('sid-1');
+  });
+});
