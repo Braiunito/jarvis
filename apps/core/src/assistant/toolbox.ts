@@ -896,10 +896,11 @@ export class CoreAssistantToolbox implements AssistantToolbox {
        * hacerse nunca. Es el mismo fallo que arreglaba, escrito una capa más arriba.
        */
       if (known.cwd && known.workspaceId) return known;
-      const opened = this.#deps.workspaces?.findByRef(ref);
+      const opened = this.#deps.workspaces?.findByRef(ref) ?? this.#asWorkspaceId(sessionId, remembered);
       if (!opened) return known;
       return {
-        ref,
+        // El del workspace manda: si el id que llegó era el suyo, la sesión buena es la que él dice.
+        ref: opened.ref,
         title: known.title ?? opened.title,
         cwd: known.cwd ?? opened.cwd,
         workspaceId: known.workspaceId ?? opened.id,
@@ -907,6 +908,22 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     }
     if (!fallback) return null;
     return { ref: fallback.ref, title: fallback.title, cwd: fallback.cwd, workspaceId: fallback.id };
+  }
+
+  /**
+   * El caso en que el `sessionId` que llega es en realidad el id de un workspace.
+   *
+   * Visto en producción: `search_sessions` devuelve los dos identificadores en la misma línea y el
+   * modelo llamó con `sessionId: "ws3d03pt1c8m0k090"`. La oferta salía igual, apuntando a una
+   * sesión que no existe — un botón que no lleva a ninguna parte, que es peor que no ofrecerlo.
+   *
+   * Sólo se mira cuando no se sabe **nada** de ese id, que es cuando la confusión es plausible: un
+   * id que ya se vio como sesión es una sesión, y ahí no hay nada que corregir. Y sólo se acepta si
+   * el workspace existe de verdad, así que no es adivinar por la forma del identificador.
+   */
+  #asWorkspaceId(sessionId: string, remembered: SeenSession | undefined): Workspace | null {
+    if (remembered) return null;
+    return this.#deps.workspaces?.find(sessionId) ?? null;
   }
 
   /** Apunta lo que se sabe de una sesión, sin perder lo que ya se sabía. */
