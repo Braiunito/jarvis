@@ -41,11 +41,25 @@ const AUTONOMY_OPTIONS: Array<{ value: AutonomyMode; label: string; hint: string
     label: 'Manual',
     hint: 'Todo lo que tenga efectos te lo pregunta antes, incluido lanzar un trabajo en modo seguro.',
   },
+  /*
+   * Dice lo que el código hace, no lo que el contrato promete.
+   *
+   * La frase anterior prometía que en automático los permisos de escritura seguían pidiendo
+   * tarjeta. No es cierto: `#createRun` del toolbox sólo convierte a aprobación cuando la
+   * autonomía es `manual`, así que en automático un trabajo con perfil `auto` —que escribe— sale
+   * sin preguntar. Lo que sí sigue pidiendo permiso siempre es tocar una máquina con una
+   * capacidad del sistema y salir a la nube, que son decisiones aparte y no dependen de esto.
+   *
+   * Se corrige la frase y no el motor porque el motor es de otro y ya está en camino. Pero un
+   * texto que promete una tarjeta que no va a aparecer es peor que no decir nada: es una
+   * exposición a un clic de quien se lo crea. Cuando el core cumpla lo que promete el contrato,
+   * esta frase vuelve a la anterior.
+   */
   {
     value: 'auto',
     label: 'Automático',
-    hint: 'Puede lanzar trabajo en modo seguro sin preguntar. Sigue pidiéndote permiso para tocar '
-      + 'una máquina, para los permisos de escritura y para salir a la nube.',
+    hint: 'Puede lanzar trabajo sin preguntar, incluido con permiso de escritura. Sigue pidiéndote '
+      + 'permiso para tocar una máquina con una capacidad del sistema y para salir a la nube.',
   },
 ];
 
