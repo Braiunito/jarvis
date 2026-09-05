@@ -128,7 +128,7 @@ export const config = {
    * Por eso el valor por defecto es corto y no generoso: subirlo no da mejores respuestas, da las
    * mismas respuestas más tarde. Quien piense en la nube puede subirlo sin pagar esa latencia.
    */
-  mcpMaxOutputChars: Number(env['JARVIS_MCP_MAX_OUTPUT_CHARS'] || 1200),
+  mcpMaxOutputChars: Number(env['JARVIS_MCP_MAX_OUTPUT_CHARS'] || 8000),
   /**
    * El lote que el asistente lleva puesto sin tener que buscarlo.
    *
@@ -151,14 +151,29 @@ export const config = {
   ],
 
   /**
-   * El cerebro local: un `llama-server` en el bastión, API compatible con OpenAI.
+   * El asistente de primera línea: el que contesta siempre.
    *
-   * Sin esto configurado, el Assistant sigue funcionando como siempre contra la nube. Con esto, la
-   * nube pasa a ser el sitio al que se escala **con permiso**, no el sitio donde se piensa.
+   * Nació siendo un `llama-server` en el propio bastión —de ahí que las variables se llamen
+   * `LOCAL`, que se aceptan por compatibilidad— y hoy es un modelo barato de la nube. Lo que
+   * define este escalón no es dónde vive sino su papel: **responde todo, y cuando no puede, pide
+   * permiso para escalar**. Sin esto configurado, el Assistant funciona como siempre contra el
+   * modelo de la nube.
    */
-  localModelBaseUrl: env['JARVIS_LOCAL_MODEL_BASE_URL'] || '',
-  localModelApiKey: env['JARVIS_LOCAL_MODEL_API_KEY'] || '',
-  localModelName: env['JARVIS_LOCAL_MODEL_NAME'] || '',
+  localModelBaseUrl: env['JARVIS_ASSISTANT_MODEL_BASE_URL'] || env['JARVIS_LOCAL_MODEL_BASE_URL'] || '',
+  localModelApiKey: env['JARVIS_ASSISTANT_MODEL_API_KEY'] || env['JARVIS_LOCAL_MODEL_API_KEY'] || '',
+  localModelName: env['JARVIS_ASSISTANT_MODEL_NAME'] || env['JARVIS_LOCAL_MODEL_NAME'] || '',
+  /**
+   * Cómo se llama el tope de generación en este proveedor, y cuánto razona antes de contestar.
+   *
+   * Los dos son de los que tumban la petición entera si se mandan mal: gpt-5-nano rechaza
+   * `max_tokens` con un 400 y exige `max_completion_tokens`. Y `reasoning_effort: minimal` no es
+   * una optimización menor —medido contra la API real, baja el turno de 4574 ms a 929 ms y de 448
+   * tokens de razonamiento a cero—.
+   */
+  localModelMaxTokensParam: env['JARVIS_ASSISTANT_MODEL_MAX_TOKENS_PARAM']
+    || env['JARVIS_LOCAL_MODEL_MAX_TOKENS_PARAM'] || 'max_tokens',
+  localModelReasoningEffort: env['JARVIS_ASSISTANT_MODEL_REASONING_EFFORT']
+    || env['JARVIS_LOCAL_MODEL_REASONING_EFFORT'] || '',
   /**
    * Cuánto contexto tiene de verdad el modelo local.
    *
@@ -168,7 +183,7 @@ export const config = {
    */
   localModelContextTokens: Number(env['JARVIS_LOCAL_MODEL_CONTEXT'] || 4096),
   /** Un modelo de casa a 7,5 tokens/s necesita más plazo que una API. */
-  localModelTimeoutMs: Number(env['JARVIS_LOCAL_MODEL_TIMEOUT_MS'] || 180_000),
+  localModelTimeoutMs: Number(env['JARVIS_ASSISTANT_MODEL_TIMEOUT_MS'] || env['JARVIS_LOCAL_MODEL_TIMEOUT_MS'] || 120_000),
   /**
    * Cuánto de un resultado de herramienta ve el modelo local dentro de un turno.
    *
@@ -176,7 +191,8 @@ export const config = {
    * devuelve cualquier herramienta, incluidas las del propio Jarvis. El valor heredado eran 60.000
    * caracteres, pensados para una API con 200k de contexto; aquí son el contexto entero.
    */
-  localModelToolResultChars: Number(env['JARVIS_LOCAL_MODEL_TOOL_RESULT_CHARS'] || 4000),
+  localModelToolResultChars: Number(env['JARVIS_ASSISTANT_MODEL_TOOL_RESULT_CHARS']
+    || env['JARVIS_LOCAL_MODEL_TOOL_RESULT_CHARS'] || 40_000),
   /**
    * Cuánto puede generar el modelo local de una vez.
    *
@@ -195,8 +211,12 @@ export const config = {
    * clasificación, no una redacción. `llama-server` viene a 0.8 de fábrica y con eso el mismo
    * «Hola» contestaba el saludo o se ponía a diagnosticar el servidor según la tirada —medido,
    * dos de cada cuatro—. No es un ajuste de estilo: es la diferencia entre 12 s y 194 s.
+   *
+   * **Vacío por defecto, y eso importa**: los modelos que razonan la rechazan. gpt-5-nano contesta
+   * 400 a cualquier valor que no sea el suyo —«does not support 0.1 with this model»—, así que
+   * mandarla siempre tumbaría el asistente entero. Se pone sólo donde se sabe que la admiten.
    */
-  localModelTemperature: Number(env['JARVIS_LOCAL_MODEL_TEMPERATURE'] ?? '0.1'),
+  localModelTemperature: env['JARVIS_ASSISTANT_MODEL_TEMPERATURE'] ?? env['JARVIS_LOCAL_MODEL_TEMPERATURE'] ?? '',
 
   /** El modelo del Assistant vive en el core: la clave jamás llega al navegador. */
   modelBaseUrl: env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com',
@@ -249,7 +269,7 @@ export const config = {
    * que se le recuerda al modelo, y es corto por la misma razón de siempre: con 4096 de contexto,
    * la historia compite con el catálogo y con la respuesta.
    */
-  chatMaxToolCalls: Number(env['JARVIS_CHAT_MAX_TOOL_CALLS'] || 8),
+  chatMaxToolCalls: Number(env['JARVIS_CHAT_MAX_TOOL_CALLS'] || 12),
   /**
    * Cuánto puede pasar un turno consultando antes de tener que responder.
    *
@@ -257,7 +277,18 @@ export const config = {
    * lo que llegó a tardar un «Hola» en producción. Dos minutos de reloj sí acotan lo que espera
    * una persona, y no dependen de lo cargada que esté la máquina ese día.
    */
-  chatMaxTurnMs: Number(env['JARVIS_CHAT_MAX_TURN_MS'] || 120_000),
+  chatMaxTurnMs: Number(env['JARVIS_CHAT_MAX_TURN_MS'] || 180_000),
+  /**
+   * Ofrecer el catálogo MCP como herramientas propias en vez de detrás del router.
+   *
+   * Con un modelo capaz es mejor y no por velocidad: la API sólo acepta los nombres que se le
+   * declararon, así que **el modelo no puede inventarse una capacidad**. Toda esa clase de fallos
+   * desaparece en vez de gestionarse. Si el catálogo no cabe bajo `chatMaxTools`, se vuelve al
+   * router entero —nunca recortado: un catálogo al que le faltan cosas sin decirlo engaña—.
+   */
+  chatDirectCapabilities: bool(env['JARVIS_CHAT_DIRECT_CAPABILITIES'], true),
+  /** Tope de funciones por petición. La API de OpenAI rechaza con 400 por encima de 128. */
+  chatMaxTools: Number(env['JARVIS_CHAT_MAX_TOOLS'] || 128),
   chatHistoryMessages: Number(env['JARVIS_CHAT_HISTORY_MESSAGES'] || 12),
   /** Con qué autonomía nace una conversación. La persona la cambia desde la interfaz. */
   chatDefaultAutonomy: (env['JARVIS_CHAT_DEFAULT_AUTONOMY'] || 'manual') as 'manual' | 'auto',

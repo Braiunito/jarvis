@@ -72,6 +72,15 @@ export interface ChatServiceDeps {
   maxTurnMs?: number;
   approvalTtlMs?: number;
   starterCapabilities?: readonly string[];
+  /**
+   * Ofrecer el catálogo MCP como herramientas propias en vez de detrás del router.
+   *
+   * Con un modelo capaz es mejor: elige a la primera y **no puede inventarse un nombre**, porque
+   * la API sólo acepta los que se le declararon. Con uno pequeño era imposible —el catálogo no le
+   * cabía en el contexto— y de ahí viene el router, que sigue ahí para cuando no quepa.
+   */
+  directCapabilities?: boolean;
+  maxTools?: number;
   toolLimits?: Partial<ToolboxLimits>;
 }
 
@@ -295,7 +304,7 @@ export class ChatService {
     this.#repository.setStatus(id, 'thinking');
     this.bus.notify(id);
 
-    const toolbox = this.#toolboxFor(conversation, user);
+    const toolbox = await this.#toolboxFor(conversation, user);
     let decision: AssistantDecision;
     try {
       decision = await model.decide(await this.#contextFor(conversation, source), toolbox);
@@ -658,9 +667,21 @@ export class ChatService {
    * herramientas para el plan y para la conversación: lo que cambia no es lo que hacen, sino que
    * aquí además se ven.
    */
-  #toolboxFor(conversation: Conversation, user: UserIdentity): AssistantToolbox {
+  async #toolboxFor(conversation: Conversation, user: UserIdentity): Promise<AssistantToolbox> {
     const workspace = conversation.workspaceId ? this.#deps.workspaces.require(conversation.workspaceId) : null;
+    /*
+     * El catálogo entero como herramientas propias, si el modelo puede con él.
+     *
+     * Se resuelve aquí porque pedirlo es asíncrono y el toolbox se construye en frío. Si el
+     * servidor MCP no contesta se sigue sin capacidades: el asistente hará menos, pero hará.
+     */
+    const capabilityTools = this.#deps.mcp?.configured && this.#deps.directCapabilities
+      ? await this.#deps.mcp.asToolDefinitions().catch(() => [])
+      : [];
+
     const inner = new CoreAssistantToolbox({
+      ...(capabilityTools.length ? { capabilityTools } : {}),
+      ...(this.#deps.maxTools ? { maxTools: this.#deps.maxTools } : {}),
       ...(workspace ? { workspace } : {}),
       actorRef: `chat:${conversation.id}`,
       sessions: this.#deps.sessions,
@@ -739,15 +760,15 @@ class RecordingToolbox implements AssistantToolbox {
     if (outcome.type === 'observation') {
       const content = outcome.content as { ok?: unknown; name?: unknown } | null;
       /*
-       * Lo que se guarda es **qué se consultó**, no con qué herramienta.
+       * Lo que se guarda es **qué se consultó**, no con qué herramienta ni con qué nombre interno.
        *
-       * `use_capability` es el mecanismo; lo que a una persona le sirve leer en el hilo es
-       * `zeus.memory_pressure`. Se prefiere el nombre que devuelve la propia observación porque
-       * viene ya cualificado con el servidor, que es lo que hace falta cuando hay más de uno.
+       * Si la observación dice qué se consultó de verdad, gana. Sirve para los dos modos y por el
+       * mismo motivo: en el router el nombre de la herramienta es `use_capability`, que es el
+       * mecanismo y no el hecho; en el directo es `mcp__zeus__memory_pressure`, que lleva dentro
+       * un aplanado que existe sólo porque la API no admite puntos. Lo que una persona quiere leer
+       * en el hilo es `zeus.memory_pressure` en los dos casos.
        */
-      const shown = name === 'use_capability' && typeof content?.name === 'string'
-        ? content.name
-        : name;
+      const shown = typeof content?.name === 'string' ? content.name : name;
       this.#repository.append(this.#conversationId, {
         role: 'tool',
         text: clipText(JSON.stringify(outcome.content), TOOL_ECHO_CHARS),

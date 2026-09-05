@@ -307,7 +307,7 @@ describe('MCP · ejecutar', () => {
   it('una herramienta con efectos no se ejecuta sin permiso', async () => {
     const service = buildService(fakeMcpServer(), { writeServers: 'zeus' });
     await expect(service.call('docker_restart', {}, { actor: 'braian' }))
-      .rejects.toThrow(/hace falta que la persona lo autorice/);
+      .rejects.toThrow(/pídelo con request_capability/);
   });
 
   it('un servidor de sólo lectura no ejecuta una escritura ni con permiso', async () => {

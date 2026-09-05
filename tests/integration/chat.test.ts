@@ -118,10 +118,18 @@ interface Harness {
   restarts: string[];
 }
 
-function harness({ local, cloud, writable = false }: {
+function harness({ local, cloud, writable = false, directCapabilities = false }: {
   local: ScriptedBrain;
   cloud?: ScriptedBrain;
   writable?: boolean;
+  /**
+   * Directo = el catálogo va como herramientas propias; router = detrás de list/search/use.
+   *
+   * Por defecto se prueba el router porque es el modo de repliegue —el que hay que garantizar
+   * cuando el catálogo no cabe— y porque es el que más superficie tiene. El directo tiene sus
+   * propias pruebas más abajo.
+   */
+  directCapabilities?: boolean;
 }): Harness {
   const nube = cloud ?? new ScriptedBrain('nube', []);
   const mcp = fakeMcp({ writable });
@@ -135,6 +143,7 @@ function harness({ local, cloud, writable = false }: {
       // Sin esto no se puede lanzar trabajo de verdad, y la mitad de lo que se prueba aquí es
       // justo cuándo se lanza y cuándo no.
       sshCommand: fakeSshPath(), knownHostsFile: '',
+      chatDirectCapabilities: directCapabilities,
     },
   });
   return { services, local, cloud: nube, restarts: mcp.restarts };
@@ -421,6 +430,98 @@ describe('CHAT · tocar una máquina', () => {
 
     expect(outcome).toContain('zeus.list_processes');
     expect(outcome).not.toContain('zeus_playbook');
+  });
+});
+
+describe('CHAT · el catálogo como herramientas propias', () => {
+  it('ofrece cada capacidad por su nombre, sin el router en medio', async () => {
+    let offered: string[] = [];
+    const local = new ScriptedBrain('local', [
+      (toolbox) => {
+        offered = toolbox.definitions().map((tool) => tool.name);
+        return { kind: 'finish', summary: 'ok' };
+      },
+    ]);
+    const { services } = track(harness({ local, directCapabilities: true }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'hola', user);
+    await settled(services, conversation.id);
+
+    // Cada capacidad es una función declarada: el modelo no puede inventarse un nombre porque la
+    // API sólo acepta los que se le dieron. Es la clase de fallo que desaparece en vez de gestionarse.
+    expect(offered).toContain('mcp__zeus__memory_pressure');
+    expect(offered).toContain('mcp__zeus__zeus_playbook');
+    // Y el router sobra: navegar por áreas es lo que se hace cuando no cabe el catálogo.
+    expect(offered).not.toContain('search_capabilities');
+    expect(offered).not.toContain('use_capability');
+  });
+
+  it('llamarla por su nombre la ejecuta por el mismo camino auditado', async () => {
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        await toolbox.invoke('mcp__zeus__memory_pressure', {});
+        return { kind: 'finish', summary: 'la RAM va bien' };
+      },
+    ]);
+    const { services } = track(harness({ local, directCapabilities: true }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, '¿la memoria?', user);
+    await settled(services, conversation.id);
+
+    const tool = services.chat.messages(conversation.id).find((message) => message.role === 'tool');
+    expect(tool?.toolName).toBe('zeus.memory_pressure');
+    expect(tool?.toolOk).toBe(true);
+  });
+
+  it('una capacidad con efectos tampoco se ejecuta por su nombre sin firma', async () => {
+    let outcome = '';
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        outcome = JSON.stringify(await toolbox.invoke('mcp__zeus__docker_restart', { container: 'camwall' }));
+        return { kind: 'finish', summary: 'ya' };
+      },
+    ]);
+    const { services, restarts } = track(harness({ local, writable: true, directCapabilities: true }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'reinicia camwall', user);
+    await settled(services, conversation.id);
+
+    // Ofrecerla como herramienta propia no la abre: sigue haciendo falta la tarjeta.
+    expect(restarts).toEqual([]);
+    expect(outcome).toContain('request_capability');
+  });
+
+  it('si el catálogo no cabe bajo el tope, se vuelve al router entero', async () => {
+    let offered: string[] = [];
+    const local = new ScriptedBrain('local', [
+      (toolbox) => {
+        offered = toolbox.definitions().map((tool) => tool.name);
+        return { kind: 'finish', summary: 'ok' };
+      },
+    ]);
+    const mcp = fakeMcp();
+    const services = buildServices({
+      db: openDatabase({ path: ':memory:' }),
+      index: new FakeSessionIndex([indexRow()]) as never,
+      model: new HybridModel({ local, cloud: null }),
+      mcp: mcp.service,
+      config: {
+        hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-chat-spool',
+        sshCommand: fakeSshPath(), knownHostsFile: '',
+        chatDirectCapabilities: true,
+        // Tan bajo que no cabe ni una capacidad además de las propias.
+        chatMaxTools: 8,
+      },
+    });
+    open.push(services);
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'hola', user);
+    await settled(services, conversation.id);
+
+    // Entero y no recortado: un catálogo al que le faltan cosas sin decirlo engaña más que uno
+    // que hay que navegar.
+    expect(offered).toContain('search_capabilities');
+    expect(offered.filter((name) => name.startsWith('mcp__'))).toEqual([]);
   });
 });
 

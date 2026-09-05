@@ -18,6 +18,7 @@
  */
 import type { McpArea, McpCallResult, McpCapability, McpServerState } from '@jarvis/contracts';
 import { JarvisError } from '@jarvis/contracts';
+import type { ToolDefinition, ToolInputSchema } from '../assistant/types.js';
 import type { Clock } from '../platform/clock.js';
 import type { AuditLog } from '../platform/audit.js';
 import { McpError, McpHttpClient, type FetchLike, type McpToolDescriptor } from './client.js';
@@ -182,6 +183,35 @@ export class McpService {
     return all;
   }
 
+  /**
+   * Las capacidades como herramientas que el modelo llama **por su nombre**.
+   *
+   * Es la alternativa al router, y con un modelo capaz es mejor por un motivo que no es la
+   * velocidad: si la capacidad es una función declarada, el modelo **no puede inventarse el
+   * nombre**. La API sólo acepta los que se le dieron. Toda una clase de fallos —`zeus.processes`,
+   * `zeus.network_stats`, `check_ram_status`— deja de existir en vez de gestionarse.
+   *
+   * Medido contra gpt-5-nano con el catálogo entero delante: 1553 ms y acertó a la primera, contra
+   * las dos vueltas que cuesta buscar. Y el catálogo completo son unos 5300 tokens de entrada, que
+   * a $0,05 el millón es un cuarto de milésima de dólar por llamada.
+   *
+   * El nombre se aplana porque la API sólo admite `[A-Za-z0-9_-]`: `zeus.memory_info` no vale y
+   * `mcp__zeus__memory_info` sí. El prefijo evita además que dos servidores con la misma
+   * herramienta se pisen.
+   */
+  async asToolDefinitions(): Promise<Array<{ definition: ToolDefinition; capability: McpCapability }>> {
+    return (await this.capabilities()).map((capability) => ({
+      capability,
+      definition: {
+        name: qualifiedToolName(capability),
+        description: capability.summary,
+        inputSchema: toInputSchema(capability.inputSchema),
+        // Ejecutar una capacidad es una observación; lo que decide el turno son las otras.
+        decides: false,
+      },
+    }));
+  }
+
   /** Cuántas capacidades hay, sin traerlas. Para la interfaz, que sólo quiere el número. */
   async count(): Promise<number> {
     return (await this.capabilities()).length;
@@ -298,7 +328,7 @@ export class McpService {
     }
     if (writes && !allowWrites) {
       throw new JarvisError('FORBIDDEN',
-        `${name} tiene efectos sobre la máquina: hace falta que la persona lo autorice antes`,
+        `${name} tiene efectos sobre la máquina: pídelo con request_capability y lo autoriza una persona`,
         { scope: { capability: name } });
     }
 
@@ -563,6 +593,27 @@ export function fitToSchema(
     else dropped.push(key);
   }
   return { args: kept, dropped };
+}
+
+/** `mcp__servidor__herramienta`: plano, único y dentro de lo que la API admite como nombre. */
+export function qualifiedToolName(capability: { server: string; tool: string }): string {
+  return `mcp__${capability.server}__${capability.tool}`.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+
+/**
+ * El esquema del servidor, en la forma que espera la API del modelo.
+ *
+ * Un esquema vacío se manda igualmente como objeto sin propiedades: omitirlo hace que algunos
+ * proveedores rechacen la función, y decir «no recibe nada» es además la información correcta.
+ */
+function toInputSchema(schema: unknown): ToolInputSchema {
+  const object = schema as { properties?: Record<string, unknown>; required?: string[] } | null;
+  return {
+    type: 'object',
+    properties: object?.properties ?? {},
+    ...(object?.required?.length ? { required: object.required } : {}),
+  };
 }
 
 function isAllowed(name: string, config: McpServerConfig): boolean {

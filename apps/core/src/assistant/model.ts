@@ -287,6 +287,19 @@ export interface AnthropicModelOptions {
    */
   temperature?: number;
   /**
+   * Cuánto razona antes de contestar, en los modelos que razonan.
+   *
+   * En gpt-5-nano cambia el turno de sitio: medido contra la API real, sin este parámetro tarda
+   * **4574 ms** y gasta 384-448 tokens sólo en pensar; con `minimal`, **929 ms** y cero. Para
+   * elegir una herramienta de un catálogo eso es todo lo que hace falta.
+   *
+   * Y hay una trampa que conviene tener escrita: **los tokens de razonamiento cuentan contra
+   * `max_completion_tokens`**. Con el razonamiento por defecto y un tope de 400, la respuesta
+   * llegó vacía —400 tokens gastados, ninguno visible—. Un tope corto sólo es seguro con
+   * `minimal`.
+   */
+  reasoningEffort?: string;
+  /**
    * Dónde se fue el tiempo de una llamada.
    *
    * Con un modelo de casa, «el asistente va lento» es la queja que va a llegar siempre, y sin esto
@@ -502,6 +515,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
   /** Cómo se llama ese campo en el servidor de destino. Ver `maxOutputTokensParam`. */
   readonly #maxOutputTokensParam: string;
   readonly #temperature: number | null;
+  readonly #reasoningEffort: string | null;
   readonly #onUsage: ((usage: ModelTurnUsage) => void) | null;
 
   constructor(options: AnthropicModelOptions) {
@@ -510,6 +524,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
     this.#maxOutputTokens = options.maxOutputTokens ?? null;
     this.#maxOutputTokensParam = options.maxOutputTokensParam ?? 'max_tokens';
     this.#temperature = options.temperature ?? null;
+    this.#reasoningEffort = options.reasoningEffort ?? null;
     this.#onUsage = options.onUsage ?? null;
     this.#apiKey = options.apiKey;
     this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
@@ -525,16 +540,36 @@ export class OpenAiCompatibleModel implements AssistantModel {
       { role: 'system', content: this.#systemPrompt },
       { role: 'user', content: renderContext(context) },
     ];
+    /** Si ya se le tuvo que pedir que contestara. Se hace una vez por turno, no en bucle. */
+    let nudged = false;
 
     for (let call = 0; call <= this.#maxToolCalls; call += 1) {
-      const decisionsOnly = call === this.#maxToolCalls || toolbox.spent;
+      const decisionsOnly = call === this.#maxToolCalls || toolbox.spent || nudged;
       const tools = toolbox.definitions({ decisionsOnly });
       const message = await this.#ask(messages, tools);
       const calls = message.tool_calls ?? [];
 
       if (!calls.length || !calls[0]?.function?.name) {
         const text = cleanSummary(message.content ?? '');
-        return { kind: 'finish', summary: (text || 'el modelo no propuso ningún paso').slice(0, 4000) };
+        if (text) return { kind: 'finish', summary: text.slice(0, 4000) };
+        /*
+         * Ni herramienta ni texto: un modelo que razona puede gastar la vuelta pensando y no
+         * emitir nada. Visto con gpt-5-nano —400 tokens generados, mensaje vacío— y la persona se
+         * quedaba con «el modelo no propuso ningún paso», que no es una respuesta.
+         *
+         * En vez de rendirse se le estrecha la elección: se repite la vuelta ofreciéndole sólo las
+         * herramientas que cierran. Con tres opciones en vez de ciento, elige. Una sola vez, y si
+         * tampoco así, entonces sí se cierra diciendo lo que pasó.
+         */
+        if (nudged) {
+          return { kind: 'finish', summary: 'el modelo no llegó a proponer ningún paso en este turno' };
+        }
+        nudged = true;
+        messages.push({
+          role: 'user',
+          content: 'No has contestado nada. Responde ahora con finish, usando lo que ya sabes.',
+        });
+        continue;
       }
 
       /**
@@ -615,7 +650,14 @@ export class OpenAiCompatibleModel implements AssistantModel {
           messages,
           // Sólo si se pidió, y con el nombre que entienda el destino.
           ...(this.#maxOutputTokens !== null ? { [this.#maxOutputTokensParam]: this.#maxOutputTokens } : {}),
+          /*
+           * Los dos van sólo si se piden, y esto no es prudencia genérica: gpt-5-nano **rechaza
+           * con un 400** cualquier temperatura que no sea la suya por defecto —«does not support
+           * 0.1 with this model»—, igual que rechaza `max_tokens`. Un parámetro de más no es
+           * inofensivo aquí: tumba la petición entera.
+           */
           ...(this.#temperature !== null ? { temperature: this.#temperature } : {}),
+          ...(this.#reasoningEffort !== null ? { reasoning_effort: this.#reasoningEffort } : {}),
           tools: tools.map((tool) => ({
             type: 'function',
             function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },

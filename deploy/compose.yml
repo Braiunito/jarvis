@@ -105,6 +105,19 @@ services:
       # core vive en un contenedor, y ahí `localhost` es el propio contenedor. El servidor local
       # escucha en toda la LAN y exige `Authorization: Bearer`, que es lo que evita que abrirlo
       # más allá de loopback sea abrirlo a cualquiera.
+      JARVIS_ASSISTANT_MODEL_BASE_URL: ${JARVIS_ASSISTANT_MODEL_BASE_URL:-}
+      # Si no se declara una propia, se usa la del modelo de la nube: los dos escalones suelen ser
+      # el mismo proveedor y la misma cuenta, y duplicar un secreto es duplicar dónde se filtra.
+      JARVIS_ASSISTANT_MODEL_API_KEY: ${JARVIS_ASSISTANT_MODEL_API_KEY:-${JARVIS_MODEL_API_KEY:-}}
+      JARVIS_ASSISTANT_MODEL_NAME: ${JARVIS_ASSISTANT_MODEL_NAME:-}
+      # Los dos que tumban la petición entera si van mal con un modelo que razona.
+      JARVIS_ASSISTANT_MODEL_MAX_TOKENS_PARAM: ${JARVIS_ASSISTANT_MODEL_MAX_TOKENS_PARAM:-}
+      JARVIS_ASSISTANT_MODEL_REASONING_EFFORT: ${JARVIS_ASSISTANT_MODEL_REASONING_EFFORT:-}
+      JARVIS_ASSISTANT_MODEL_TEMPERATURE: ${JARVIS_ASSISTANT_MODEL_TEMPERATURE:-}
+      JARVIS_ASSISTANT_MODEL_MAX_OUTPUT_TOKENS: ${JARVIS_ASSISTANT_MODEL_MAX_OUTPUT_TOKENS:-}
+      JARVIS_CHAT_DIRECT_CAPABILITIES: ${JARVIS_CHAT_DIRECT_CAPABILITIES:-true}
+      JARVIS_CHAT_MAX_TOOLS: ${JARVIS_CHAT_MAX_TOOLS:-128}
+      # Nombres antiguos, cuando esto era un llama-server en el propio bastión.
       JARVIS_LOCAL_MODEL_BASE_URL: ${JARVIS_LOCAL_MODEL_BASE_URL:-}
       JARVIS_LOCAL_MODEL_API_KEY: ${JARVIS_LOCAL_MODEL_API_KEY:-}
       JARVIS_LOCAL_MODEL_NAME: ${JARVIS_LOCAL_MODEL_NAME:-}

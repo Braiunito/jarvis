@@ -836,3 +836,71 @@ describe('el tope de generación de un endpoint compatible', () => {
     expect(bodies[0]?.['max_tokens']).toBe(400);
   });
 });
+
+
+/**
+ * Cuando el modelo gasta la vuelta pensando y no emite nada.
+ *
+ * Es un modo de fallo propio de los modelos que razonan: la respuesta llega sin llamada a
+ * herramienta y sin texto. Visto con gpt-5-nano —400 tokens generados, mensaje vacío— y la persona
+ * se quedaba leyendo «el modelo no propuso ningún paso», que no es una respuesta.
+ */
+describe('una vuelta que no devuelve nada', () => {
+  const responder = (bodies: Array<Record<string, unknown>>, respuestas: Array<Record<string, unknown>>): FetchLike =>
+    (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      const next = respuestas[bodies.length - 1] ?? { role: 'assistant', content: null };
+      return Promise.resolve(new Response(JSON.stringify({ choices: [{ message: next }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } }));
+    };
+
+  const context: PlanContext = {
+    objective: 'qué tal las cámaras', history: [], pendingInput: null, pendingApprovals: [],
+    limits: { stepsUsed: 0, maxSteps: 1, maxToolCalls: 4, maxToolOutputBytes: 1000 },
+  };
+  const toolbox = {
+    definitions: ({ decisionsOnly = false } = {}) => (decisionsOnly
+      ? [{ name: 'finish', description: '', inputSchema: { type: 'object' as const, properties: {} }, decides: true }]
+      : [
+        { name: 'get_health', description: '', inputSchema: { type: 'object' as const, properties: {} }, decides: false },
+        { name: 'finish', description: '', inputSchema: { type: 'object' as const, properties: {} }, decides: true },
+      ]),
+    invoke: () => Promise.resolve({ type: 'observation' as const, content: {} }),
+    terminalOffer: null,
+    observations: 0,
+    spent: false,
+  };
+
+  it('se le estrecha la elección y se le pide que responda, en vez de rendirse', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const model = new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'https://api.openai.com', model: 'gpt-5-nano',
+      fetchImpl: responder(bodies, [
+        { role: 'assistant', content: null },
+        { role: 'assistant', content: 'Las cámaras van bien: cinco en pie.' },
+      ]),
+    });
+    const decision = await model.decide(context, toolbox);
+
+    expect(decision).toEqual({ kind: 'finish', summary: 'Las cámaras van bien: cinco en pie.' });
+    // La segunda vuelta le ofrece sólo las que cierran: con tres opciones en vez de ciento, elige.
+    expect((bodies[1]?.['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name))
+      .toEqual(['finish']);
+    // Y se le dice por qué se le vuelve a preguntar, en vez de repetir la misma petición.
+    const segunda = bodies[1]?.['messages'] as Array<{ role: string; content: string }>;
+    expect(segunda.at(-1)?.content).toContain('Responde ahora con finish');
+  });
+
+  it('si tampoco así contesta, se cierra diciendo lo que pasó y no se insiste', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const model = new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'https://api.openai.com', model: 'gpt-5-nano',
+      fetchImpl: responder(bodies, []),
+    });
+    const decision = await model.decide(context, toolbox);
+
+    expect(decision).toEqual({ kind: 'finish', summary: 'el modelo no llegó a proponer ningún paso en este turno' });
+    // Dos vueltas y para: insistir con un modelo que no contesta es gastar sin aprender nada.
+    expect(bodies).toHaveLength(2);
+  });
+});

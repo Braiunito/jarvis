@@ -62,7 +62,16 @@ function buildLocalModel(config: CoreConfig): AssistantModel | null {
      */
     maxToolResultChars: config.localModelToolResultChars,
     maxOutputTokens: config.localModelMaxOutputTokens,
-    temperature: config.localModelTemperature,
+    maxOutputTokensParam: config.localModelMaxTokensParam,
+    /*
+     * La temperatura y el esfuerzo de razonamiento sólo se mandan si están puestos.
+     *
+     * No es prudencia genérica: un modelo que razona rechaza la petición entera si le llega una
+     * temperatura que no sea la suya. Mandar un parámetro de más aquí no degrada nada, tumba el
+     * asistente.
+     */
+    ...(config.localModelTemperature !== '' ? { temperature: Number(config.localModelTemperature) } : {}),
+    ...(config.localModelReasoningEffort ? { reasoningEffort: config.localModelReasoningEffort } : {}),
     /*
      * Con `JARVIS_VERBOSE` se dice dónde se va el tiempo de cada vuelta.
      *
@@ -313,6 +322,8 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     mcp, attachments, evidence,
     maxToolCalls: config.chatMaxToolCalls,
     maxTurnMs: config.chatMaxTurnMs,
+    directCapabilities: config.chatDirectCapabilities,
+    maxTools: config.chatMaxTools,
     historyMessages: config.chatHistoryMessages,
     defaultAutonomy: config.chatDefaultAutonomy,
     starterCapabilities: config.mcpStarter,

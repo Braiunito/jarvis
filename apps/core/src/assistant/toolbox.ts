@@ -20,6 +20,7 @@ import type {
   Workspace,
 } from '@jarvis/contracts';
 import { JarvisError, MCP_AREAS } from '@jarvis/contracts';
+import type { McpCapability } from '@jarvis/contracts';
 import type { McpService } from '../mcp/service.js';
 import type { SessionService } from '../sessions/service.js';
 import type { HealthService } from '../health/service.js';
@@ -163,6 +164,24 @@ export interface CoreToolboxDeps {
    * diferencia entre contestar y dar tres vueltas antes de contestar.
    */
   starterCapabilities?: readonly string[];
+  /**
+   * Las capacidades como herramientas que el modelo llama por su nombre.
+   *
+   * Cuando vienen, se ofrecen **en vez del** router: el modelo elige directamente y la API le
+   * impide inventarse un nombre, que era de donde salía media docena de vueltas perdidas. Cuando
+   * no caben —o no vienen— se ofrece el router y se navegan por áreas, que es lo que hay que hacer
+   * con un catálogo que no entra.
+   */
+  capabilityTools?: ReadonlyArray<{ definition: ToolDefinition; capability: McpCapability }>;
+  /**
+   * Tope de herramientas por petición.
+   *
+   * No es una precaución: la API de OpenAI lo rechaza con un 400 —«array too long. Expected an
+   * array with maximum length 128»— y hoy vamos por 126. Cuando el catálogo crezca por encima, el
+   * modo directo deja de caber y se vuelve al router **entero**, no recortado: un catálogo al que
+   * le faltan herramientas sin decirlo es peor que uno que hay que navegar.
+   */
+  maxTools?: number;
 }
 
 /** Recorta diciendo que recorta, con el tamaño que había antes. Nunca en silencio (ADR-007). */
@@ -550,6 +569,8 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   /** De qué workspace se habla, y con qué identidad se actúa. Uno u otro origen, un solo dato. */
   readonly #workspaceId: string | null;
   readonly #actorRef: string;
+  /** Las capacidades ofrecidas como herramienta propia, por su nombre aplanado. Vacío = router. */
+  readonly #direct: Map<string, McpCapability>;
 
   constructor(deps: CoreToolboxDeps) {
     this.#deps = deps;
@@ -560,9 +581,25 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     this.#now = deps.now ?? (() => Date.now());
     this.#deadline = deps.maxTurnMs ? this.#now() + deps.maxTurnMs : null;
     const scoped = Boolean(deps.workspace);
+    const own = TOOL_DEFINITIONS.filter((tool) => scoped || !WORKSPACE_TOOL_NAMES.has(tool.name));
+    const extras = (deps.mcp?.configured && deps.capabilityWrites ? 1 : 0) + (deps.canEscalate ? 1 : 0);
+
+    /*
+     * Directo si cabe entero, router si no.
+     *
+     * El reparto se hace aquí y no fuera porque sólo aquí se sabe cuántas herramientas propias se
+     * están ofreciendo —depende de si hay workspace—, y el tope es del total.
+     */
+    const room = (deps.maxTools ?? 128) - own.length - extras;
+    const direct = deps.capabilityTools ?? [];
+    this.#direct = direct.length > 0 && direct.length <= room
+      ? new Map(direct.map((entry) => [entry.definition.name, entry.capability]))
+      : new Map();
+
     this.#available = Object.freeze([
-      ...TOOL_DEFINITIONS.filter((tool) => scoped || !WORKSPACE_TOOL_NAMES.has(tool.name)),
-      ...(deps.mcp?.configured ? CAPABILITY_TOOL_DEFINITIONS : []),
+      ...own,
+      ...(this.#direct.size ? direct.map((entry) => entry.definition) : []),
+      ...(deps.mcp?.configured && !this.#direct.size ? CAPABILITY_TOOL_DEFINITIONS : []),
       ...(deps.mcp?.configured && deps.capabilityWrites ? [REQUEST_CAPABILITY_TOOL] : []),
       ...(deps.canEscalate ? [ESCALATE_TOOL] : []),
     ]);
@@ -615,7 +652,15 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     }
   }
 
+  /** En modo directo, qué capacidades se le están ofreciendo. Para Salud y para la pantalla. */
+  get directCapabilities(): number { return this.#direct.size; }
+
   async #run(name: string, input: Record<string, unknown>): Promise<ToolOutcome> {
+    // Una capacidad ofrecida como herramienta propia se ejecuta por el mismo camino que las demás:
+    // el `McpService`, con su allowlist, su ajuste al esquema y su auditoría.
+    const direct = this.#direct.get(name);
+    if (direct) return this.#useCapability({ name: direct.name, args: input });
+
     switch (name) {
       case 'search_sessions': return this.#searchSessions(input);
       case 'get_session_context': return this.#sessionContext(input);
@@ -1108,14 +1153,25 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     const memo = `${bare}:${JSON.stringify(args)}`;
     const previous = this.#alreadyAsked.get(memo);
     if (previous !== undefined) {
+      /*
+       * Repetir se contesta como error, no como éxito con una nota al pie.
+       *
+       * Devolverlo como `ok: true` con un «no la vuelvas a pedir» no funcionó: gpt-5-nano llamó
+       * cuatro veces seguidas a la misma capacidad con los mismos argumentos y gastó el turno
+       * entero. Un modelo trata un éxito como una señal de que va bien. El dato se le devuelve
+       * igual —no tiene por qué perderlo— pero la respuesta dice que esto no era un paso adelante.
+       */
       return {
         type: 'observation',
         content: {
-          ok: true,
+          ok: false,
+          error: {
+            code: 'ALREADY_ASKED',
+            message: `ya consultaste ${name} con esos mismos argumentos en este turno`,
+            hint: 'no la repitas: responde con finish usando lo que ya tienes, o consulta otra cosa distinta',
+          },
           name,
-          content: previous,
-          note: 'ya consultaste esto en este turno; es la misma respuesta. No la vuelvas a pedir: '
-            + 'responde con lo que tienes o consulta otra cosa distinta',
+          previousResult: previous,
         },
       };
     }
