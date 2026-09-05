@@ -73,6 +73,162 @@ está a un clic de la frase que lo cuenta.
 
 </details>
 
+### [x] IA-02b · El asistente encontraba las cosas y no podía hacer nada con ellas
+
+Hecho 2026-09-05 · `d19c527`, `2796caa` y `0ac018c` · `apps/core/src/assistant/{toolbox,model,types}.ts`,
+`chat/{service,repository}.ts`, `platform/migrations.ts` (migración 13 · `chat_refs`),
+`workspaces/use-cases.ts`, `packages/contracts/src/chat.ts` · ADR-009 enmendado y
+`docs/architecture.md` al día · 456 pruebas en verde en el árbol
+
+La primera conversación de trabajo real lo dejó ver entero: buscó una sesión de Claude, la
+encontró, y al preguntarle de qué trataba **resumió el título** en vez del contenido. A «ábremela»
+sólo supo contestar dónde estaba. Ocho preguntas, veinticinco consultas, doce de ellas
+repeticiones exactas.
+
+Lo que no era: que el modelo no supiera contestar. `open_workspace` no existía, así que entendía
+«abrir workspace» como abrir una ruta de fichero, se iba a otra herramienta y chocaba contra los
+read roots del MCP —`MCP_READ_ROOTS`—. Se equivocaba de herramienta porque la que hacía falta no
+estaba.
+
+Tres cosas, y la frontera entre ellas es la que importa:
+
+- **Las herramientas de sesión dejan de ser sólo del workspace.** `get_session_context` y
+  `open_terminal_offer` aceptan cualquier sesión encontrada, y se añade `open_workspace`.
+- **Qué hace el asistente por su cuenta no es leer contra escribir**, es si el gesto tiene efecto
+  fuera de Jarvis. Abrir un workspace es una fila que dice «me interesa esta sesión», así que la
+  hace él; una terminal viva levanta una tmux en un servidor, así que se ofrece y la abre una
+  persona.
+- **El memo sube a `invoke()`** y se comprueba antes del presupuesto: repetir una pregunta no debe
+  costar una consulta. No memoriza lo que falló ni lo que llegó viejo —un índice caído se
+  reintenta— y una repetición cortada no deja fila en el hilo, porque no se consultó nada. Se
+  cuenta en `toolbox.repeats`, que es lo que distingue arreglar un bucle de esconderlo.
+
+Un mensaje puede llevar referencias (`ChatRef`) con lo que el turno dejó pulsable. El turno
+siguiente las lee de vuelta para decir «esa sesión» sin volver a buscarla. `run_ids` no se migra:
+las filas viejas lo usan y la interfaz pinta las dos cosas. La salud **no** entra en el contexto a
+propósito —un problema delante convierte un «Hola» en un diagnóstico, y eso ya se midió—, así que
+esa pregunta la siembra la pantalla de Salud (IA-03).
+
+Medido contra producción, la misma pregunta antes y después:
+
+| | Consultas | Repetidas | Qué hizo |
+|---|---|---|---|
+| antes | 25 | 12 | resumió el título; «ábremela» → `MCP_READ_ROOTS` |
+| ahora | 4 | 0 | leyó el transcript y abrió el workspace `ws3d03pt1c8m0k090` |
+
+Los tres turnos del «ahora»: 9 s, 12 s y 15 s.
+
+`open_workspace` se añadía al catálogo sin descontarse del tope de 128 funciones. La cuenta vive
+ahora en `directCapacity()`, que usan el toolbox y la pantalla. En producción: 108 capacidades
+enchufadas de un cupo de 111, o sea **tres huecos** antes de que el modelo tenga que buscarlas en
+vez de llamarlas por su nombre. El repliegue al router sólo se notaba como lentitud, y por eso el
+modo se sirve ahora en `/api/chat`.
+
+Tres fallos salieron de revisar el diff con la mitad de interfaz delante, y los tres eran del tipo
+que sólo se ve desde el otro lado:
+
+- **`#foundIn` perdía el título de la sesión** en el camino normal, no en un caso raro:
+  `get_session_context` empuja la ref `session` con el `preview` y `open_terminal_offer` empuja
+  después la `terminal`, que no lleva título y lo pisaba a `null`. Se conserva el previo.
+- **`pickRefs` tiraba la oferta de terminal.** El tope de cuatro trataba las cuatro clases como
+  equivalentes; en pantalla no lo son, porque la terminal es la única que lleva escrito **por qué**
+  deberías mirar. Un turno que ofrecía pronto y luego miraba cuatro sesiones más la empujaba fuera
+  sin dejar rastro. Ahora tiene sitio reservado y el dedupe va por identidad, no por el objeto
+  entero.
+- **La ref `terminal` salía con `workspaceId: null` y `cwd: null`** aunque el mismo turno acabara de
+  abrir un workspace para esa sesión: el botón llegaba sin `from` y la terminal arrancaba en el
+  home. El toolbox recuerda por `sessionId` lo que va viendo —`search_sessions` ya devuelve `cwd` y
+  título, el modelo no los reenvía— y lo rellena solo.
+- **`capabilityRoom` servía el cupo entero y no lo que quedaba**, o sea 111 en vez de 3, mientras su
+  propio comentario en el contrato decía «cuántas capacidades más caben». El aviso de la interfaz
+  salta con tres huecos o menos, así que recibiendo 111 no habría saltado nunca: el repliegue al
+  router seguía siendo silencioso, que es justo lo que se estaba arreglando.
+
+Merece la pena quedarse con el patrón, porque los dos peores del día son el mismo: **un campo
+documentado de una manera e implementado de otra** —el título en `#foundIn` y `capabilityRoom`—. Ni
+uno ni otro rompen nada al ejecutar, ninguna prueba los ve, y los dos se cazaron leyendo el código
+con la otra mitad del sistema delante. Cuando el que documenta y el que consume son la misma
+persona, la contradicción no aparece; aquí apareció porque el consumidor la leyó desde fuera.
+
+### [x] IA-03 · Lo que el asistente encuentra ya se puede pulsar
+
+Hecho 2026-09-05 · `1c42f94` y `95427bb` · `apps/web/src/screens/assistant.tsx`,
+`api/links.ts` (nuevo), `ui/ask-assistant.tsx` (nuevo), `api/queries.ts`, `ui/command-palette.tsx`,
+`ui/{assistant,new-session}.tsx`, `screens/{workspace,health,runs,home,explorer}.tsx`, `styles.css`
+· e2e 60 pasadas / 2 saltadas, en escritorio y en teléfono
+
+La otra mitad de IA-02b. El core aprendió a abrir lo que encuentra y a emitir `ChatRef`; sin esto,
+esas referencias no existían en pantalla. Cada una se pinta como una acción **dentro de la
+burbuja**, porque lo que encontró es parte de lo que contestó y no un pie de página. Las cuatro
+clases se leen distinto a propósito: un workspace y un trabajo son un enlace; una sesión es un
+botón, porque la que se encontró en el índice puede no tener workspace todavía y abrirla es
+crearlo; y una terminal lleva el motivo escrito encima, que sin él es un botón que manda a una
+máquina sin decir a qué.
+
+Y preguntarle desde donde está el problema, que era el otro camino que faltaba. `useAskAssistant()`
+crea la conversación sembrada y navega; de ahí salen cuatro accesos —el workspace, un salto en
+rojo, un trabajo que falló y la paleta— y ninguna pantalla decide por su cuenta cómo se crea una
+conversación. El de Salud es el que más importa, porque el core no mete el estado en el contexto a
+propósito: si esa pregunta no la siembra la pantalla, no la siembra nadie.
+
+El `workspaceId` viaja siempre que existe, y no es un detalle: sin él la conversación es sobre la
+casa, no alcanza el trabajo de esa sesión, y la terminal que acabe ofreciendo arranca en el home en
+vez de en la carpeta donde está el problema.
+
+Tres cosas que salieron al construirlo y se arreglaron de paso:
+
+| Qué | Por qué importaba |
+|---|---|
+| «Ver el trabajo» era un `<a href>` crudo | Recargaba la aplicación entera y **mataba el `EventSource`**: se perdía el stream de la conversación por ir a mirar un run |
+| La URL de la terminal, a mano en **seis** sitios | Cinco con `Link` y uno con `navigate()` —el que se escapa al buscar por `Link`—. Ahora `terminalHref()` |
+| La paleta pedía `/api/chat` en cada carga de cualquier pantalla | Los hooks corren aunque el componente devuelva `null` por estar cerrado; contar capacidades trae el catálogo de cada servidor MCP |
+
+**El fallo que sólo aparece con el hilo lleno.** En móvil el hilo no scrolleaba: `.shell` trae
+`min-height: 100dvh`, así que crecía con el contenido en vez de quedarse en la ventana, y el
+compositor se iba fuera de la pantalla con el final de la última respuesta debajo de la barra de
+navegación —justo donde cae la oferta de terminal—. Medido en 390×844: el documento pedía 1136.
+`.chat-messages` ya tenía su `overflow-y: auto` y nunca llegaba a usarlo porque nadie lo acotaba.
+
+Es la mitad que faltaba del arreglo de `5a7d281`, que corrigió el hilo **vacío**: este caso sólo se
+reproduce con una conversación delante. Hacen falta dos reglas —el alto del armazón y además su
+pista, porque una fila `auto` se estira hasta caber el contenido— y van con `:has()` sobre
+`.shell`, no sobre `.assistant-page`: quien crecía era el padre, y acotar al hijo no le impide
+estirarse.
+
+**Cómo se encontró, que es lo reutilizable.** El stack de pruebas no tiene modelo, así que el
+asistente sale vacío y ninguna captura lo iba a enseñar: dos rondas anteriores no lo vieron por
+eso. Se montó un andamio temporal (`?demo=refs`) con un mensaje falso que traía las cuatro clases
+de ref más un `runId` heredado, se capturó en 1440×1000 y en 390×844, y se quitó. Sin contenido de
+verdad delante, el bug pasa en verde.
+
+**Pendiente, y conviene que se sepa:** los seis puntos del guion de móvil siguen **sin verificar en
+un teléfono real**. La instancia pide passkey, y ninguna de las dos sesiones que hicieron este
+trabajo puede ni debe autenticarse, así que el guion es de Braian o de quien él abra sesión. Lo que
+sí está comprobado en el Chrome 151 de esta máquina es que `:has()` y `100dvh` están soportados
+(`CSS.supports('selector(:has(*))')`), de modo que el arreglo se aplica; falta el navegador del
+teléfono. Si `:has()` faltara, el efecto es que vuelve el bug tal cual, sin romper nada más.
+
+El guion va aquí y no en un mensaje, porque un pendiente que remite a algo que nadie puede leer no
+es un pendiente. Hace falta una conversación **con refs y larga**: con dos mensajes no se
+reproduce nada de esto.
+
+1. **Que scrollee el hilo, no la página.** Arrastra hacia arriba: el compositor se queda clavado
+   abajo y la cabecera arriba, y sólo se mueve la lista de mensajes. Si se mueve la pantalla entera
+   y el compositor se va, ha vuelto el bug.
+2. **Que el final del último mensaje no quede bajo la barra.** La oferta de terminal es lo último
+   de la burbuja y por eso la primera en perderse: motivo, botón y `cwd` tienen que verse enteros.
+3. **Reflujo de las pastillas.** Con una sesión de título largo —el `preview` del índice se
+   estira— los botones se apilan; mirar si eso empuja la oferta de terminal fuera de lo cómodo.
+   El tamaño no hace falta comprobarlo: `pointer: coarse` ya los pone a 44 px.
+4. **Que no desborde a lo ancho** con un `sessionId` entero y un `cwd` profundo.
+5. **Con el teclado abierto.** Toca el compositor y comprueba que el hilo sigue scrolleando y no se
+   come el compositor. Es el punto con más riesgo: `100dvh` no se comporta igual en Safari iOS que
+   en Chrome Android.
+6. **Pulsar una ref de verdad.** Que «Abrir terminal en …» llegue con el `from` puesto —o sea, que
+   haya camino de vuelta al workspace— y que una ref de sesión sin workspace lo cree y entre.
+
+Y de paso: que el distintivo de capacidades salga en ámbar con `108 · quedan 3`.
+
 ## Bloque UX · repensar la consola (prioridad 1)
 
 Encargo del 2026-09-02: repensar UI/UX, revisar qué librerías merece la pena incluir, mejorar los
