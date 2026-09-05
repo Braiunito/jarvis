@@ -997,3 +997,119 @@ describe('CHAT · lo que el hilo recuerda y lo que la pantalla enseña', () => {
     expect(assistant?.refs.filter((ref) => ref.kind === 'workspace')).toHaveLength(1);
   });
 });
+
+/**
+ * Lo que se supo en un turno tiene que seguir sabiéndose en el siguiente.
+ *
+ * Éste es el fallo que ninguna prueba de toolbox podía ver, y conviene decir por qué: `#seen` vive
+ * en el toolbox y **el toolbox se construye uno por turno**, así que una prueba que use un solo
+ * toolbox está probando justo el caso que no falla. Se vio contra producción, no aquí: la búsqueda
+ * del turno 1 traía el directorio —el modelo hasta lo citaba en su respuesta— y la terminal del
+ * turno 3 salía con `cwd: null`, arrancando en el home y sin camino de vuelta.
+ *
+ * La frontera que hay que cruzar es la del turno, y sólo se cruza mandando dos mensajes.
+ */
+describe('CHAT · la memoria de las sesiones sobrevive al turno', () => {
+  const conDirectorio = (): FakeSessionIndex => {
+    const index = new FakeSessionIndex([
+      indexRow({ session_id: 'sid-iod', title: 'iod: el escáner se queda a medias', cwd: '/var/www/landing' }),
+    ]);
+    index.transcripts.set('sid-iod', [
+      { role: 'user', at: '2026-08-31T09:00:00.000Z', text: 'el escáner de iod se para con los ficheros grandes' },
+    ]);
+    return index;
+  };
+
+  it('la terminal de un turno posterior sale con el directorio que trajo la búsqueda', async () => {
+    const local = new ScriptedBrain('local', [
+      // Turno 1: busca y lee. De aquí sale la referencia con el directorio.
+      async (toolbox) => {
+        await toolbox.invoke('search_sessions', { q: 'iod' });
+        await toolbox.invoke('get_session_context', { sessionId: 'sid-iod' });
+        return { kind: 'finish', summary: 'era el timeout del escáner' };
+      },
+      // Turno 2, toolbox nuevo: el modelo pide la terminal como la pide de verdad, con el id.
+      async (toolbox) => {
+        await toolbox.invoke('open_terminal_offer', { reason: 'verlo mientras barre', sessionId: 'sid-iod' });
+        return { kind: 'finish', summary: 'te dejo el botón' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: conDirectorio() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'busca lo de iod y dime de qué iba', user);
+    await settled(services, conversation.id);
+    services.chat.send(conversation.id, 'quiero verlo en vivo', user);
+    await settled(services, conversation.id);
+
+    const mensajes = services.chat.messages(conversation.id).filter((message) => message.role === 'assistant');
+    const terminal = mensajes.at(-1)?.refs.find((ref) => ref.kind === 'terminal');
+    // Sin el directorio la tmux arranca en el home: es media oferta, y parece entera.
+    expect(terminal).toMatchObject({ sessionId: 'sid-iod', cwd: '/var/www/landing' });
+  });
+
+  it('el workspace abierto en un turno es el camino de vuelta de la terminal del siguiente', async () => {
+    let abierto: string | undefined;
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        const outcome = await toolbox.invoke('open_workspace', {
+          host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+        }) as { content: { workspaceId?: string } };
+        abierto = outcome.content.workspaceId;
+        return { kind: 'finish', summary: 'abierta' };
+      },
+      async (toolbox) => {
+        await toolbox.invoke('open_terminal_offer', { reason: 'seguirlo a mano', sessionId: 'sid-iod' });
+        return { kind: 'finish', summary: 'ahí tienes' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: conDirectorio() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'ábreme lo de iod', user);
+    await settled(services, conversation.id);
+    services.chat.send(conversation.id, 'y déjame una terminal', user);
+    await settled(services, conversation.id);
+
+    /*
+     * La referencia `workspace` no dice de qué sesión es —lo dice la base—, así que esto sólo
+     * funciona si el hilo resuelve el id contra los workspaces. Es la mitad del arreglo que no se
+     * ve mirando el toolbox.
+     */
+    const mensajes = services.chat.messages(conversation.id).filter((message) => message.role === 'assistant');
+    const terminal = mensajes.at(-1)?.refs.find((ref) => ref.kind === 'terminal');
+    expect(abierto).toBeDefined();
+    expect(terminal).toMatchObject({ sessionId: 'sid-iod', workspaceId: abierto });
+  });
+
+  it('y con host y provider repetidos pero sin el directorio, que es como falló de verdad', async () => {
+    const local = new ScriptedBrain('local', [
+      async (toolbox) => {
+        await toolbox.invoke('search_sessions', { q: 'iod' });
+        await toolbox.invoke('get_session_context', { sessionId: 'sid-iod' });
+        return { kind: 'finish', summary: 'era el timeout' };
+      },
+      /*
+       * El modelo repite lo que sabe decir —máquina, proveedor, id— y **no** el directorio, que se
+       * le dio dos turnos antes y no vuelve a escribir. Ésta es la forma exacta que se midió
+       * contra producción: la referencia salía, así que parecía que funcionaba, y salía con
+       * `cwd: null`. Una oferta que existe y arranca donde no es se parece mucho a una que va bien.
+       */
+      async (toolbox) => {
+        await toolbox.invoke('open_terminal_offer', {
+          reason: 'verlo mientras barre', host: 'bastion', provider: 'claude', sessionId: 'sid-iod',
+        });
+        return { kind: 'finish', summary: 'ahí lo tienes' };
+      },
+    ]);
+    const { services } = track(harness({ local, index: conDirectorio() }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'busca lo de iod', user);
+    await settled(services, conversation.id);
+    services.chat.send(conversation.id, 'quiero verlo en vivo', user);
+    await settled(services, conversation.id);
+
+    const mensajes = services.chat.messages(conversation.id).filter((message) => message.role === 'assistant');
+    const terminal = mensajes.at(-1)?.refs.find((ref) => ref.kind === 'terminal');
+    expect(terminal).toBeDefined();
+    expect(terminal).toMatchObject({ sessionId: 'sid-iod', cwd: '/var/www/landing' });
+  });
+});
