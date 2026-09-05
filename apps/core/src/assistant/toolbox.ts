@@ -20,10 +20,11 @@ import type {
   Workspace,
 } from '@jarvis/contracts';
 import { JarvisError, MCP_AREAS } from '@jarvis/contracts';
-import type { McpCapability } from '@jarvis/contracts';
+import type { ChatRef, McpCapability } from '@jarvis/contracts';
 import type { McpService } from '../mcp/service.js';
 import type { SessionService } from '../sessions/service.js';
 import type { HealthService } from '../health/service.js';
+import type { WorkspaceService } from '../workspaces/use-cases.js';
 import type { RunService } from '../runs/service.js';
 import type { AuditLog } from '../platform/audit.js';
 import type { AttachmentService } from '../attachments/service.js';
@@ -43,7 +44,7 @@ const PROFILES: readonly PermissionProfile[] = ['safe', 'auto', 'yolo'];
  * que miente.
  */
 const WORKSPACE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'get_session_context', 'list_runs', 'get_run', 'cancel_run', 'open_terminal_offer',
+  'list_runs', 'get_run', 'cancel_run',
   'list_evidence', 'read_evidence', 'get_changes', 'create_run', 'request_approval',
 ]);
 
@@ -65,10 +66,10 @@ export interface ToolboxLimits {
 
 export const DEFAULT_TOOLBOX_LIMITS: ToolboxLimits = {
   maxSessions: 8,
-  maxTranscriptMessages: 12,
+  maxTranscriptMessages: 30,
   maxRuns: 10,
   maxRunEvents: 12,
-  maxTextChars: 1200,
+  maxTextChars: 3000,
   maxAttachments: 12,
   maxEvidenceBytes: 4000,
   maxChangedFiles: 40,
@@ -104,6 +105,14 @@ export interface CoreToolboxDeps {
    */
   actorRef?: string;
   sessions: SessionService;
+  /**
+   * Para abrir el workspace de una sesión encontrada.
+   *
+   * Opcional: sin él la herramienta no se ofrece. Abrir un workspace es marcar un favorito —no
+   * ejecuta nada ni toca ninguna máquina— y por eso lo puede hacer el asistente, a diferencia de
+   * una terminal viva, que sigue abriendo una persona.
+   */
+  workspaces?: WorkspaceService;
   health: HealthService;
   runs: RunService;
   audit: AuditLog;
@@ -223,6 +232,44 @@ const asInt = (value: unknown, fallback: number, max: number): number => {
   return Math.min(parsed, max);
 };
 
+/**
+ * De qué sesión se habla en esta llamada.
+ *
+ * Sin argumentos, la del workspace —que es como funcionaba cuando estas herramientas sólo servían
+ * dentro de uno—. Con host, provider y sessionId, cualquiera que el modelo haya encontrado. Ése es
+ * el arreglo: buscar una sesión y no poder leerla es lo que hacía que resumiera el título y lo
+ * llamara contenido.
+ */
+function refFrom(
+  input: Record<string, unknown>,
+  workspace: Workspace | undefined,
+): { ref: { host: string; provider: Provider; sessionId: string }; cwd: string | null } | null {
+  const host = asString(input['host']);
+  const provider = asString(input['provider']);
+  const sessionId = asString(input['sessionId']);
+
+  if (host && provider && sessionId) {
+    // El provider ya se validó antes de llegar aquí, con su propio error: ver `badProvider`.
+    if (!(PROVIDERS as readonly string[]).includes(provider)) return null;
+    // El `cwd` es del workspace y una sesión ajena no lo tiene: se dice que no se sabe en vez de
+    // prestarle el de otra, que es como se acaba abriendo una terminal en el sitio equivocado.
+    return { ref: { host, provider: provider as Provider, sessionId }, cwd: null };
+  }
+  return workspace ? { ref: workspace.ref, cwd: workspace.cwd } : null;
+}
+
+/**
+ * El `provider` que vino mal escrito, si vino mal escrito.
+ *
+ * Se comprueba aparte de resolver la sesión porque son dos fallos distintos y merecen dos
+ * respuestas distintas: «no sé de qué sesión hablas» no le dice nada a un modelo que escribió
+ * `claude-code` en vez de `claude`, y lo que hace entonces es volver a intentarlo igual.
+ */
+const badProvider = (input: Record<string, unknown>): string | null => {
+  const provider = asString(input['provider']);
+  return provider && !(PROVIDERS as readonly string[]).includes(provider) ? provider : null;
+};
+
 const asProfile = (value: unknown, fallback: PermissionProfile): PermissionProfile =>
   (PROFILES as readonly string[]).includes(String(value)) ? value as PermissionProfile : fallback;
 
@@ -252,12 +299,19 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
   },
   {
     name: 'get_session_context',
-    description: 'Últimos mensajes de la sesión de este workspace, tal como los guardó el CLI '
-      + 'remoto. Úsalo para saber qué se estaba haciendo antes de proponer nada. Devuelve un '
-      + 'extracto acotado, no la conversación entera.',
+    description: 'Lee los últimos mensajes de una sesión de agente, tal como los guardó el CLI '
+      + 'remoto. **Es la única forma de saber de qué iba de verdad una sesión**: lo que devuelve '
+      + 'search_sessions es su título y su primera línea, no su contenido. Sin argumentos lee la '
+      + 'sesión de este workspace; con host, provider y sessionId lee cualquiera que hayas '
+      + 'encontrado.',
     inputSchema: {
       type: 'object',
-      properties: { last: { type: 'integer', description: 'Cuántos mensajes finales leer.' } },
+      properties: {
+        last: { type: 'integer', description: 'Cuántos mensajes finales leer.' },
+        host: { type: 'string', description: 'La máquina donde vive la sesión.' },
+        provider: { type: 'string', enum: [...PROVIDERS] },
+        sessionId: { type: 'string', description: 'Tal como lo devolvió search_sessions.' },
+      },
     },
     decides: false,
   },
@@ -310,14 +364,18 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
   },
   {
     name: 'open_terminal_offer',
-    description: 'Deja preparada una oferta de terminal viva sobre esta sesión, que la persona '
-      + 'abre si quiere. No abre nada por su cuenta. Ofrécelo cuando haga falta supervisar, algo '
-      + 'vaya a preguntar a mitad, o el fallo se vea distinto cada vez.',
+    description: 'Deja preparado un botón para abrir una terminal viva sobre una sesión, que la '
+      + 'persona pulsa si quiere. **No abre nada por su cuenta.** Sin argumentos ofrece la sesión '
+      + 'de este workspace; con host, provider y sessionId, cualquiera que hayas encontrado. '
+      + 'Ofrécelo cuando haga falta mirar en vivo o continuar el trabajo a mano.',
     inputSchema: {
       type: 'object',
       properties: {
         reason: { type: 'string', description: 'Por qué conviene mirarlo en vivo.' },
         permissionProfile: { type: 'string', enum: [...PROFILES] },
+        host: { type: 'string' },
+        provider: { type: 'string', enum: [...PROVIDERS] },
+        sessionId: { type: 'string' },
       },
       required: ['reason'],
     },
@@ -425,6 +483,34 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
     decides: true,
   },
 ]);
+
+/**
+ * Abrir el workspace de una sesión encontrada.
+ *
+ * Se ofrece sólo si el toolbox tiene el caso de uso, y **la hace el asistente** en vez de dejarla
+ * como oferta: abrir un workspace es marcar un favorito en la consola —no ejecuta nada, no toca
+ * ninguna máquina, y volver a abrirlo devuelve el mismo—. Una terminal viva es otra cosa y sigue
+ * abriéndola una persona.
+ */
+export const OPEN_WORKSPACE_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
+  name: 'open_workspace',
+  description: 'Abre en Jarvis el workspace de una sesión, y deja el enlace listo para pulsar. No '
+    + 'ejecuta nada: un workspace es dónde se guarda el trabajo sobre esa sesión. Es idempotente, '
+    + 'así que abrir dos veces la misma sesión no crea dos. Si search_sessions ya te devolvió un '
+    + 'workspaceId, esa sesión ya está abierta y no hace falta llamarme.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      host: { type: 'string' },
+      provider: { type: 'string', enum: [...PROVIDERS] },
+      sessionId: { type: 'string' },
+      title: { type: 'string', description: 'El título que traía la sesión, para no dejarlo sin nombre.' },
+      cwd: { type: 'string', description: 'Su directorio de trabajo, si lo sabes.' },
+    },
+    required: ['host', 'provider', 'sessionId'],
+  },
+  decides: false,
+});
 
 /**
  * El router de capacidades (ADR-009).
@@ -535,6 +621,27 @@ export const ESCALATE_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
 });
 
 /**
+ * Cuántas capacidades caben como herramientas propias.
+ *
+ * Vive fuera de la clase porque hay dos que necesitan la misma cuenta: el toolbox, para repartir, y
+ * la pantalla, para poder decir en qué modo está. Con la aritmética escrita dos veces, el día que
+ * se añada una herramienta una de las dos se queda vieja y la pantalla promete un modo que no es.
+ */
+export function directCapacity(options: {
+  maxTools?: number;
+  scoped: boolean;
+  capabilityWrites: boolean;
+  canOpenWorkspaces: boolean;
+  canEscalate: boolean;
+}): number {
+  const own = TOOL_DEFINITIONS.filter((tool) => options.scoped || !WORKSPACE_TOOL_NAMES.has(tool.name)).length;
+  const extras = (options.capabilityWrites ? 1 : 0)
+    + (options.canOpenWorkspaces ? 1 : 0)
+    + (options.canEscalate ? 1 : 0);
+  return (options.maxTools ?? 128) - own - extras;
+}
+
+/**
  * El adaptador de verdad, atado a un plan concreto.
  *
  * Se construye por turno: sabe de qué workspace habla y con qué identidad actúa, así que ninguna
@@ -548,6 +655,8 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   /** Instante a partir del cual ya no se consulta más. `null` = sin tope de reloj. */
   readonly #deadline: number | null;
   #terminalOffer: TerminalOffer | null = null;
+  readonly #refs: ChatRef[] = [];
+  #repeats = 0;
   #observations = 0;
   /**
    * Lo que ya se consultó en este turno, con sus argumentos.
@@ -582,15 +691,21 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     this.#deadline = deps.maxTurnMs ? this.#now() + deps.maxTurnMs : null;
     const scoped = Boolean(deps.workspace);
     const own = TOOL_DEFINITIONS.filter((tool) => scoped || !WORKSPACE_TOOL_NAMES.has(tool.name));
-    const extras = (deps.mcp?.configured && deps.capabilityWrites ? 1 : 0) + (deps.canEscalate ? 1 : 0);
-
     /*
      * Directo si cabe entero, router si no.
      *
-     * El reparto se hace aquí y no fuera porque sólo aquí se sabe cuántas herramientas propias se
-     * están ofreciendo —depende de si hay workspace—, y el tope es del total.
+     * Cuántas propias se ofrecen depende de si hay workspace, y el tope de 128 es del total: las
+     * que se añaden fuera de `TOOL_DEFINITIONS` cuentan igual. Se olvidó una al añadirla
+     * —`open_workspace`— y el efecto de olvidarla no es un fallo visible: es creerse con un hueco
+     * más del que hay y, el día que el MCP crezca justo hasta ahí, un 400 por pasarse de 128.
      */
-    const room = (deps.maxTools ?? 128) - own.length - extras;
+    const room = directCapacity({
+      ...(deps.maxTools ? { maxTools: deps.maxTools } : {}),
+      scoped,
+      capabilityWrites: Boolean(deps.mcp?.configured && deps.capabilityWrites),
+      canOpenWorkspaces: Boolean(deps.workspaces),
+      canEscalate: Boolean(deps.canEscalate),
+    });
     const direct = deps.capabilityTools ?? [];
     this.#direct = direct.length > 0 && direct.length <= room
       ? new Map(direct.map((entry) => [entry.definition.name, entry.capability]))
@@ -601,11 +716,14 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       ...(this.#direct.size ? direct.map((entry) => entry.definition) : []),
       ...(deps.mcp?.configured && !this.#direct.size ? CAPABILITY_TOOL_DEFINITIONS : []),
       ...(deps.mcp?.configured && deps.capabilityWrites ? [REQUEST_CAPABILITY_TOOL] : []),
+      ...(deps.workspaces ? [OPEN_WORKSPACE_TOOL] : []),
       ...(deps.canEscalate ? [ESCALATE_TOOL] : []),
     ]);
   }
 
   get terminalOffer(): TerminalOffer | null { return this.#terminalOffer; }
+  get refs(): ChatRef[] { return this.#refs; }
+  get repeats(): number { return this.#repeats; }
   get observations(): number { return this.#observations; }
 
   /** Ya no queda presupuesto: ni por número de consultas ni por tiempo. */
@@ -628,6 +746,41 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         `las que hay son: ${this.#available.map((tool) => tool.name).join(', ')}`);
     }
     if (!definition.decides) {
+      /*
+       * Repetir una lectura no cuesta presupuesto: cuesta una respuesta que dice que ya la tiene.
+       *
+       * El memo vivía sólo dentro de `use_capability` y por eso cubría las capacidades MCP y
+       * ninguna herramienta propia. En una conversación real eso salió caro: **12 de 25 consultas
+       * fueron repeticiones exactas**, cinco de ellas la misma búsqueda de sesiones, y entre unas
+       * y otras se llevaron el turno por delante.
+       *
+       * Se comprueba **antes** que el presupuesto a propósito: una repetición no debe gastar una
+       * de las consultas del turno, porque no aporta nada que no estuviera ya en el hilo.
+       *
+       * Las capacidades quedan fuera de este camino y las memoriza `#useCapability`, que sabe
+       * normalizar el nombre —`zeus.x`, `x` y `mcp__zeus__x` son la misma cosa— y la forma de los
+       * argumentos. Dos memos con claves distintas sobre el mismo mapa, sin pisarse.
+       */
+      if (name !== 'use_capability' && !this.#direct.has(name)) {
+        const memo = `tool:${name}:${JSON.stringify(input)}`;
+        const previous = this.#alreadyAsked.get(memo);
+        if (previous !== undefined) {
+          this.#repeats += 1;
+          return {
+            type: 'observation',
+            content: {
+              ok: false,
+              error: {
+                code: 'ALREADY_ASKED',
+                message: `ya llamaste a ${name} con esos mismos argumentos en este turno`,
+                hint: 'no la repitas: responde con finish usando lo que ya tienes, o consulta otra cosa distinta',
+              },
+              previousResult: previous,
+            },
+          };
+        }
+      }
+
       if (this.#outOfTime()) {
         return toolError('BUDGET_SPENT', 'este turno lleva demasiado tiempo consultando',
           'responde ya con finish, con lo que tengas: di lo que has averiguado y qué te faltó. '
@@ -641,7 +794,23 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       this.#observations += 1;
     }
     try {
-      return await this.#run(name, input);
+      const outcome = await this.#run(name, input);
+      /*
+       * Sólo se memoriza lo que salió bien de verdad.
+       *
+       * Un fallo puede ser pasajero y reintentarlo es legítimo. Y `stale: true` es lo mismo con
+       * otra cara: el índice no contestó y se sirvió lo último que había —la regla de siempre, dar
+       * el dato viejo diciendo que es viejo— así que tampoco es una respuesta que valga por dos.
+       * Memorizarla convertiría un tropiezo de red en «ya lo preguntaste» durante el resto del turno.
+       */
+      if (!definition.decides && outcome.type === 'observation'
+        && name !== 'use_capability' && !this.#direct.has(name)) {
+        const served = outcome.content as { ok?: unknown; stale?: unknown } | null;
+        if (served?.ok !== false && served?.stale !== true) {
+          this.#alreadyAsked.set(`tool:${name}:${JSON.stringify(input)}`, outcome.content);
+        }
+      }
+      return outcome;
     } catch (error) {
       // Un salto roto no tumba el turno: se cuenta como lo que es y el modelo decide con eso.
       if (error instanceof JarvisError) {
@@ -669,6 +838,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       case 'get_run': return this.#getRun(input);
       case 'cancel_run': return this.#cancelRun(input);
       case 'open_terminal_offer': return this.#offerTerminal(input);
+      case 'open_workspace': return this.#openWorkspace(input);
       case 'list_evidence': return this.#listEvidence();
       case 'read_evidence': return this.#readEvidence(input);
       case 'get_changes': return this.#getChanges(input);
@@ -730,26 +900,53 @@ export class CoreAssistantToolbox implements AssistantToolbox {
 
   async #sessionContext(input: Record<string, unknown>): Promise<ToolOutcome> {
     const last = asInt(input['last'], this.#limits.maxTranscriptMessages, this.#limits.maxTranscriptMessages);
-    const { workspace } = this.#deps;
-    if (!workspace) return toolError('NO_WORKSPACE', 'esta conversación no está atada a una sesión de trabajo',
-        'pregunta por la máquina con las capacidades, o abre la sesión en la que quieras trabajar');
-    const transcript = await this.#deps.sessions.transcript(workspace.ref, { last });
+    const wrong = badProvider(input);
+    if (wrong) {
+      return toolError('BAD_INPUT', `provider desconocido: ${wrong}`, `los válidos son ${PROVIDERS.join(', ')}`);
+    }
+    const target = refFrom(input, this.#deps.workspace);
+    if (!target) {
+      return toolError('NO_SESSION', 'no sé de qué sesión hablas',
+        'dime host, provider y sessionId —los devuelve search_sessions— o entra desde un workspace');
+    }
+    const transcript = await this.#deps.sessions.transcript(target.ref, { last });
     let clipped = false;
     const messages = transcript.messages.slice(-last).map((message) => {
       const text = clip(message.text, this.#limits.maxTextChars);
       if (text.truncated) clipped = true;
       return { role: message.role, at: message.at, text: text.text, provenance: message.provenance };
     });
+    /*
+     * Leer una sesión es encontrarla: se deja el botón.
+     *
+     * Sólo cuando es ajena al workspace de la conversación. Dentro de un workspace, ofrecer «abre
+     * este workspace» es ofrecerle a alguien la puerta en la que ya está.
+     */
+    if (target.ref.sessionId !== this.#deps.workspace?.ref.sessionId) {
+      this.#refs.push({
+        kind: 'session',
+        host: target.ref.host,
+        provider: target.ref.provider,
+        sessionId: target.ref.sessionId,
+        title: transcript.preview,
+      });
+    }
     return {
       type: 'observation',
       content: {
         ok: true,
-        session: { host: workspace.ref.host, provider: workspace.ref.provider, sessionId: workspace.ref.sessionId },
-        cwd: workspace.cwd,
+        session: target.ref,
+        cwd: target.cwd,
+        // El primer turno aprovechable, que es literalmente la respuesta a «¿de qué iba esto?».
+        preview: transcript.preview,
         messages,
+        // Cuántos tiene la sesión entera, no cuántos se han traído: es lo que le dice al modelo si
+        // está viendo el final de una conversación larga o la conversación completa.
+        messageCount: transcript.messageCount,
         // Dos truncados distintos: el del índice y el nuestro. Se dicen los dos.
         truncatedByIndex: transcript.truncated,
         messagesClipped: clipped,
+        note: CONTENT_IS_DATA,
       },
     };
   }
@@ -881,22 +1078,88 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   #offerTerminal(input: Record<string, unknown>): ToolOutcome {
     const reason = asString(input['reason']);
     if (!reason) return toolError('BAD_INPUT', 'falta reason', 'di en una frase por qué conviene mirarlo en vivo');
-    const { workspace } = this.#deps;
-    if (!workspace) {
-      return toolError('NO_WORKSPACE', 'esta conversación no está atada a una sesión de trabajo',
-        'una terminal se ofrece sobre una sesión concreta, y aquí no hay ninguna elegida');
+    const wrong = badProvider(input);
+    if (wrong) {
+      return toolError('BAD_INPUT', `provider desconocido: ${wrong}`, `los válidos son ${PROVIDERS.join(', ')}`);
+    }
+    const target = refFrom(input, this.#deps.workspace);
+    if (!target) {
+      return toolError('NO_SESSION', 'no sé sobre qué sesión ofrecer la terminal',
+        'dime host, provider y sessionId —los devuelve search_sessions— o entra desde un workspace');
     }
     this.#terminalOffer = {
-      host: workspace.ref.host,
-      provider: workspace.ref.provider,
-      sessionId: workspace.ref.sessionId,
-      cwd: workspace.cwd,
+      host: target.ref.host,
+      provider: target.ref.provider,
+      sessionId: target.ref.sessionId,
+      cwd: target.cwd,
       permissionProfile: asProfile(input['permissionProfile'], 'safe'),
       reason: clip(reason, 300).text,
     };
+    this.#refs.push({
+      kind: 'terminal',
+      host: target.ref.host,
+      provider: target.ref.provider,
+      sessionId: target.ref.sessionId,
+      workspaceId: this.#workspaceId,
+      cwd: target.cwd,
+      reason: this.#terminalOffer.reason,
+    });
     return {
       type: 'observation',
       content: { ok: true, offered: this.#terminalOffer, note: 'la abre la persona, no tú' },
+    };
+  }
+
+  /**
+   * Abrir el workspace de una sesión.
+   *
+   * Esto sí lo hace el asistente, y no contradice la regla de arriba: un workspace es una fila en
+   * la base de Jarvis que dice «me interesa esta sesión». No levanta nada, no entra en ninguna
+   * máquina y `open` es idempotente por `SessionRef`, así que insistir devuelve el mismo. La
+   * diferencia con la terminal es exactamente ésa, y es la que decide quién puede hacer qué.
+   */
+  #openWorkspace(input: Record<string, unknown>): ToolOutcome {
+    const workspaces = this.#deps.workspaces;
+    if (!workspaces) return toolError('UNAVAILABLE', 'aquí no se pueden abrir workspaces');
+    const wrong = badProvider(input);
+    if (wrong) {
+      return toolError('BAD_INPUT', `provider desconocido: ${wrong}`, `los válidos son ${PROVIDERS.join(', ')}`);
+    }
+    const target = refFrom(input, undefined);
+    if (!target) {
+      return toolError('BAD_INPUT', 'no sé qué sesión abrir',
+        'dime host, provider y sessionId — los devuelve search_sessions');
+    }
+    const title = clip(asString(input['title']), 120).text || null;
+    const cwd = asString(input['cwd']) || null;
+    const { workspace, created } = workspaces.open({
+      ref: target.ref,
+      ...(cwd ? { cwd } : {}),
+      ...(title ? { title } : {}),
+    }, this.#deps.user);
+    /*
+     * La auditoría la escribe `WorkspaceService.open`, pero sólo cuando crea.
+     *
+     * Así que aquí se apunta que fue el asistente quien lo pidió, también cuando ya existía: sin
+     * esta línea, un workspace abierto por el modelo es indistinguible de uno abierto a mano.
+     */
+    this.#deps.audit.record({
+      actorUser: this.#deps.user.username,
+      eventType: 'assistant.workspace_opened',
+      workspaceId: workspace.id,
+      host: workspace.ref.host,
+      payload: { actor: this.#actorRef, provider: workspace.ref.provider, sessionId: workspace.ref.sessionId, created },
+    });
+    this.#refs.push({ kind: 'workspace', workspaceId: workspace.id, title: workspace.title });
+    return {
+      type: 'observation',
+      content: {
+        ok: true,
+        workspaceId: workspace.id,
+        created,
+        session: workspace.ref,
+        note: created ? 'abierto' : 'ya estaba abierto: es el mismo de antes',
+      },
     };
   }
 

@@ -107,12 +107,18 @@ se puede guardar:
 ```
 contexto (resúmenes + referencias)
   → el modelo consulta lo que le falte      search_sessions · get_session_context · get_health
-                                            list_runs · get_run · cancel_run · open_terminal_offer
+                                            list_runs · get_run · cancel_run
                                             list_capabilities · search_capabilities · use_capability
+  → o deja algo pulsable                    open_workspace · open_terminal_offer
   → decide una acción del core              create_run · request_approval · ask_human · finish
                                             request_capability · escalate
   → el core persiste el checkpoint y el turno termina
 ```
+
+Una consulta que se repite con los mismos argumentos **no se ejecuta ni gasta presupuesto**: se le
+devuelve lo que ya contestó, y esa vuelta no deja fila en el hilo porque no se consultó nada. Se
+cuenta aparte (`toolbox.repeats`), que es lo único que distingue arreglar un bucle de esconderlo.
+No se memoriza lo que salió mal ni lo que salió viejo (`stale`): un índice caído se reintenta.
 
 Las herramientas llaman a los **mismos casos de uso que REST**, nunca a la API HTTP ni a una copia
 de la lógica, y van atadas al plan: no alcanzan el trabajo de otro workspace ni actúan como otra
@@ -126,6 +132,16 @@ Tres frenos, y ninguno vive en el prompt:
 - `finish` cita los trabajos por id y la interfaz enlaza a la evidencia: la síntesis no copia
   buffers;
 - ofrecer una terminal deja un dato en el plan; abrirla es un gesto de la persona.
+
+La frontera de qué puede hacer el asistente por su cuenta no es «leer contra escribir»: es si el
+gesto tiene efecto **fuera de Jarvis**. Abrir un workspace lo hace él —es una fila que dice «me
+interesa esta sesión», no entra en ninguna máquina y abrirlo dos veces devuelve el mismo—; abrir
+una terminal levanta una tmux en un servidor, así que se ofrece y la abre una persona.
+
+Lo que un turno deja pulsable viaja en el mensaje como **referencias** (`ChatRef`): el workspace
+que abrió, la terminal que ofrece, la sesión que leyó, el trabajo que lanzó. La interfaz las pinta
+como botones, y el turno siguiente las lee de vuelta para poder decir «esa sesión» sin volver a
+buscarla.
 
 Lo que espera —un run de horas, una aprobación, una respuesta humana— no se espera dentro del
 turno: se persiste como paso y el despertador vuelve cuando hay motivo. Por eso un plan sobrevive

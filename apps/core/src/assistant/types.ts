@@ -6,7 +6,7 @@
  * contrato entre ambos —qué se ve, qué se puede decidir— es lo que hace que un plan sea
  * reproducible y auditable. Si esto se mueve, se rompe el histórico.
  */
-import type { ModelSource, PermissionProfile, Provider } from '@jarvis/contracts';
+import type { ChatRef, ModelSource, PermissionProfile, Provider } from '@jarvis/contracts';
 
 /** Lo que el modelo ve de un paso ya ocurrido. Resúmenes y referencias, nunca buffers. */
 export interface PlanHistoryEntry {
@@ -63,6 +63,32 @@ export interface PlanContext {
    * herramientas había. Con esto puestas, son dos. Cuestan unos 580 tokens y ahorran dos viajes.
    */
   capabilities?: Array<{ name: string; summary: string; params: string }>;
+  /**
+   * Lo que ya se encontró en este hilo.
+   *
+   * Es lo que permite decir «esa sesión» en el turno siguiente sin volver a buscarla. Se
+   * reconstruye de las referencias guardadas, que son datos tipados, y no leyendo el eco recortado
+   * de las herramientas, que es texto y se rompe. En la conversación medida, cinco de veinticinco
+   * consultas fueron la misma búsqueda repetida.
+   */
+  found?: Array<{ host: string; provider: Provider; sessionId: string; title: string | null; workspaceId: string | null }>;
+  /**
+   * Qué hay abierto y qué está corriendo ahora mismo.
+   *
+   * Va en el contexto y no en una herramienta porque cuesta unas cien palabras y una vuelta contra
+   * el modelo cuesta mucho más: quita la razón más común para gastar una consulta. Sólo aparece si
+   * hay algo.
+   *
+   * **No lleva salud a propósito.** Lo que hay abierto son sustantivos —una sesión, un trabajo—;
+   * un salto en rojo es un problema, y poner un problema delante convierte un «Hola» en un
+   * diagnóstico. Ya pasó una vez con las capacidades de arranque y se midió: tres de tres. Para la
+   * salud está `get_health`, y el acceso directo desde la pantalla de Salud, que es quien sí sabe
+   * que la pregunta va de eso.
+   */
+  house?: {
+    workspaces: Array<{ id: string; title: string | null; host: string; provider: Provider }>;
+    runs: Array<{ runId: string; status: string; title: string | null }>;
+  };
   /** Lo que dijo la persona cuando se le preguntó algo, sin usar todavía. */
   pendingInput: string | null;
   /** Aprobaciones vivas de este plan: pedir otra vez lo ya pedido es ruido. */
@@ -169,6 +195,21 @@ export interface AssistantToolbox {
   invoke(name: string, input: Record<string, unknown>): Promise<ToolOutcome>;
   /** La oferta de terminal que el modelo dejó preparada en este turno, si dejó alguna. */
   readonly terminalOffer: TerminalOffer | null;
+  /**
+   * Lo que el turno dejó pulsable: workspaces abiertos, terminales ofrecidas, sesiones encontradas.
+   *
+   * Es lo que convierte un hallazgo en un botón. Sin esto el asistente encuentra una sesión y a
+   * «ábremela» sólo sabe contestar dónde está.
+   */
+  readonly refs: ChatRef[];
+  /**
+   * Cuántas veces pidió en este turno algo que ya había preguntado.
+   *
+   * No se cuenta por curiosidad: es lo único que deja ver una repetición que no llegó a ejecutarse
+   * y que, por lo mismo, no deja rastro en el hilo. Sin este número, arreglar el bucle y esconderlo
+   * se parecen demasiado.
+   */
+  readonly repeats: number;
   /** Cuántas lecturas lleva el turno: el presupuesto es del core, no del modelo. */
   readonly observations: number;
   /**

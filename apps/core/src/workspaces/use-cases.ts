@@ -132,6 +132,11 @@ export class WorkspaceService {
     return { workspace, created: true };
   }
 
+  /** El workspace, o nada. Para quien pregunta por uno que puede haberse borrado. */
+  find(workspaceId: string): Workspace | null {
+    return this.#repository.findById(workspaceId) ?? null;
+  }
+
   require(workspaceId: string): Workspace {
     const workspace = this.#repository.findById(workspaceId);
     if (!workspace) throw new JarvisError('NOT_FOUND', `unknown workspace ${workspaceId}`, { scope: { workspaceId } });

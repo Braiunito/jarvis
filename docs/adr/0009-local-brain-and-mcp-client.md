@@ -1,6 +1,6 @@
 # ADR-009 · El cerebro vive en casa; MCP también se consume, detrás de un caso de uso
 
-Fecha: 2026-09-04 · Estado: aceptado, **con la premisa enmendada el 2026-09-05** · Amplía a
+Fecha: 2026-09-04 · Estado: aceptado, **con dos enmiendas del 2026-09-05** · Amplía a
 [ADR-004](0004-rest-sse-ws-mcp.md)
 
 > ## Enmienda · 2026-09-05 · el primer escalón deja de vivir en casa
@@ -28,6 +28,50 @@ Fecha: 2026-09-04 · Estado: aceptado, **con la premisa enmendada el 2026-09-05*
 > Los nombres `local` y `cloud` se quedan en el código y en la base por compatibilidad, pero ya no
 > significan dónde vive el modelo: significan **qué escalón es**. La interfaz dejó de decir «casa»
 > y «nube» y dice el nombre del modelo, porque lo otro era mentira en cada mensaje.
+
+> ## Enmienda · 2026-09-05 · encontrar algo no es poder tocarlo
+>
+> La primera conversación de trabajo de verdad —ocho preguntas, veinticinco consultas— dejó ver un
+> agujero que ninguna prueba veía, porque no era un fallo: era una ausencia. El asistente encontraba
+> las cosas y no podía hacer nada con ellas.
+>
+> | Lo que pasó | Por qué |
+> |---|---|
+> | «no me resumiste de qué trataba, sólo dónde está» | Nunca leyó el transcript: `get_session_context` sólo se ofrecía dentro de un workspace. Resumió el **título** y lo llamó contenido. |
+> | «¿me lo abres?» → sólo lo describe | No existía la herramienta, y la oferta de terminal **ni se guardaba**: el getter que la recogía era código muerto. |
+> | **doce de veinticinco consultas fueron repeticiones exactas** | El memo vivía dentro del router de capacidades y no cubría ninguna herramienta propia. |
+>
+> **Lo que cambia**: las herramientas de sesión aceptan cualquier sesión encontrada, no sólo la del
+> workspace; el memo sube a `invoke()` y se comprueba **antes** del presupuesto, porque repetir una
+> pregunta no debe costar una consulta; y un mensaje puede llevar **referencias** —`ChatRef`— que la
+> pantalla pinta como botones.
+>
+> **Lo que no cambia, y es lo que se estaba decidiendo de verdad**: quién puede hacer qué. Abrir un
+> workspace lo hace el asistente porque un workspace es una fila que dice «me interesa esta sesión»:
+> no entra en ninguna máquina, no ejecuta nada, y abrirlo dos veces devuelve el mismo. Una terminal
+> viva levanta una tmux en un servidor, así que se **ofrece** y la abre una persona. La frontera no
+> es «leer contra escribir» ni «barato contra caro»: es si el gesto tiene efecto fuera de Jarvis.
+>
+> **Una repetición cortada no se escribe en el hilo.** Una fila de herramienta afirma «miré esto», y
+> el memo la paró antes de mirar nada. Se cuenta aparte, en `toolbox.repeats`, que es lo único que
+> distingue haber arreglado el bucle de haberlo escondido.
+>
+> Eso obliga a cambiar la cifra con la que se mide el arreglo: **consultas totales** —veinticinco en
+> la conversación que falló—, y no consultas repetidas. Contar las repetidas en la base daría cero
+> aunque el memo estuviera roto, porque la fila que las delataba ya no se escribe. Una métrica que
+> sólo puede salir bien no mide nada.
+>
+> **El contexto crece donde es gratis y no donde tuerce.** Van en el prompt las sesiones ya
+> encontradas en el hilo —reconstruidas de las referencias guardadas, que son datos tipados, no del
+> eco recortado de las herramientas— y lo que hay abierto y corriendo, dos consultas a SQLite. **No
+> va la salud**: lo que hay abierto son sustantivos, un salto en rojo es un problema, y poner un
+> problema delante convierte un «Hola» en un diagnóstico. Ya se midió una vez, tres de tres.
+>
+> **El tope de 128 funciones dejó de ser folclore.** Con 108 capacidades enchufadas quedan tres
+> huecos, y el repliegue al router es silencioso: cuatro herramientas nuevas en el MCP cambian el
+> modo de todas las conversaciones sin que nadie toque Jarvis. Ahora la cuenta vive en una sola
+> función y el modo se sirve en `/api/chat` (`capabilityMode`, `capabilityRoom`), porque una
+> degradación que sólo se nota en la latencia no se nota.
 
 ## Contexto
 

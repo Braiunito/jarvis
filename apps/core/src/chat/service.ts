@@ -20,9 +20,10 @@
 import { createHash } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import type {
-  Approval, AutonomyMode, ChatCapabilities, ChatMessage, Conversation, ModelSource, UserIdentity,
+  Approval, AutonomyMode, ChatCapabilities, ChatMessage, ChatRef, Conversation, ModelSource,
+  UserIdentity,
 } from '@jarvis/contracts';
-import { JarvisError } from '@jarvis/contracts';
+import { isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId } from '../platform/ids.js';
 import type { AuditLog } from '../platform/audit.js';
@@ -37,7 +38,7 @@ import type { HybridModel } from '../assistant/hybrid.js';
 import type {
   AssistantDecision, AssistantToolbox, PlanContext, ToolDefinition, ToolOutcome,
 } from '../assistant/types.js';
-import { CoreAssistantToolbox, type ToolboxLimits } from '../assistant/toolbox.js';
+import { CoreAssistantToolbox, directCapacity, type ToolboxLimits } from '../assistant/toolbox.js';
 import { ChatRepository } from './repository.js';
 import { ChatEventBus } from './events-bus.js';
 
@@ -145,12 +146,28 @@ export class ChatService {
   /** Lo que la interfaz necesita para no ofrecer lo que no existe. */
   async capabilities(): Promise<ChatCapabilities> {
     const model = this.#deps.model;
+    const count = this.#deps.mcp?.configured ? await this.#deps.mcp.count().catch(() => 0) : 0;
+    /*
+     * El cupo del caso peor: con workspace, que es cuando menos sitio queda.
+     *
+     * La pantalla es una y las conversaciones son muchas; decir el cupo de la más holgada sería
+     * prometer un modo que la siguiente conversación no va a tener.
+     */
+    const room = directCapacity({
+      ...(this.#deps.maxTools ? { maxTools: this.#deps.maxTools } : {}),
+      scoped: true,
+      capabilityWrites: Boolean(this.#deps.mcp?.configured),
+      canOpenWorkspaces: true,
+      canEscalate: model?.canEscalate === true,
+    });
     return {
       localAvailable: Boolean(model?.localId),
       localModel: model?.localId ?? null,
       cloudAvailable: Boolean(model?.cloudId),
       cloudModel: model?.cloudId ?? null,
-      capabilityCount: this.#deps.mcp?.configured ? await this.#deps.mcp.count().catch(() => 0) : 0,
+      capabilityCount: count,
+      capabilityMode: this.#deps.directCapabilities && count > 0 && count <= room ? 'direct' : 'router',
+      capabilityRoom: Math.max(0, room),
     };
   }
 
@@ -318,7 +335,7 @@ export class ChatService {
       return;
     }
 
-    await this.#applyDecision(conversation, decision, user, source, model.id);
+    await this.#applyDecision(conversation, decision, user, source, model.id, toolbox);
     this.bus.notify(id);
   }
 
@@ -335,13 +352,23 @@ export class ChatService {
     user: UserIdentity,
     source: ModelSource,
     modelId: string,
+    toolbox: AssistantToolbox,
   ): Promise<void> {
     const id = conversation.id;
+    /*
+     * Lo que el turno dejó pulsable.
+     *
+     * Va en el mensaje del asistente y no en el de la herramienta que lo produjo: los botones se
+     * leen debajo de la respuesta, no dentro de la traza. Y va en **todas** las ramas, aprobaciones
+     * incluidas, porque un workspace abierto mientras razonaba sigue estando abierto aunque el
+     * turno acabe pidiendo permiso para otra cosa.
+     */
+    const refs = pickRefs(toolbox.refs);
 
     if (decision.kind === 'finish') {
       this.#repository.append(id, {
         role: 'assistant', text: decision.summary, source, modelId,
-        runIds: decision.evidenceRunIds ?? [],
+        runIds: decision.evidenceRunIds ?? [], refs,
       });
       // El hilo vuelve a casa después de un turno en la nube: la autorización era para ese turno.
       this.#repository.setStatus(id, 'idle', 'local');
@@ -349,7 +376,7 @@ export class ChatService {
     }
 
     if (decision.kind === 'ask') {
-      this.#repository.append(id, { role: 'assistant', text: decision.question, source, modelId });
+      this.#repository.append(id, { role: 'assistant', text: decision.question, source, modelId, refs });
       this.#repository.setStatus(id, 'idle', 'local');
       return;
     }
@@ -364,7 +391,7 @@ export class ChatService {
       this.#repository.append(id, {
         role: 'assistant',
         text: `Esto se me escapa: ${decision.reason}\n\n¿Consulto al modelo de la nube?`,
-        source, modelId, approvalId: approval.id,
+        source, modelId, approvalId: approval.id, refs,
       });
       this.#repository.setStatus(id, 'waiting_approval');
       return;
@@ -380,7 +407,7 @@ export class ChatService {
         user,
       });
       this.#repository.append(id, {
-        role: 'assistant', text: decision.summary, source, modelId, approvalId: approval.id,
+        role: 'assistant', text: decision.summary, source, modelId, approvalId: approval.id, refs,
       });
       this.#repository.setStatus(id, 'waiting_approval');
       return;
@@ -409,7 +436,7 @@ export class ChatService {
         user,
       });
       this.#repository.append(id, {
-        role: 'assistant', text: decision.summary, source, modelId, approvalId: approval.id,
+        role: 'assistant', text: decision.summary, source, modelId, approvalId: approval.id, refs,
       });
       this.#repository.setStatus(id, 'waiting_approval');
       return;
@@ -436,6 +463,7 @@ export class ChatService {
         role: 'assistant',
         text: `${decision.title}. ${decision.rationale}`.trim(),
         source, modelId, runIds: [created.run.id],
+        refs: [...refs, { kind: 'run', runId: created.run.id, title: decision.title }],
       });
     } catch (error) {
       this.#repository.append(id, {
@@ -624,9 +652,13 @@ export class ChatService {
      */
     const lastUser = [...history].reverse().find((message) => message.role === 'user');
     const workspace = conversation.workspaceId ? this.#deps.workspaces.require(conversation.workspaceId) : null;
+    const found = this.#foundIn(history);
+    const house = this.#house();
 
     return {
       objective: lastUser?.text ?? '',
+      ...(found.length ? { found } : {}),
+      ...(house ? { house } : {}),
       ...(workspace ? {
         workspace: {
           id: workspace.id,
@@ -685,6 +717,9 @@ export class ChatService {
       ...(workspace ? { workspace } : {}),
       actorRef: `chat:${conversation.id}`,
       sessions: this.#deps.sessions,
+      // Sólo la conversación: un plan ya trabaja sobre una sesión, y dejarle abrir otras le
+      // ensancha el alcance sin que nadie lo haya pedido.
+      workspaces: this.#deps.workspaces,
       health: this.#deps.health,
       runs: this.#deps.runs,
       audit: this.#deps.audit,
@@ -704,6 +739,71 @@ export class ChatService {
       now: () => this.#deps.clock.nowMs(),
     });
     return new RecordingToolbox(inner, this.#repository, this.bus, conversation.id);
+  }
+
+  /**
+   * Lo que este hilo ya encontró, sacado de las referencias guardadas.
+   *
+   * De las referencias y no del eco de las herramientas: el eco se guarda recortado a 1200
+   * caracteres y parsearlo es adivinar. Una referencia es un dato tipado que ya pasó por el
+   * contrato.
+   *
+   * Una sesión con workspace abierto se cuenta una sola vez y lo dice: es la diferencia entre
+   * «ábremela» y «ya está abierta, aquí la tienes».
+   */
+  #foundIn(history: readonly ChatMessage[]): NonNullable<PlanContext['found']> {
+    const byId = new Map<string, NonNullable<PlanContext['found']>[number]>();
+    const workspaceOf = new Map<string, string>();
+    for (const message of history) {
+      for (const ref of message.refs) {
+        if (ref.kind === 'session' || ref.kind === 'terminal') {
+          byId.set(ref.sessionId, {
+            host: ref.host,
+            provider: ref.provider,
+            sessionId: ref.sessionId,
+            title: ref.kind === 'session' ? ref.title : null,
+            workspaceId: null,
+          });
+        }
+        if (ref.kind === 'terminal' && ref.workspaceId) workspaceOf.set(ref.sessionId, ref.workspaceId);
+        if (ref.kind === 'workspace') {
+          // El workspace se apunta aparte: la referencia no lleva la sesión, la lleva la base.
+          const opened = this.#deps.workspaces.find(ref.workspaceId);
+          if (opened) workspaceOf.set(opened.ref.sessionId, opened.id);
+        }
+      }
+    }
+    return [...byId.values()]
+      .map((session) => ({ ...session, workspaceId: workspaceOf.get(session.sessionId) ?? null }))
+      .slice(-6);
+  }
+
+  /**
+   * Qué hay abierto y qué corre ahora mismo.
+   *
+   * Dos consultas a SQLite y ninguna a la red, que es lo que permite ponerlo en el contexto de
+   * cada turno: la alternativa era que el modelo gastara una vuelta —diez segundos y una factura—
+   * preguntando lo que la base contesta en un milisegundo.
+   *
+   * Devuelve `null` si no hay nada. Un bloque que dice «no hay nada» ocupa lo mismo que uno que
+   * dice algo y no informa de nada.
+   */
+  #house(): PlanContext['house'] | null {
+    const workspaces = this.#deps.workspaces.recent(4).map((workspace) => ({
+      id: workspace.id,
+      title: workspace.title,
+      host: workspace.ref.host,
+      provider: workspace.ref.provider,
+    }));
+    // Sólo lo vivo: un trabajo terminado hace tres días no es estado de la casa, es histórico, y
+    // para eso está `list_runs`.
+    const runs = this.#deps.runs.listRecent(12)
+      .filter((run) => !isTerminalStatus(run.status))
+      .slice(0, 4)
+      // Un trabajo no tiene título: lo que tiene es lo que se le pidió. Recortado, porque un prompt
+      // entero por cada trabajo vivo convierte cien palabras de contexto en mil.
+      .map((run) => ({ runId: run.id, status: run.status, title: clipText(run.promptPreview ?? '', 80) || null }));
+    return workspaces.length || runs.length ? { workspaces, runs } : null;
   }
 
   #toApproval(row: Record<string, unknown>): Approval {
@@ -748,6 +848,8 @@ class RecordingToolbox implements AssistantToolbox {
   }
 
   get terminalOffer(): AssistantToolbox['terminalOffer'] { return this.#inner.terminalOffer; }
+  get refs(): AssistantToolbox['refs'] { return this.#inner.refs; }
+  get repeats(): number { return this.#inner.repeats; }
   get observations(): number { return this.#inner.observations; }
   get spent(): boolean { return this.#inner.spent; }
 
@@ -758,7 +860,18 @@ class RecordingToolbox implements AssistantToolbox {
   async invoke(name: string, input: Record<string, unknown>): Promise<ToolOutcome> {
     const outcome = await this.#inner.invoke(name, input);
     if (outcome.type === 'observation') {
-      const content = outcome.content as { ok?: unknown; name?: unknown } | null;
+      const content = outcome.content as { ok?: unknown; name?: unknown; error?: { code?: unknown } } | null;
+      /*
+       * Una repetición cortada no se escribe en el hilo.
+       *
+       * Porque no se consultó nada: el memo la paró antes de salir. Una fila `tool` dice «miré
+       * esto», y ponerla aquí sería afirmar una consulta que no ocurrió — y además dejaría la
+       * repetición contada en la base, que es justo la cifra que este trabajo venía a bajar.
+       *
+       * Que no deje rastro no es que no se sepa: el turno la cuenta en `toolbox.repeats`, que es
+       * donde se mira si el modelo sigue dando vueltas.
+       */
+      if (content?.error?.code === 'ALREADY_ASKED') return outcome;
       /*
        * Lo que se guarda es **qué se consultó**, no con qué herramienta ni con qué nombre interno.
        *
@@ -780,6 +893,27 @@ class RecordingToolbox implements AssistantToolbox {
     }
     return outcome;
   }
+}
+
+/**
+ * Las referencias que acaban en un mensaje.
+ *
+ * Sin duplicados y con tope: un mensaje con doce botones debajo no es una acción, es ruido. Se
+ * quedan las últimas, que son las del final del razonamiento y las que la respuesta comenta.
+ */
+const MAX_MESSAGE_REFS = 4;
+
+function pickRefs(refs: readonly ChatRef[]): ChatRef[] {
+  const seen = new Set<string>();
+  const unique: ChatRef[] = [];
+  for (const ref of [...refs].reverse()) {
+    const key = JSON.stringify(ref);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(ref);
+    if (unique.length >= MAX_MESSAGE_REFS) break;
+  }
+  return unique.reverse();
 }
 
 function clipText(text: string, max: number): string {

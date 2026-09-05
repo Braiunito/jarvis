@@ -466,4 +466,19 @@ export const MIGRATIONS: Migration[] = [
         WHERE conversation_id IS NOT NULL;
     `,
   },
+  {
+    version: 13,
+    name: 'chat_refs',
+    sql: `
+      -- Lo que se puede pulsar de un mensaje.
+      --
+      -- Hasta ahora el único canal de acción era \`run_ids\`, así que el asistente podía citar un
+      -- trabajo y nada más: encontraba una sesión y a «ábremela» sólo sabía contestar dónde
+      -- estaba. Aquí caben workspaces, sesiones, terminales ofrecidas y trabajos.
+      --
+      -- \`run_ids\` no se migra y se queda como está: las filas viejas lo usan, la interfaz pinta
+      -- las dos cosas, y reescribir el histórico por uniformidad no arregla nada.
+      ALTER TABLE chat_messages ADD COLUMN refs_json TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
 ];

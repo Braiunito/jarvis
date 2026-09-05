@@ -7,7 +7,7 @@
  */
 import type { Database as Db } from 'better-sqlite3';
 import type {
-  AutonomyMode, ChatMessage, ChatRole, Conversation, ConversationStatus, ModelSource,
+  AutonomyMode, ChatMessage, ChatRef, ChatRole, Conversation, ConversationStatus, ModelSource,
 } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newChatMessageId, newConversationId } from '../platform/ids.js';
@@ -23,7 +23,7 @@ interface MessageRow {
   id: string; conversation_id: string; seq: number; role: string; text: string;
   tool_name: string | null; tool_input: string | null; tool_ok: number | null;
   source: string | null; model_id: string | null; approval_id: string | null;
-  run_ids: string; created_at: string;
+  run_ids: string; refs_json: string; created_at: string;
 }
 
 const toConversation = (row: ConversationRow): Conversation => ({
@@ -53,6 +53,7 @@ const toMessage = (row: MessageRow): ChatMessage => ({
   modelId: row.model_id,
   approvalId: row.approval_id,
   runIds: JSON.parse(row.run_ids) as string[],
+  refs: JSON.parse(row.refs_json ?? '[]') as ChatRef[],
   createdAt: row.created_at,
 });
 
@@ -66,6 +67,8 @@ export interface NewMessage {
   modelId?: string | null;
   approvalId?: string | null;
   runIds?: string[];
+  /** Lo que se puede pulsar de este mensaje. Ver `ChatRef` en los contratos. */
+  refs?: ChatRef[];
 }
 
 export class ChatRepository {
@@ -147,14 +150,14 @@ export class ChatRepository {
       ).get(conversationId) as { seq: number };
       this.#db.prepare(`INSERT INTO chat_messages
         (id, conversation_id, seq, role, text, tool_name, tool_input, tool_ok, source, model_id,
-         approval_id, run_ids, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+         approval_id, run_ids, refs_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, conversationId, next.seq, message.role, message.text,
           message.toolName ?? null,
           message.toolInput === undefined ? null : JSON.stringify(message.toolInput),
           message.toolOk === undefined || message.toolOk === null ? null : (message.toolOk ? 1 : 0),
           message.source ?? null, message.modelId ?? null, message.approvalId ?? null,
-          JSON.stringify(message.runIds ?? []), at);
+          JSON.stringify(message.runIds ?? []), JSON.stringify(message.refs ?? []), at);
       this.#db.prepare('UPDATE conversations SET updated_at = ?, last_message_at = ? WHERE id = ?')
         .run(at, at, conversationId);
       return this.#db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(id) as MessageRow;
