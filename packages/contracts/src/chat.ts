@@ -10,6 +10,7 @@
  * abierto antes una sesión de agente. Con workspace, además, alcanza el trabajo de ese workspace.
  */
 import { Type, type Static } from '@sinclair/typebox';
+import { ArtifactKindSchema, ArtifactPresentationSchema } from './artifacts.js';
 import { HostName, Iso8601, Provider } from './common.js';
 
 /**
@@ -83,6 +84,28 @@ export const ChatRef = Type.Union([
     kind: Type.Literal('run'),
     runId: Type.String(),
     title: Type.Union([Type.String(), Type.Null()]),
+  }),
+  /**
+   * Contenido con forma que el asistente dejó colgado de la respuesta.
+   *
+   * Es **el puntero, no el contenido**: el cuerpo vive en su propia tabla y se pide aparte. Va
+   * aquí porque los últimos mensajes del hilo son también el contexto que se le pasa al modelo en
+   * cada turno, y una tabla de doscientas filas metida en la fila del mensaje se paga en tokens
+   * mientras dure la conversación.
+   *
+   * Y no comparte cupo con las demás referencias: las otras cuatro son botones —un mensaje con
+   * doce debajo es ruido— y esto es contenido. Meterlos en el mismo tope hace que un informe se
+   * coma la oferta de terminal.
+   */
+  Type.Object({
+    kind: Type.Literal('artifact'),
+    artifactId: Type.String(),
+    artifactKind: ArtifactKindSchema,
+    presentation: ArtifactPresentationSchema,
+    title: Type.String(),
+    bytes: Type.Integer({ minimum: 0 }),
+    /** Lo justo para pintar el chip sin pedir el cuerpo: la primera línea, o nada. */
+    preview: Type.Union([Type.String(), Type.Null()]),
   }),
 ]);
 export type ChatRef = Static<typeof ChatRef>;

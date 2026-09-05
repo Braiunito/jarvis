@@ -1,0 +1,226 @@
+/**
+ * Lo que el asistente enseña.
+ *
+ * Lo que se prueba aquí no es que elija bien qué presentar —eso no se prueba— sino las tres cosas
+ * que hacen que presentar sea seguro de operar: que un cuerpo mal formado se le devuelve diciendo
+ * **qué** falta para que se corrija dentro del turno, que lo que se sirve va acotado y lo dice, y
+ * que enseñar no consume el presupuesto de consultas ni desaparece cuando ese presupuesto se agota.
+ */
+import { beforeEach, describe, expect, it } from 'vitest';
+import { FakeSessionIndex, indexRow } from '@jarvis/testkit';
+import { openDatabase } from '../src/platform/db.js';
+import { fixedClock } from '../src/platform/clock.js';
+import { buildServices, type CoreServices } from '../src/services.js';
+import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
+import { ArtifactRepository, MAX_ARTIFACT_BYTES, previewOf } from '../src/chat/artifacts.js';
+import type { ToolOutcome } from '../src/assistant/types.js';
+
+const user = { userId: 'u1', username: 'braian' };
+const NOW = '2026-09-05T12:00:00.000Z';
+
+let services: CoreServices;
+let artifacts: ArtifactRepository;
+let conversationId: string;
+
+beforeEach(() => {
+  services = buildServices({
+    db: openDatabase({ path: ':memory:' }),
+    clock: fixedClock(NOW),
+    index: new FakeSessionIndex([indexRow()]) as never,
+    model: null,
+    config: { hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-artifacts-spool' },
+  });
+  artifacts = new ArtifactRepository({ db: services.db, clock: fixedClock(NOW) });
+  // La conversación se inserta a pelo: aquí interesa el artifact, no el turno, y crearla por el
+  // servicio exigiría un modelo configurado que estas pruebas no usan para nada.
+  conversationId = 'c-test';
+  services.db.prepare(`INSERT INTO conversations
+    (id, title, created_by, workspace_id, autonomy, status, source, created_at, updated_at, last_message_at)
+    VALUES (?, 'prueba', ?, NULL, 'manual', 'idle', 'local', ?, ?, NULL)`)
+    .run(conversationId, user.username, NOW, NOW);
+});
+
+const toolbox = (options: { maxObservations?: number } = {}): CoreAssistantToolbox =>
+  new CoreAssistantToolbox({
+    sessions: services.sessions,
+    health: services.health,
+    runs: services.runs,
+    audit: services.audit,
+    user,
+    artifacts: { repository: artifacts, conversationId },
+    ...(options.maxObservations === undefined ? {} : { maxObservations: options.maxObservations }),
+  });
+
+const failed = (outcome: ToolOutcome): { code: string; message: string; hint?: string } => {
+  expect(outcome.type).toBe('observation');
+  const content = (outcome as { content: { ok?: boolean; error?: { code: string; message: string; hint?: string } } }).content;
+  expect(content.ok).toBe(false);
+  return content.error!;
+};
+
+const served = (outcome: ToolOutcome): Record<string, unknown> => {
+  expect(outcome.type).toBe('observation');
+  const content = (outcome as { content: Record<string, unknown> }).content;
+  expect(content['ok']).toBe(true);
+  return content;
+};
+
+const table = (rows: unknown): string => JSON.stringify({
+  columns: [{ key: 'host', label: 'Máquina' }, { key: 'libre', label: 'Libre' }],
+  rows,
+});
+
+describe('ARTIFACT · un cuerpo mal formado se corrige, no se rechaza y ya', () => {
+  it('dice qué columna falta y en qué fila, que es lo que se puede arreglar', async () => {
+    const error = failed(await toolbox().invoke('present', {
+      kind: 'table', presentation: 'inline', title: 'Disco',
+      body: table([{ host: 'zeus', libre: '40G' }, { host: 'bastion' }]),
+    }));
+
+    expect(error.code).toBe('BAD_INPUT');
+    expect(error.message).toContain('libre');
+    expect(error.message).toContain('fila 2');
+  });
+
+  it('un JSON que no se puede leer viene con un ejemplo de la forma buena', async () => {
+    const error = failed(await toolbox().invoke('present', {
+      kind: 'table', presentation: 'inline', title: 'Disco', body: 'esto no es json',
+    }));
+
+    expect(error.code).toBe('BAD_INPUT');
+    expect(error.hint).toContain('columns');
+  });
+
+  it('un gráfico que no sabemos dibujar dice cuáles sí, en vez de prometer uno genérico', async () => {
+    const error = failed(await toolbox().invoke('present', {
+      kind: 'chart', presentation: 'inline', title: 'Carga',
+      body: JSON.stringify({ shape: 'scatter', points: [] }),
+    }));
+
+    expect(error.message).toContain('scatter');
+    expect(error.hint).toContain('bars');
+    expect(error.hint).toContain('donut');
+    expect(error.hint).toContain('meter');
+  });
+
+  it('y después del error se puede volver a intentar en el mismo turno', async () => {
+    const caja = toolbox();
+    failed(await caja.invoke('present', {
+      kind: 'table', presentation: 'inline', title: 'Disco', body: 'roto',
+    }));
+    served(await caja.invoke('present', {
+      kind: 'table', presentation: 'inline', title: 'Disco', body: table([{ host: 'zeus', libre: '40G' }]),
+    }));
+  });
+});
+
+describe('ARTIFACT · lo que se sirve va acotado y lo dice', () => {
+  it('un cuerpo enorme se recorta y se dice que se recortó', () => {
+    const created = artifacts.create(conversationId, {
+      kind: 'markdown', presentation: 'panel', title: 'Log',
+      body: 'a'.repeat(MAX_ARTIFACT_BYTES + 1000),
+    });
+
+    expect('code' in created).toBe(false);
+    const artifact = created as Exclude<typeof created, { code: unknown }>;
+    expect(artifact.truncated).toBe(true);
+    expect(artifact.bytes).toBeLessThanOrEqual(MAX_ARTIFACT_BYTES);
+  });
+
+  it('un html nunca se cuela dentro de la burbuja: se mira a propósito', () => {
+    const created = artifacts.create(conversationId, {
+      kind: 'html', presentation: 'inline', title: 'Informe', body: '<p>hola</p>',
+    });
+
+    expect((created as { presentation: string }).presentation).toBe('panel');
+  });
+
+  it('el cuarto del turno se rechaza diciendo que ya toca responder', async () => {
+    const caja = toolbox();
+    for (let i = 0; i < 3; i += 1) {
+      served(await caja.invoke('present', {
+        kind: 'markdown', presentation: 'inline', title: `Nota ${i}`, body: `cosa ${i}`,
+      }));
+    }
+    const error = failed(await caja.invoke('present', {
+      kind: 'markdown', presentation: 'inline', title: 'Nota 4', body: 'una más',
+    }));
+
+    expect(error.code).toBe('TOO_MANY');
+  });
+});
+
+describe('ARTIFACT · el botón dice qué hay detrás', () => {
+  it('una tabla se anuncia por su tamaño, no por su título a secas', () => {
+    expect(previewOf('table', table([{ host: 'a' }, { host: 'b' }, { host: 'c' }])))
+      .toBe('3 filas · 2 columnas');
+  });
+
+  it('en singular cuando toca: una lista que dice «1 filas» se lee mal', () => {
+    expect(previewOf('table', table([{ host: 'a' }]))).toBe('1 fila · 2 columnas');
+  });
+
+  it('un gráfico dice su tamaño en sus propias unidades', () => {
+    expect(previewOf('chart', JSON.stringify({
+      shape: 'donut', caption: 'Trabajos', total: 9,
+      slices: [{ key: 'ok', label: 'Bien', value: 7 }, { key: 'ko', label: 'Mal', value: 2 }],
+    }))).toBe('2 porciones');
+    expect(previewOf('chart', JSON.stringify({ shape: 'meter', label: 'Disco', value: 60, max: 100 })))
+      .toBe('60 de 100');
+  });
+
+  it('y lo que se lee se anuncia por su primera línea', () => {
+    expect(previewOf('markdown', '\n\n## Estado de la flota\ntodo bien')).toBe('## Estado de la flota');
+  });
+});
+
+describe('ARTIFACT · enseñar no es consultar', () => {
+  it('no gasta presupuesto de consultas: no va a ninguna máquina', async () => {
+    const caja = toolbox();
+    await caja.invoke('present', {
+      kind: 'markdown', presentation: 'inline', title: 'Nota', body: 'algo',
+    });
+
+    expect(caja.observations).toBe(0);
+  });
+
+  it('se sigue ofreciendo con el presupuesto agotado, que es cuando se redacta', async () => {
+    const caja = toolbox({ maxObservations: 1 });
+    await caja.invoke('get_health', {});
+    expect(caja.spent).toBe(true);
+
+    const nombres = caja.definitions({ decisionsOnly: true }).map((tool) => tool.name);
+    expect(nombres).toContain('present');
+    // Y sigue funcionando de verdad, no sólo ofreciéndose.
+    served(await caja.invoke('present', {
+      kind: 'markdown', presentation: 'inline', title: 'Resumen', body: 'lo que averigüé',
+    }));
+  });
+
+  it('deja el puntero en las referencias, no el cuerpo', async () => {
+    const caja = toolbox();
+    // Largo a propósito: en algo corto el preview y el cuerpo coinciden y la prueba no distingue
+    // «lleva un adelanto» de «lleva el contenido», que es justo lo que hay que fijar aquí.
+    const cuerpo = `primera línea del informe\n${'detalle que no cabe en un botón. '.repeat(400)}`;
+    const outcome = served(await caja.invoke('present', {
+      kind: 'markdown', presentation: 'panel', title: 'Informe', body: cuerpo,
+    }));
+
+    const ref = caja.refs.find((entry) => entry.kind === 'artifact');
+    expect(ref).toBeDefined();
+    expect((ref as { artifactId: string }).artifactId).toBe(outcome['artifactId']);
+    // El puntero no crece con el contenido: es lo que hace que meterlo en el mensaje no se pague
+    // en tokens en cada turno.
+    expect(JSON.stringify(ref).length).toBeLessThan(400);
+    expect(JSON.stringify(ref)).not.toContain('detalle que no cabe');
+  });
+
+  it('sin sitio donde guardarlo, ni se ofrece', () => {
+    const sinArtifacts = new CoreAssistantToolbox({
+      sessions: services.sessions, health: services.health, runs: services.runs,
+      audit: services.audit, user,
+    });
+
+    expect(sinArtifacts.definitions().map((tool) => tool.name)).not.toContain('present');
+  });
+});

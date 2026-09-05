@@ -43,6 +43,15 @@ export const config = {
   defaultPermissionProfile: (env['JARVIS_DEFAULT_PROFILE'] || 'safe') as 'safe' | 'auto' | 'yolo',
   /** Negarse a correr en este perfil salvo que el operador lo permita explícitamente. */
   allowYolo: bool(env['JARVIS_ALLOW_YOLO'], false),
+  /**
+   * Si el asistente puede entregar documentos HTML que ejecutan JavaScript.
+   *
+   * Encendido por defecto: el aislamiento no depende de este interruptor sino del origen opaco
+   * que impone la CSP de la ruta, y apagarlo por si acaso sería fingir que la protección es
+   * ésta. Existe porque «que puedan ejecutar» no es lo mismo que «que no se puedan apagar»: una
+   * casa que no los quiera tiene dónde decirlo sin desplegar otra cosa.
+   */
+  allowHtmlArtifacts: bool(env['JARVIS_ALLOW_HTML_ARTIFACTS'], true),
 
   maxConcurrentRuns: Number(env['JARVIS_MAX_CONCURRENT_RUNS'] || 4),
   runTimeoutMs: Number(env['JARVIS_RUN_TIMEOUT_MS'] || 4 * 60 * 60 * 1000),

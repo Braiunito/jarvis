@@ -481,4 +481,40 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE chat_messages ADD COLUMN refs_json TEXT NOT NULL DEFAULT '[]';
     `,
   },
+  {
+    version: 14,
+    name: 'chat_artifacts',
+    sql: `
+      -- El cuerpo de lo que el asistente enseña.
+      --
+      -- Separado del mensaje a propósito. En \`refs_json\` va sólo el puntero, porque los últimos
+      -- mensajes del hilo son también el contexto que se le pasa al modelo en cada turno: meter
+      -- ahí una tabla de doscientas filas se paga en tokens mientras dure la conversación, y el
+      -- frame del stream lleva el mensaje entero.
+      --
+      -- Un artifact es inmutable: nace con el turno y no se edita. Por eso el cuerpo es texto
+      -- serializado y no columnas —nadie va a consultarlo por sus campos— y por eso se puede
+      -- cachear para siempre en el navegador.
+      CREATE TABLE chat_artifacts (
+        id              TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        -- Sin FK a \`chat_messages\`: el artifact nace mientras el modelo razona y se ata al
+        -- cerrar el turno, así que existe un rato sin mensaje al que colgarse. Si el turno se
+        -- cae antes de cerrar, queda huérfano y lo barre la retención.
+        message_id      TEXT,
+        kind            TEXT NOT NULL,
+        presentation    TEXT NOT NULL,
+        title           TEXT NOT NULL,
+        caption         TEXT,
+        language        TEXT,
+        body            TEXT NOT NULL,
+        bytes           INTEGER NOT NULL,
+        truncated       INTEGER NOT NULL DEFAULT 0,
+        created_at      TEXT NOT NULL
+      );
+      CREATE INDEX idx_chat_artifacts_conversation ON chat_artifacts (conversation_id, created_at);
+      CREATE INDEX idx_chat_artifacts_message ON chat_artifacts (message_id)
+        WHERE message_id IS NOT NULL;
+    `,
+  },
 ];

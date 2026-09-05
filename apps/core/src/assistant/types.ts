@@ -178,6 +178,17 @@ export interface ToolDefinition {
    * llamada al modelo termina ahí. Las demás son lecturas cortas que se resuelven en el momento.
    */
   decides: boolean;
+  /**
+   * No gasta presupuesto de lectura y se sigue ofreciendo cuando el presupuesto se agota.
+   *
+   * Es para lo que **no consulta nada**: enseñar una tabla que ya se tiene no va a ninguna
+   * máquina, no cuesta reloj, y quitarla al agotarse las consultas la haría desaparecer justo
+   * cuando el modelo va a redactar la respuesta, que es cuando más falta hace.
+   *
+   * No es una barra libre: una herramienta gratis sin freno es una puerta al bucle —está medido,
+   * tres llamadas seguidas cambiando sólo la redacción— así que cada una pone su propio tope.
+   */
+  free?: boolean;
 }
 
 export type ToolOutcome =

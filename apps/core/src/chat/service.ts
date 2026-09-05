@@ -20,7 +20,8 @@
 import { createHash } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import type {
-  Approval, AutonomyMode, ChatCapabilities, ChatMessage, ChatRef, Conversation, ModelSource,
+  Approval, AutonomyMode, ChatArtifact, ChatCapabilities, ChatMessage, ChatRef, Conversation,
+  ModelSource,
   UserIdentity,
 } from '@jarvis/contracts';
 import { isTerminalStatus, JarvisError } from '@jarvis/contracts';
@@ -41,7 +42,8 @@ import type {
 import {
   CoreAssistantToolbox, directCapacity, type SeenSession, type ToolboxLimits,
 } from '../assistant/toolbox.js';
-import { ChatRepository } from './repository.js';
+import { ArtifactRepository, MAX_ARTIFACTS_PER_TURN } from './artifacts.js';
+import { ChatRepository, type NewMessage } from './repository.js';
 import { ChatEventBus } from './events-bus.js';
 
 /** Lo que se guarda de un resultado de herramienta en el hilo. Lo completo ya está en su sitio. */
@@ -73,6 +75,8 @@ export interface ChatServiceDeps {
    * responda con lo que tenga.
    */
   maxTurnMs?: number;
+  /** Si se sirven artifacts html. Ver `allowHtmlArtifacts` en la configuración. */
+  allowHtmlArtifacts?: boolean;
   approvalTtlMs?: number;
   starterCapabilities?: readonly string[];
   /**
@@ -90,6 +94,8 @@ export interface ChatServiceDeps {
 export class ChatService {
   readonly #deps: ChatServiceDeps;
   readonly #repository: ChatRepository;
+  readonly #artifacts: ArtifactRepository;
+  readonly #allowHtmlArtifacts: boolean;
   readonly #maxToolCalls: number;
   readonly #historyMessages: number;
   readonly #defaultAutonomy: AutonomyMode;
@@ -108,11 +114,13 @@ export class ChatService {
   constructor(deps: ChatServiceDeps) {
     this.#deps = deps;
     this.#repository = new ChatRepository({ db: deps.db, clock: deps.clock });
+    this.#artifacts = new ArtifactRepository({ db: deps.db, clock: deps.clock });
     this.#maxToolCalls = deps.maxToolCalls ?? 8;
     this.#historyMessages = deps.historyMessages ?? 12;
     this.#defaultAutonomy = deps.defaultAutonomy ?? 'manual';
     this.#approvalTtlMs = deps.approvalTtlMs ?? 30 * 60 * 1000;
     this.#maxTurnMs = deps.maxTurnMs ?? 120_000;
+    this.#allowHtmlArtifacts = deps.allowHtmlArtifacts ?? true;
   }
 
   /**
@@ -351,6 +359,23 @@ export class ChatService {
    * reinicio. Ninguna deja el hilo «pensando» para siempre, que es el fallo que convierte un
    * asistente en algo que la gente deja de usar.
    */
+  /**
+   * Escribe un mensaje y ata lo que el turno dejó preparado.
+   *
+   * El artifact nace mientras el modelo razona —no sabe todavía en qué mensaje va a acabar— y se
+   * cuelga aquí, cuando ya hay uno. Se atan **los que sobrevivieron al reparto**, no todos los que
+   * se crearon: uno que se cayó del tope no se enseña, así que colgarlo dejaría una fila que nadie
+   * puede abrir. Los que quedan sin atar son huérfanos y los barre la retención con la conversación.
+   */
+  #say(conversationId: string, message: NewMessage): ChatMessage {
+    const written = this.#repository.append(conversationId, message);
+    const artifactIds = (message.refs ?? [])
+      .filter((ref) => ref.kind === 'artifact')
+      .map((ref) => (ref as Extract<ChatRef, { kind: 'artifact' }>).artifactId);
+    this.#artifacts.attach(artifactIds, written.id);
+    return written;
+  }
+
   async #applyDecision(
     conversation: Conversation,
     decision: AssistantDecision,
@@ -371,7 +396,7 @@ export class ChatService {
     const refs = pickRefs(toolbox.refs);
 
     if (decision.kind === 'finish') {
-      this.#repository.append(id, {
+      this.#say(id, {
         role: 'assistant', text: decision.summary, source, modelId,
         runIds: decision.evidenceRunIds ?? [], refs,
       });
@@ -381,7 +406,7 @@ export class ChatService {
     }
 
     if (decision.kind === 'ask') {
-      this.#repository.append(id, { role: 'assistant', text: decision.question, source, modelId, refs });
+      this.#say(id, { role: 'assistant', text: decision.question, source, modelId, refs });
       this.#repository.setStatus(id, 'idle', 'local');
       return;
     }
@@ -393,7 +418,7 @@ export class ChatService {
         summary: `Consultar al modelo de la nube. Motivo: ${decision.reason}`,
         user,
       });
-      this.#repository.append(id, {
+      this.#say(id, {
         role: 'assistant',
         text: `Esto se me escapa: ${decision.reason}\n\n¿Consulto al modelo de la nube?`,
         source, modelId, approvalId: approval.id, refs,
@@ -411,7 +436,7 @@ export class ChatService {
         summary: decision.summary,
         user,
       });
-      this.#repository.append(id, {
+      this.#say(id, {
         role: 'assistant', text: decision.summary, source, modelId, approvalId: approval.id, refs,
       });
       this.#repository.setStatus(id, 'waiting_approval');
@@ -420,7 +445,7 @@ export class ChatService {
 
     if (decision.kind === 'approval') {
       if (!conversation.workspaceId) {
-        this.#repository.append(id, {
+        this.#say(id, {
           role: 'event',
           text: 'El asistente pidió lanzar un trabajo, pero esta conversación no está atada a ninguna sesión.',
         });
@@ -440,7 +465,7 @@ export class ChatService {
         summary: decision.summary,
         user,
       });
-      this.#repository.append(id, {
+      this.#say(id, {
         role: 'assistant', text: decision.summary, source, modelId, approvalId: approval.id, refs,
       });
       this.#repository.setStatus(id, 'waiting_approval');
@@ -450,7 +475,7 @@ export class ChatService {
     // Un run directo: sólo llega aquí en autonomía `auto`, porque en `manual` el toolbox ya lo
     // convirtió en una petición de permiso antes de salir del modelo.
     if (!conversation.workspaceId) {
-      this.#repository.append(id, {
+      this.#say(id, {
         role: 'event',
         text: 'El asistente quiso lanzar un trabajo, pero esta conversación no está atada a ninguna sesión.',
       });
@@ -464,18 +489,46 @@ export class ChatService {
         permissionProfile: decision.permissionProfile,
         idempotencyKey: `chat:${id}:${this.#repository.messages(id).length}`,
       }, user, `chat:${id}`);
-      this.#repository.append(id, {
+      this.#say(id, {
         role: 'assistant',
         text: `${decision.title}. ${decision.rationale}`.trim(),
         source, modelId, runIds: [created.run.id],
         refs: [...refs, { kind: 'run', runId: created.run.id, title: decision.title }],
       });
     } catch (error) {
-      this.#repository.append(id, {
+      this.#say(id, {
         role: 'event', text: `No se pudo lanzar el trabajo: ${(error as Error).message}`,
       });
     }
     this.#repository.setStatus(id, 'idle', 'local');
+  }
+
+  // ---- artifacts ---------------------------------------------------------
+
+  /** Si esta casa sirve documentos que ejecutan JavaScript. Lo decide el operador, no el modelo. */
+  get htmlArtifactsAllowed(): boolean { return this.#allowHtmlArtifacts; }
+
+  /** El cuerpo de un artifact. Sólo se sirve cuando alguien lo abre: los `panel` y `modal` pesan. */
+  artifact(conversationId: string, artifactId: string): ChatArtifact {
+    const found = this.#artifacts.get(conversationId, artifactId);
+    if (!found) throw new JarvisError('NOT_FOUND', `no existe el artifact ${artifactId}`);
+    return found;
+  }
+
+  /**
+   * Los cuerpos que viajan con la conversación.
+   *
+   * Los `inline` son parte de la respuesta y tienen que llegar **con ella**, no en un segundo
+   * viaje: si no, el turno que acabas de esperar treinta segundos pinta un hueco y sólo se rellena
+   * si algo dispara un refetch, que puede no ocurrir nunca.
+   */
+  inlineArtifacts(conversationId: string): ChatArtifact[] {
+    return this.#artifacts.inlineFor(conversationId);
+  }
+
+  /** Los `inline` de un mensaje, para que el frame del stream llegue completo. */
+  inlineArtifactsOf(messageId: string): ChatArtifact[] {
+    return this.#artifacts.inlineOf(messageId);
   }
 
   // ---- aprobaciones -------------------------------------------------------
@@ -738,6 +791,7 @@ export class ChatService {
       ...(this.#deps.toolLimits ? { limits: this.#deps.toolLimits } : {}),
       // La conversación sí sabe ejecutar una capacidad con efectos tras aprobarla.
       capabilityWrites: true,
+      artifacts: { repository: this.#artifacts, conversationId: conversation.id },
       autonomy: conversation.autonomy,
       canEscalate: this.#deps.model?.canEscalate === true,
       maxObservations: this.#maxToolCalls,
@@ -966,6 +1020,11 @@ class RecordingToolbox implements AssistantToolbox {
  *
  * Sin duplicados y con tope: un mensaje con doce botones debajo no es una acción, es ruido. Se
  * quedan las últimas, que son las del final del razonamiento y las que la respuesta comenta.
+ *
+ * Los presupuestos son **dos y no se comparten**. Las cuatro primeras clases son botones: cosas
+ * que se pueden pulsar. Un artifact es contenido —una tabla que se lee, un informe que se abre— y
+ * si compartiese cupo, un turno que reúne tres tablas dejaría fuera la oferta de terminal, que es
+ * la única referencia que lleva escrito por qué conviene mirar.
  */
 const MAX_MESSAGE_REFS = 4;
 
@@ -973,30 +1032,41 @@ const MAX_MESSAGE_REFS = 4;
  *  distintos —antes y después de renombrarlo— son dos botones al mismo sitio. */
 const refKey = (ref: ChatRef): string => (ref.kind === 'workspace' ? `workspace:${ref.workspaceId}`
   : ref.kind === 'run' ? `run:${ref.runId}`
-    : `${ref.kind}:${ref.host}|${ref.provider}|${ref.sessionId}`);
+    : ref.kind === 'artifact' ? `artifact:${ref.artifactId}`
+      : `${ref.kind}:${ref.host}|${ref.provider}|${ref.sessionId}`);
 
-function pickRefs(refs: readonly ChatRef[]): ChatRef[] {
+/** Deduplica por identidad y se queda con las últimas, que son las que la respuesta comenta. */
+function lastUnique(refs: readonly ChatRef[], max: number, first?: ChatRef): ChatRef[] {
   const seen = new Set<string>();
   const unique: ChatRef[] = [];
-  /*
-   * La oferta de terminal tiene sitio reservado.
-   *
-   * Las cuatro clases no pesan igual en pantalla: un workspace, una sesión o un trabajo son una
-   * pastilla en una fila; la terminal es un bloque con el motivo escrito, y es la única que
-   * explica **por qué** conviene mirar. Sin reserva, un turno que ofrece pronto y luego mira
-   * cuatro sesiones más la empuja fuera del tope, y como el motivo vive dentro de la propia
-   * referencia no queda ni rastro de que llegó a ofrecerla.
-   */
   const ordered = [...refs].reverse();
-  const terminal = ordered.find((ref) => ref.kind === 'terminal');
-  for (const ref of terminal ? [terminal, ...ordered] : ordered) {
+  for (const ref of first ? [first, ...ordered] : ordered) {
     const key = refKey(ref);
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(ref);
-    if (unique.length >= MAX_MESSAGE_REFS) break;
+    if (unique.length >= max) break;
   }
   return unique.reverse();
+}
+
+function pickRefs(refs: readonly ChatRef[]): ChatRef[] {
+  const artifacts = refs.filter((ref) => ref.kind === 'artifact');
+  const actions = refs.filter((ref) => ref.kind !== 'artifact');
+  /*
+   * La oferta de terminal tiene sitio reservado.
+   *
+   * Las cuatro clases de acción no pesan igual en pantalla: un workspace, una sesión o un trabajo
+   * son una pastilla en una fila; la terminal es un bloque con el motivo escrito, y es la única
+   * que explica **por qué** conviene mirar. Sin reserva, un turno que ofrece pronto y luego mira
+   * cuatro sesiones más la empuja fuera del tope, y como el motivo vive dentro de la propia
+   * referencia no queda ni rastro de que llegó a ofrecerla.
+   */
+  const terminal = [...actions].reverse().find((ref) => ref.kind === 'terminal');
+  return [
+    ...lastUnique(actions, MAX_MESSAGE_REFS, terminal),
+    ...lastUnique(artifacts, MAX_ARTIFACTS_PER_TURN),
+  ];
 }
 
 function clipText(text: string, max: number): string {

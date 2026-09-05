@@ -344,6 +344,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     mcp, attachments, evidence,
     maxToolCalls: config.chatMaxToolCalls,
     maxTurnMs: config.chatMaxTurnMs,
+    allowHtmlArtifacts: config.allowHtmlArtifacts,
     directCapabilities: config.chatDirectCapabilities,
     maxTools: config.chatMaxTools,
     historyMessages: config.chatHistoryMessages,

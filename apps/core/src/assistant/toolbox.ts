@@ -20,7 +20,10 @@ import type {
   Workspace,
 } from '@jarvis/contracts';
 import { JarvisError, MCP_AREAS } from '@jarvis/contracts';
-import type { ChatRef, McpCapability } from '@jarvis/contracts';
+import type { ArtifactKind, ArtifactPresentation, ChatRef, McpCapability } from '@jarvis/contracts';
+import {
+  MAX_ARTIFACTS_PER_TURN, previewOf, type ArtifactRepository,
+} from '../chat/artifacts.js';
 import type { McpService } from '../mcp/service.js';
 import type { SessionService } from '../sessions/service.js';
 import type { HealthService } from '../health/service.js';
@@ -43,6 +46,17 @@ const PROFILES: readonly PermissionProfile[] = ['safe', 'auto', 'yolo'];
  * demás dicen «este workspace» en su descripción, y ofrecerlas sin uno sería enseñar un catálogo
  * que miente.
  */
+/** Enseñar contenido necesita dónde guardarlo: un plan no tiene hilo al que colgarlo. */
+const PRESENT_TOOL_NAME = 'present';
+/**
+ * Cuántas veces se puede llamar a una herramienta gratis en un turno.
+ *
+ * Más alto que los tres artifacts que caben en un mensaje, y a propósito: un cuerpo mal formado
+ * se corrige con el error delante, y gastar el techo en el primer intento dejaría al modelo sin
+ * forma de arreglarlo. Lo que corta es el bucle de reformular lo mismo, no el segundo intento.
+ */
+const MAX_FREE_CALLS = 6;
+
 const WORKSPACE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'list_runs', 'get_run', 'cancel_run',
   'list_evidence', 'read_evidence', 'get_changes', 'create_run', 'request_approval',
@@ -167,6 +181,13 @@ export interface CoreToolboxDeps {
    * sólo lectura y punto.
    */
   capabilityWrites?: boolean;
+  /**
+   * Dónde se guardan los artifacts, y de qué conversación son.
+   *
+   * Opcional porque un plan no tiene hilo al que colgarlos: `present` no se le ofrece y no se
+   * inventa un sitio donde dejarlos.
+   */
+  artifacts?: { repository: ArtifactRepository; conversationId: string };
   /**
    * Cuánta cuerda hay sin preguntar. En `manual`, `create_run` deja de ser una acción y pasa a ser
    * una petición de permiso: el modelo propone lo mismo, pero lo ejecuta una persona.
@@ -468,6 +489,35 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
     decides: true,
   },
   {
+    name: 'present',
+    description: 'Deja un bloque de contenido colgado de tu respuesta: una tabla, un JSON, un '
+      + 'fragmento de código, un gráfico, un texto largo con formato o una página. Úsalo cuando lo '
+      + 'que has averiguado se lee mejor en columnas que en una frase, o cuando el volcado no cabe '
+      + 'en el hilo. **Tú decides dónde se enseña**: `inline` va dentro de la respuesta y siempre '
+      + 'se ve, para algo corto; `panel` abre una hoja al lado que se consulta mientras se sigue '
+      + 'leyendo, para algo largo; `modal` tapa la pantalla, para lo que hay que mirar entero antes '
+      + 'de seguir. No lo uses para repetir lo que ya dice tu texto. No cierra tu turno: presentas '
+      + 'y luego respondes con finish.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['markdown', 'table', 'json', 'code', 'chart', 'html'] },
+        presentation: { type: 'string', enum: ['inline', 'panel', 'modal'] },
+        title: { type: 'string', description: 'Cómo se llama en la pestaña o en el botón. Cinco palabras.' },
+        body: {
+          type: 'string',
+          description: 'El contenido. Para table y chart, JSON con la forma exacta; si te '
+            + 'equivocas, el error te dice qué falta y lo corriges.',
+        },
+        language: { type: 'string', description: 'Sólo para kind=code: el lenguaje.' },
+        caption: { type: 'string', description: 'Una línea diciendo qué se mira y de dónde salió.' },
+      },
+      required: ['kind', 'presentation', 'title', 'body'],
+    },
+    decides: false,
+    free: true,
+  },
+  {
     name: 'request_approval',
     description: 'Pide permiso antes de una acción con efectos. La tarjeta enseña acción, '
       + 'destino y permiso, caduca y sirve una sola vez. Cierra tu turno.',
@@ -706,6 +756,18 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   readonly #alreadyAsked = new Map<string, unknown>();
 
   /**
+   * Cuántas veces se ha llamado a cada herramienta gratis en este turno.
+   *
+   * El tope es de **llamadas**, no de resultados: deja margen para corregir un cuerpo mal
+   * formado un par de veces y corta el bucle de reformular lo mismo, que está medido y cuesta
+   * medio turno.
+   */
+  readonly #freeCalls = new Map<string, number>();
+
+  /** Los artifacts que este turno ha dejado, para atarlos al mensaje cuando cierre. */
+  readonly #presented: string[] = [];
+
+  /**
    * El catálogo de **este** toolbox.
    *
    * Se calcula una vez y no en cada llamada porque `definitions()` se pide en cada vuelta del
@@ -729,7 +791,11 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     this.#deadline = deps.maxTurnMs ? this.#now() + deps.maxTurnMs : null;
     for (const session of deps.knownSessions ?? []) this.#remember(session);
     const scoped = Boolean(deps.workspace);
-    const own = TOOL_DEFINITIONS.filter((tool) => scoped || !WORKSPACE_TOOL_NAMES.has(tool.name));
+    const own = TOOL_DEFINITIONS
+      .filter((tool) => scoped || !WORKSPACE_TOOL_NAMES.has(tool.name))
+      // Cuenta en `directCapacity` aunque aquí no se ofrezca: el cupo se calcula en el caso
+      // peor, y creerse con un hueco de más se paga en un 400 el día que el catálogo crezca.
+      .filter((tool) => tool.name !== PRESENT_TOOL_NAME || Boolean(deps.artifacts));
     /*
      * Directo si cabe entero, router si no.
      *
@@ -775,7 +841,9 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   }
 
   definitions({ decisionsOnly = false }: { decisionsOnly?: boolean } = {}): ToolDefinition[] {
-    return this.#available.filter((tool) => !decisionsOnly || tool.decides);
+    // Lo gratis sobrevive al corte: `present` no consulta nada y quitarla al agotarse el
+    // presupuesto la haría desaparecer justo en la vuelta en que se redacta la respuesta.
+    return this.#available.filter((tool) => !decisionsOnly || tool.decides || tool.free === true);
   }
 
   async invoke(name: string, input: Record<string, unknown>): Promise<ToolOutcome> {
@@ -783,6 +851,35 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     if (!definition) {
       return toolError('UNKNOWN_TOOL', `no existe la herramienta ${name}`,
         `las que hay son: ${this.#available.map((tool) => tool.name).join(', ')}`);
+    }
+    /*
+     * Lo gratis se salta **las dos** comprobaciones de abajo, y por motivos distintos.
+     *
+     * El presupuesto mide consultas: lo que va a una máquina, cuesta segundos y puede volver
+     * viejo. `present` no consulta nada —escribe una fila y devuelve un puntero— así que cobrarle
+     * una consulta le quitaría al modelo una lectura de verdad por enseñar lo que ya tiene.
+     *
+     * El memo contesta «esto ya lo preguntaste», y `present` no es una pregunta: su contenido
+     * **es** la carga útil. Indexarla por el cuerpo sería comparar los argumentos enteros —lo que
+     * el memo ya hace por defecto, así que no compra nada— y por el título bloquearía rehacer un
+     * borrador con el mismo nombre, que es un uso legítimo y probablemente el más común.
+     *
+     * Lo que necesita en lugar de las dos es un techo propio, y por eso está justo aquí arriba:
+     * una herramienta que no gasta presupuesto y sigue ofreciéndose cuando el presupuesto se agota
+     * es, sin freno, una puerta al bucle. Está medido con otra herramienta —tres llamadas seguidas
+     * cambiando sólo la redacción— y con `present` ese caso es el normal, no el patológico.
+     *
+     * Para todo lo demás el orden de abajo se conserva tal cual: el memo va **antes** que el
+     * presupuesto a propósito, porque una repetición no debe gastar una consulta del turno.
+     */
+    if (definition.free) {
+      const spent = this.#freeCalls.get(name) ?? 0;
+      if (spent >= MAX_FREE_CALLS) {
+        return toolError('BUDGET_SPENT', `ya has llamado a ${name} demasiadas veces en este turno`,
+          'responde ya con finish usando lo que has presentado');
+      }
+      this.#freeCalls.set(name, spent + 1);
+      return this.#guarded(name, input);
     }
     if (!definition.decides) {
       /*
@@ -831,6 +928,25 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       }
       this.#observations += 1;
     }
+    return this.#guardedAndMemoed(name, input, definition);
+  }
+
+  /** Un salto roto no tumba el turno: se cuenta como lo que es y el modelo decide con eso. */
+  async #guarded(name: string, input: Record<string, unknown>): Promise<ToolOutcome> {
+    try {
+      return await this.#run(name, input);
+    } catch (error) {
+      if (error instanceof JarvisError) {
+        return toolError(error.code, error.message,
+          error.retryable ? 'puede funcionar si se reintenta' : undefined);
+      }
+      return toolError('TOOL_FAILED', (error as Error).message);
+    }
+  }
+
+  async #guardedAndMemoed(
+    name: string, input: Record<string, unknown>, definition: ToolDefinition,
+  ): Promise<ToolOutcome> {
     try {
       const outcome = await this.#run(name, input);
       /*
@@ -857,6 +973,70 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       }
       return toolError('TOOL_FAILED', (error as Error).message);
     }
+  }
+
+  /**
+   * Deja un artifact colgado del turno.
+   *
+   * No ejecuta nada y no va a ninguna máquina: escribe una fila y devuelve el puntero. Por eso es
+   * gratis —no gasta consultas ni reloj— y por eso se sigue ofreciendo cuando el presupuesto se
+   * acaba: el momento de enseñar una tabla es justo el de redactar la respuesta.
+   *
+   * Los errores de forma se le devuelven **diciendo qué falta**, no como un «no valida»: el modelo
+   * tiene margen para corregirse dentro del mismo turno y esa es la diferencia entre que lo haga y
+   * que se rinda y lo cuente en prosa.
+   */
+  #present(input: Record<string, unknown>): ToolOutcome {
+    const artifacts = this.#deps.artifacts;
+    if (!artifacts) {
+      return toolError('NO_ARTIFACTS', 'aquí no hay dónde dejar contenido',
+        'cuenta lo que has averiguado en el texto de tu respuesta');
+    }
+    if (this.#presented.length >= MAX_ARTIFACTS_PER_TURN) {
+      return toolError('TOO_MANY', `ya has presentado ${MAX_ARTIFACTS_PER_TURN} cosas en este turno`,
+        'responde ya con finish: lo que falte cabe en el texto o en el turno siguiente');
+    }
+
+    const kind = asString(input['kind']);
+    const presentation = asString(input['presentation']);
+    const title = asString(input['title']);
+    const body = asString(input['body']);
+    if (!kind || !presentation || !title || body === null) {
+      return toolError('BAD_INPUT', 'faltan kind, presentation, title o body');
+    }
+
+    const created = artifacts.repository.create(artifacts.conversationId, {
+      kind: kind as ArtifactKind,
+      presentation: presentation as ArtifactPresentation,
+      title,
+      body,
+      language: asString(input['language']),
+      caption: asString(input['caption']),
+    });
+    if ('code' in created) return toolError(created.code, created.message, created.hint);
+
+    this.#presented.push(created.id);
+    this.#refs.push({
+      kind: 'artifact',
+      artifactId: created.id,
+      artifactKind: created.kind,
+      presentation: created.presentation,
+      title: created.title,
+      bytes: created.bytes,
+      preview: previewOf(created.kind, created.body),
+    });
+    return {
+      type: 'observation',
+      content: {
+        ok: true,
+        artifactId: created.id,
+        // Se dice lo que se hizo de verdad: `html` nunca va dentro de la burbuja, y si el modelo
+        // pidió `inline` tiene que saber que se enseña de otra forma antes de escribir su frase.
+        presentation: created.presentation,
+        truncated: created.truncated,
+        hint: 'ya está colgado de tu respuesta: no repitas su contenido en el texto, preséntalo',
+      },
+    };
   }
 
   /**
@@ -958,6 +1138,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       case 'list_evidence': return this.#listEvidence();
       case 'read_evidence': return this.#readEvidence(input);
       case 'get_changes': return this.#getChanges(input);
+      case 'present': return this.#present(input);
       case 'list_capabilities': return this.#listCapabilities(input);
       case 'search_capabilities': return this.#searchCapabilities(input);
       case 'use_capability': return this.#useCapability(input);

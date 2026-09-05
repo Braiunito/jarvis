@@ -54,6 +54,9 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
       conversation: services.chat.require(id),
       messages: services.chat.messages(id, Number.isFinite(afterSeq) ? { afterSeq } : {}),
       approvals: services.chat.pendingApprovals(id),
+      // Los `inline` son parte de la respuesta: si no llegan con ella, la primera pintada tiene
+      // un hueco. Los `panel` y `modal` se piden al abrirlos, que es cuando se miran.
+      artifacts: services.chat.inlineArtifacts(id),
     });
   });
 
@@ -99,6 +102,67 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
    * con la tarifa que tiene configurada.
    */
   app.get('/api/spend', async (_request, reply) => reply.send(services.spend.summary()));
+
+  app.get('/api/chat/:id/artifacts/:artifactId', async (request, reply) => {
+    const { id, artifactId } = request.params as { id: string; artifactId: string };
+    return reply.send({ artifact: services.chat.artifact(id, artifactId) });
+  });
+
+  /**
+   * El artifact como documento, para meterlo en un iframe.
+   *
+   * Aquí es donde vive el aislamiento, y **no depende del atributo del iframe**: `sandbox` va como
+   * directiva de CSP en la respuesta, así que el documento cae en un origen opaco **se cargue como
+   * se cargue** —embebido o navegando a esta URL a pelo—. Sin eso, abrir este enlace en una
+   * pestaña cargaría en el origen de la aplicación, con la cookie de sesión, un documento que
+   * escribió un modelo a partir de lo que leyó en una máquina. Eso es XSS almacenado.
+   *
+   * `script-src` va explícito y no heredado: `default-src 'none'` habría prohibido justo el script
+   * que todo esto existe para aislar. Y `form-action` y `base-uri` también, porque **no heredan de
+   * `default-src`**: sin ellas, un formulario con envío automático exfiltra sin problema.
+   *
+   * `connect-src 'none'` e `img-src data:` son lo que impide que llame a casa: ni contar que lo
+   * abriste ni sacar lo que lleva dentro. Y que no pueda **navegarse a sí mismo** a un servidor de
+   * fuera —la misma baliza por otra puerta— lo sostiene el `frame-src 'self'` de la aplicación,
+   * que por eso está declarado explícito y no heredado.
+   *
+   * Verificado en un navegador de verdad, embebido y abriendo esta URL como pestaña: el script
+   * corre, y leer el padre, la cookie y `localStorage` dan `SecurityError`; ni un intento llega a
+   * la red. **Aviso para quien lo compruebe a mano**: `document.location.origin` devuelve el
+   * origen de la URL, no `null`, porque refleja la dirección y no el origen de seguridad. Que el
+   * documento está en un origen opaco lo demuestran los `SecurityError`, no esa línea.
+   */
+  app.get('/api/chat/:id/artifacts/:artifactId/raw', async (request, reply) => {
+    const { id, artifactId } = request.params as { id: string; artifactId: string };
+    const artifact = services.chat.artifact(id, artifactId);
+    if (artifact.kind !== 'html') {
+      throw new JarvisError('BAD_REQUEST', 'sólo un artifact html se sirve como documento');
+    }
+    if (!services.chat.htmlArtifactsAllowed) {
+      throw new JarvisError('FORBIDDEN', 'los artifacts html están desactivados en este servidor');
+    }
+    return reply
+      .header('content-security-policy', [
+        // El origen opaco, que es todo el aislamiento.
+        "sandbox allow-scripts",
+        "script-src 'unsafe-inline'",
+        "style-src 'unsafe-inline'",
+        "img-src data:",
+        "font-src data:",
+        "connect-src 'none'",
+        "form-action 'none'",
+        "base-uri 'none'",
+        "object-src 'none'",
+        // Que sólo lo embeba la propia consola: `securityHeaders()` pone `'none'` y con eso el
+        // iframe no renderiza, así que esta ruta lleva las suyas.
+        "frame-ancestors 'self'",
+      ].join('; '))
+      .header('x-content-type-options', 'nosniff')
+      .header('referrer-policy', 'no-referrer')
+      .header('cache-control', 'private, max-age=31536000, immutable')
+      .type('text/html; charset=utf-8')
+      .send(artifact.body);
+  });
 
   app.get('/events/chat/:id', (request, reply) => {
     const { id } = request.params as { id: string };
@@ -151,7 +215,16 @@ function streamChat(request: FastifyRequest, reply: FastifyReply, services: Core
     }
     for (const message of messages) {
       cursor = message.seq;
-      write(`event: chat.message\nid: ${message.seq}\ndata: ${JSON.stringify(message)}\n\n`);
+      /*
+       * Los cuerpos `inline` van **en el mismo frame** y no por un canal aparte.
+       *
+       * El frame lleva punteros, y un artifact `inline` que llega en vivo se pintaría vacío hasta
+       * que algo dispare un refetch —que con `refetchOnWindowFocus: false` puede no llegar nunca—.
+       * Es aditivo: quien lea el frame como un `ChatMessage` sigue leyéndolo igual.
+       */
+      const artifacts = services.chat.inlineArtifactsOf(message.id);
+      const payload = artifacts.length ? { ...message, artifacts } : message;
+      write(`event: chat.message\nid: ${message.seq}\ndata: ${JSON.stringify(payload)}\n\n`);
     }
     // El estado va aparte de los mensajes: «pensando» no es algo que se haya dicho, y meterlo en
     // el hilo dejaría un rastro de mensajes vacíos en el histórico.

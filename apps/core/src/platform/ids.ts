@@ -25,5 +25,6 @@ export const newJobId = (): string => opaqueId('j');
 export const newAuditId = (): string => opaqueId('e');
 export const newConversationId = (): string => opaqueId('c');
 export const newChatMessageId = (): string => opaqueId('m');
+export const newArtifactId = (): string => opaqueId('t');
 export const newSpendId = (): string => opaqueId('g');
 export const newRequestId = (): string => `req_${randomUUID()}`;
