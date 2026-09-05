@@ -144,6 +144,16 @@ services:
       JARVIS_MCP_DENY: ${JARVIS_MCP_DENY:-}
       JARVIS_MCP_STARTER: ${JARVIS_MCP_STARTER:-}
       JARVIS_CHAT_DEFAULT_AUTONOMY: ${JARVIS_CHAT_DEFAULT_AUTONOMY:-manual}
+      JARVIS_CHAT_MAX_TOOL_CALLS: ${JARVIS_CHAT_MAX_TOOL_CALLS:-}
+      JARVIS_CHAT_MAX_TURN_MS: ${JARVIS_CHAT_MAX_TURN_MS:-}
+      JARVIS_MCP_MAX_OUTPUT_CHARS: ${JARVIS_MCP_MAX_OUTPUT_CHARS:-}
+      JARVIS_ASSISTANT_MODEL_TOOL_RESULT_CHARS: ${JARVIS_ASSISTANT_MODEL_TOOL_RESULT_CHARS:-}
+      # Dice por cada vuelta cuánto tardó, cuánto prompt pagó y cuánto reutilizó de caché. El
+      # runbook manda encenderlo para diagnosticar el asistente, y hasta hoy la variable **no
+      # llegaba al contenedor**: se prometía un control que no se tenía. Es la cuarta vez que pasa
+      # en este fichero, y por eso las de arriba van también aunque tengan buenos valores por
+      # defecto.
+      JARVIS_VERBOSE: ${JARVIS_VERBOSE:-}
 
       JARVIS_TITLE_API_KEY: ${JARVIS_TITLE_API_KEY:-}
       JARVIS_TITLE_BASE_URL: ${JARVIS_TITLE_BASE_URL:-https://api.groq.com/openai}
