@@ -61,6 +61,15 @@ export interface ChatServiceDeps {
   maxToolCalls?: number;
   historyMessages?: number;
   defaultAutonomy?: AutonomyMode;
+  /**
+   * Cuánto puede pasar un turno consultando antes de tener que responder.
+   *
+   * Es el tope que de verdad protege a quien está esperando delante de la pantalla: contar
+   * consultas no acota nada cuando cada una cuesta dos minutos. Pasado el plazo el turno no se
+   * corta —eso perdería lo que ya sabe— sino que deja de ofrecerle lecturas y le pide que
+   * responda con lo que tenga.
+   */
+  maxTurnMs?: number;
   approvalTtlMs?: number;
   starterCapabilities?: readonly string[];
   toolLimits?: Partial<ToolboxLimits>;
@@ -73,6 +82,7 @@ export class ChatService {
   readonly #historyMessages: number;
   readonly #defaultAutonomy: AutonomyMode;
   readonly #approvalTtlMs: number;
+  readonly #maxTurnMs: number;
   readonly bus = new ChatEventBus();
   /**
    * Turnos en curso, por conversación.
@@ -90,6 +100,35 @@ export class ChatService {
     this.#historyMessages = deps.historyMessages ?? 12;
     this.#defaultAutonomy = deps.defaultAutonomy ?? 'manual';
     this.#approvalTtlMs = deps.approvalTtlMs ?? 30 * 60 * 1000;
+    this.#maxTurnMs = deps.maxTurnMs ?? 120_000;
+  }
+
+  /**
+   * Deja en pie las conversaciones que se quedaron pensando.
+   *
+   * Un turno vive en memoria: si el proceso muere a mitad —un despliegue, un reinicio, un fallo—
+   * la fila se queda en `thinking` y **no vuelve sola nunca**. La pantalla dice «pensando…» para
+   * siempre y quien mira no tiene forma de saber que ya no hay nadie pensando. Pasó en producción
+   * el primer día.
+   *
+   * No se reanuda el turno: se cierra diciendo lo que ocurrió. Reanudarlo exigiría saber en qué
+   * punto estaba, y lo que había en ese punto era una llamada a un modelo que ya no existe. Lo
+   * honesto es devolver la conversación a la persona, que puede volver a preguntar sabiendo qué
+   * pasó.
+   */
+  reconcile(): number {
+    const stuck = this.#deps.db
+      .prepare("SELECT id FROM conversations WHERE status = 'thinking'")
+      .all() as Array<{ id: string }>;
+    for (const { id } of stuck) {
+      this.#repository.append(id, {
+        role: 'event',
+        text: 'El servidor se reinició mientras el asistente pensaba, así que ese turno se perdió. '
+          + 'Vuelve a preguntar cuando quieras.',
+      });
+      this.#repository.setStatus(id, 'idle', 'local');
+    }
+    return stuck.length;
   }
 
   // ---- consulta -----------------------------------------------------------
@@ -557,16 +596,23 @@ export class ChatService {
   async #contextFor(conversation: Conversation, source: ModelSource): Promise<PlanContext> {
     const history = this.#repository.lastMessages(conversation.id, this.#historyMessages);
     /*
-     * El lote de arranque va dentro del contexto, no detrás de una consulta.
+     * El lote de arranque **no** va en el contexto, y esto costó descubrirlo.
      *
-     * Cada ida y vuelta con el modelo de casa cuesta de diez a veinte segundos, así que gastar la
-     * primera en preguntar «¿qué herramientas hay?» es gastar un cuarto de la respuesta en algo que
-     * cabe en veinte líneas. Si el catálogo no se puede pedir, se sigue sin él: el asistente
-     * contestará peor, pero contestará.
+     * Lo puse aquí para ahorrar una vuelta en la pregunta más común —«¿cómo va la memoria?»— y
+     * funcionaba: iba directo a la herramienta buena. Lo que no vi es lo que le hacía al resto de
+     * las conversaciones. Poner cinco herramientas de diagnóstico delante, con un «puedes consultar
+     * esto directamente», es decirle qué hacer, no qué existe: ante un «Hola» se ponía a
+     * diagnosticar el servidor durante minutos.
+     *
+     * Medido, y la medida es lo que cierra la discusión: a temperatura 0,8 pasaba dos de cada
+     * cuatro veces; bajarla a 0,1 lo volvió determinista **en la dirección mala**, tres de tres.
+     * O sea que no era mala suerte del muestreo: con ese contexto delante, diagnosticar era la
+     * continuación más probable de un saludo.
+     *
+     * El catálogo sigue estando: se pide con `list_capabilities`, que es para lo que existe el
+     * router. Cuesta una vuelta cuando hace falta, en vez de torcer todas las conversaciones en
+     * las que no hacía falta.
      */
-    const starter = this.#deps.mcp?.configured
-      ? await this.#deps.mcp.describe(this.#deps.starterCapabilities ?? []).catch(() => [])
-      : [];
     const lastUser = [...history].reverse().find((message) => message.role === 'user');
     const workspace = conversation.workspaceId ? this.#deps.workspaces.require(conversation.workspaceId) : null;
 
@@ -592,13 +638,6 @@ export class ChatService {
               : 'assistant' as const,
           text: message.toolName ? `${message.toolName} → ${clipText(message.text, 400)}` : clipText(message.text, 600),
         })),
-      ...(starter.length ? {
-        capabilities: starter.map((capability) => ({
-          name: capability.name,
-          summary: capability.summary,
-          params: compactParams(capability.inputSchema),
-        })),
-      } : {}),
       pendingInput: null,
       pendingApprovals: this.pendingApprovals(conversation.id)
         .map((approval) => ({ id: approval.id, summary: approval.summary, expiresAt: approval.expiresAt })),
@@ -639,6 +678,9 @@ export class ChatService {
       autonomy: conversation.autonomy,
       canEscalate: this.#deps.model?.canEscalate === true,
       maxObservations: this.#maxToolCalls,
+      // Lo que de verdad acota la espera de quien está mirando la pantalla.
+      maxTurnMs: this.#maxTurnMs,
+      now: () => this.#deps.clock.nowMs(),
     });
     return new RecordingToolbox(inner, this.#repository, this.bus, conversation.id);
   }
@@ -686,6 +728,7 @@ class RecordingToolbox implements AssistantToolbox {
 
   get terminalOffer(): AssistantToolbox['terminalOffer'] { return this.#inner.terminalOffer; }
   get observations(): number { return this.#inner.observations; }
+  get spent(): boolean { return this.#inner.spent; }
 
   definitions(options?: { decisionsOnly?: boolean }): ToolDefinition[] {
     return this.#inner.definitions(options);
@@ -722,13 +765,3 @@ function clipText(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-/** Los parámetros de una capacidad en una línea. El esquema entero cuesta más de lo que aporta. */
-function compactParams(schema: unknown): string {
-  const object = schema as { properties?: Record<string, { type?: string }>; required?: string[] } | null;
-  const properties = object?.properties;
-  if (!properties || !Object.keys(properties).length) return 'sin parámetros';
-  const required = new Set(object?.required ?? []);
-  return Object.entries(properties)
-    .map(([name, spec]) => `${name}: ${spec?.type ?? 'any'}${required.has(name) ? ' (obligatorio)' : ''}`)
-    .join(', ');
-}

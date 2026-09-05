@@ -118,10 +118,58 @@ máquina, con la respuesta correcta.
    costarían otra vuelta para pedir sus detalles. Lo que sigue sin hacerse es ejecutar la que más
    se parezca: adivinar qué quiso decir alguien que ya se equivocó al decirlo es como se ejecuta
    algo que nadie pidió.
-10. **La copia de seguridad salió a medias** al desplegar: sólo el volumen del core, sin
+10. **Un turno podía consultar sin límite de tiempo.** Ocho consultas no son un tope cuando cada
+    una tarda dos minutos: son veinte minutos, y eso llegó a tardar un «Hola». Ahora hay tope de
+    reloj además del de consultas (dos minutos por defecto). Pasado el plazo el turno no se corta
+    —eso perdería lo que ya sabe— sino que deja de ofrecerle lecturas y le pide que responda.
+11. **Una conversación podía quedarse «pensando» para siempre.** El turno vive en memoria, así que
+    un reinicio a mitad dejaba la fila en `thinking` y la pantalla diciendo «pensando…»
+    indefinidamente. Ahora se reconcilian al arrancar: se cierran diciendo qué pasó, sin fingir que
+    se reanudan.
+12. **La copia de seguridad salió a medias** al desplegar: sólo el volumen del core, sin
    `jarvis-auth` —usuarios, passkeys y claves de sesión, que es la mitad que no se reconstruye—.
    No es un defecto del código: `bin/jarvis backup` ya hacía las dos mitades y falla si sale
    incompleta. Fue no usar el comando que había.
+
+## El «Hola» que diagnosticaba el servidor
+
+Vale la pena aparte, porque el camino hasta la causa fue equivocado dos veces y el dato que lo
+cerró es contraintuitivo.
+
+**El síntoma**: ante un saludo, el asistente se ponía a diagnosticar la máquina. En producción, un
+«Hola» estuvo más de ocho minutos consultando y agotó el presupuesto del turno.
+
+**Primer intento — la descripción de `finish`.** Decía qué hacía pero no **cuándo** usarla, así que
+se le añadió «úsala también cuando no haga falta consultar nada», más una regla en el prompt. En un
+banco pequeño bastaba. En producción siguió diagnosticando.
+
+**Segundo intento — la temperatura.** `llama-server` viene a 0.8 de fábrica y elegir herramienta es
+clasificar, no redactar. Parecía la causa evidente de que el mismo «Hola» se comportara distinto
+cada vez. Se bajó a 0.1 y **salió peor**:
+
+| Configuración | «Hola» acaba diagnosticando |
+|---|---|
+| lote inyectado, temperatura 0.8 | 2 de 4 |
+| lote inyectado, temperatura **0.1** | **3 de 3** |
+| sin lote inyectado, temperatura 0.1 | **0 de 2** |
+
+Bajar la temperatura no arregló nada: lo volvió **determinista en la dirección mala**. Y eso es lo
+que cerró el diagnóstico, porque significa que diagnosticar no era mala suerte del muestreo — era
+la continuación *más probable* de un saludo con ese contexto delante. La aleatoriedad nos estaba
+rescatando la mitad de las veces.
+
+**La causa**: el lote de arranque, que yo mismo inyectaba en el contexto de cada turno con un
+«puedes consultar esto directamente». Eso no le dice al modelo qué existe: le dice qué hacer. Con
+cinco herramientas de diagnóstico delante, un modelo pequeño diagnostica.
+
+Se quitó la inyección. El catálogo sigue estando —se pide con `list_capabilities`, que es para lo
+que existe el router— y cuesta una vuelta cuando hace falta, en vez de torcer todas las
+conversaciones en las que no hacía falta. La temperatura se queda en 0.1: no arregló el problema,
+pero hace el comportamiento reproducible, que es lo que permitió medir el A/B de arriba.
+
+**La lección, que es la de siempre en este proyecto**: lo que se le pone delante al modelo pesa más
+que lo que se le pide. Ya había pasado con `[sin parámetros]`, que estaba escrito y no impidió que
+inventara argumentos.
 
 ## Lo que queda
 

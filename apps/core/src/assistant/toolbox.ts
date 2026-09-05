@@ -126,6 +126,16 @@ export interface CoreToolboxDeps {
    */
   maxObservations?: number;
   /**
+   * Cuánto puede durar el turno consultando, en milisegundos.
+   *
+   * Un tope por número de consultas no acota nada cuando cada consulta cuesta dos minutos: ocho
+   * son veinte, y eso es lo que tardó un «Hola» en producción. El reloj sí acota, y no depende de
+   * lo lista que sea la pregunta ni de lo rápida que esté la máquina ese día.
+   */
+  maxTurnMs?: number;
+  /** De dónde sale la hora. Se inyecta para poder probar el corte sin esperar de verdad. */
+  now?: () => number;
+  /**
    * Las capacidades MCP (ADR-009). Opcional: sin servidores declarados, las tres herramientas del
    * router no se ofrecen y el asistente no promete un sistema que no puede mirar.
    */
@@ -515,6 +525,9 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   readonly #deps: CoreToolboxDeps;
   readonly #limits: ToolboxLimits;
   readonly #maxObservations: number;
+  readonly #now: () => number;
+  /** Instante a partir del cual ya no se consulta más. `null` = sin tope de reloj. */
+  readonly #deadline: number | null;
   #terminalOffer: TerminalOffer | null = null;
   #observations = 0;
   /**
@@ -544,6 +557,8 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     this.#actorRef = deps.actorRef ?? (deps.plan ? `plan:${deps.plan.id}` : 'chat');
     this.#limits = { ...DEFAULT_TOOLBOX_LIMITS, ...deps.limits };
     this.#maxObservations = deps.maxObservations ?? 6;
+    this.#now = deps.now ?? (() => Date.now());
+    this.#deadline = deps.maxTurnMs ? this.#now() + deps.maxTurnMs : null;
     const scoped = Boolean(deps.workspace);
     this.#available = Object.freeze([
       ...TOOL_DEFINITIONS.filter((tool) => scoped || !WORKSPACE_TOOL_NAMES.has(tool.name)),
@@ -556,6 +571,15 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   get terminalOffer(): TerminalOffer | null { return this.#terminalOffer; }
   get observations(): number { return this.#observations; }
 
+  /** Ya no queda presupuesto: ni por número de consultas ni por tiempo. */
+  get spent(): boolean {
+    return this.#observations >= this.#maxObservations || this.#outOfTime();
+  }
+
+  #outOfTime(): boolean {
+    return this.#deadline !== null && this.#now() >= this.#deadline;
+  }
+
   definitions({ decisionsOnly = false }: { decisionsOnly?: boolean } = {}): ToolDefinition[] {
     return this.#available.filter((tool) => !decisionsOnly || tool.decides);
   }
@@ -567,6 +591,11 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         `las que hay son: ${this.#available.map((tool) => tool.name).join(', ')}`);
     }
     if (!definition.decides) {
+      if (this.#outOfTime()) {
+        return toolError('BUDGET_SPENT', 'este turno lleva demasiado tiempo consultando',
+          'responde ya con finish, con lo que tengas: di lo que has averiguado y qué te faltó. '
+          + 'Podrás volver a consultar en el turno siguiente');
+      }
       if (this.#observations >= this.#maxObservations) {
         return toolError('BUDGET_SPENT', 'se agotaron las consultas de este turno',
           'responde ya con finish, con lo que tengas: di lo que has averiguado y qué te faltó. '

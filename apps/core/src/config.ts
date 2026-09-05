@@ -188,6 +188,15 @@ export const config = {
    * 200). Lo que corta es la divagación, que es justo lo que hay que cortar.
    */
   localModelMaxOutputTokens: Number(env['JARVIS_LOCAL_MODEL_MAX_OUTPUT_TOKENS'] || 400),
+  /**
+   * Temperatura del modelo local.
+   *
+   * Baja a propósito: lo que se le pide en cada vuelta es **elegir una herramienta**, que es una
+   * clasificación, no una redacción. `llama-server` viene a 0.8 de fábrica y con eso el mismo
+   * «Hola» contestaba el saludo o se ponía a diagnosticar el servidor según la tirada —medido,
+   * dos de cada cuatro—. No es un ajuste de estilo: es la diferencia entre 12 s y 194 s.
+   */
+  localModelTemperature: Number(env['JARVIS_LOCAL_MODEL_TEMPERATURE'] ?? '0.1'),
 
   /** El modelo del Assistant vive en el core: la clave jamás llega al navegador. */
   modelBaseUrl: env['JARVIS_MODEL_BASE_URL'] || 'https://api.anthropic.com',
@@ -241,6 +250,14 @@ export const config = {
    * la historia compite con el catálogo y con la respuesta.
    */
   chatMaxToolCalls: Number(env['JARVIS_CHAT_MAX_TOOL_CALLS'] || 8),
+  /**
+   * Cuánto puede pasar un turno consultando antes de tener que responder.
+   *
+   * Ocho consultas no son un tope cuando cada una tarda dos minutos: son veinte minutos, y eso es
+   * lo que llegó a tardar un «Hola» en producción. Dos minutos de reloj sí acotan lo que espera
+   * una persona, y no dependen de lo cargada que esté la máquina ese día.
+   */
+  chatMaxTurnMs: Number(env['JARVIS_CHAT_MAX_TURN_MS'] || 120_000),
   chatHistoryMessages: Number(env['JARVIS_CHAT_HISTORY_MESSAGES'] || 12),
   /** Con qué autonomía nace una conversación. La persona la cambia desde la interfaz. */
   chatDefaultAutonomy: (env['JARVIS_CHAT_DEFAULT_AUTONOMY'] || 'manual') as 'manual' | 'auto',

@@ -171,6 +171,15 @@ export interface AssistantToolbox {
   readonly terminalOffer: TerminalOffer | null;
   /** Cuántas lecturas lleva el turno: el presupuesto es del core, no del modelo. */
   readonly observations: number;
+  /**
+   * Si ya no queda presupuesto —por número de consultas o por reloj—.
+   *
+   * El modelo lo consulta para dejar de ofrecerle herramientas de lectura en cuanto se agota. Sin
+   * esto se le siguen ofreciendo, las pide, se le contesta que no queda, y **cada uno de esos
+   * rechazos cuesta una vuelta entera contra el modelo**: en el de casa, dos minutos por saber
+   * algo que el core ya sabía.
+   */
+  readonly spent: boolean;
 }
 
 export interface AssistantModel {

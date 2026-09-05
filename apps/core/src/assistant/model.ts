@@ -274,6 +274,19 @@ export interface AnthropicModelOptions {
    */
   maxOutputTokensParam?: string;
   /**
+   * Con cuánta libertad genera.
+   *
+   * Elegir una herramienta **es clasificar, no redactar**, y `llama-server` viene de fábrica a 0.8,
+   * que para eso es muchísimo. Medido con «Hola» contra el servidor de casa: de cuatro intentos
+   * idénticos, dos contestaron el saludo y dos se pusieron a diagnosticar el servidor, tardando
+   * 103 s y 194 s en vez de 12 s. No era una diferencia de configuración entre local y producción
+   * —era la misma tirada de dados—.
+   *
+   * Sin valor no se manda nada y decide el servidor, que es lo correcto para la nube: ahí el
+   * proveedor ya tiene su defecto y el modelo es lo bastante bueno como para que no importe.
+   */
+  temperature?: number;
+  /**
    * Dónde se fue el tiempo de una llamada.
    *
    * Con un modelo de casa, «el asistente va lento» es la queja que va a llegar siempre, y sin esto
@@ -337,8 +350,9 @@ export class AnthropicModel implements AssistantModel {
     const messages: AnthropicMessage[] = [{ role: 'user', content: renderContext(context) }];
 
     for (let call = 0; call <= this.#maxToolCalls; call += 1) {
-      // En la última vuelta sólo quedan las herramientas que cierran: el turno acaba en decisión.
-      const decisionsOnly = call === this.#maxToolCalls;
+      // Sólo quedan las que cierran cuando es la última vuelta **o cuando el core ya dijo que no
+      // queda presupuesto**: ofrecerle lecturas que van a ser rechazadas gasta una vuelta entera.
+      const decisionsOnly = call === this.#maxToolCalls || toolbox.spent;
       const tools = toolbox.definitions({ decisionsOnly });
       const body = await this.#ask(messages, tools);
       const blocks = body.content ?? [];
@@ -487,6 +501,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
   readonly #maxOutputTokens: number | null;
   /** Cómo se llama ese campo en el servidor de destino. Ver `maxOutputTokensParam`. */
   readonly #maxOutputTokensParam: string;
+  readonly #temperature: number | null;
   readonly #onUsage: ((usage: ModelTurnUsage) => void) | null;
 
   constructor(options: AnthropicModelOptions) {
@@ -494,6 +509,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
     this.#maxToolResultChars = options.maxToolResultChars ?? 60_000;
     this.#maxOutputTokens = options.maxOutputTokens ?? null;
     this.#maxOutputTokensParam = options.maxOutputTokensParam ?? 'max_tokens';
+    this.#temperature = options.temperature ?? null;
     this.#onUsage = options.onUsage ?? null;
     this.#apiKey = options.apiKey;
     this.#baseUrl = options.baseUrl.replace(/\/+$/, '');
@@ -511,7 +527,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
     ];
 
     for (let call = 0; call <= this.#maxToolCalls; call += 1) {
-      const decisionsOnly = call === this.#maxToolCalls;
+      const decisionsOnly = call === this.#maxToolCalls || toolbox.spent;
       const tools = toolbox.definitions({ decisionsOnly });
       const message = await this.#ask(messages, tools);
       const calls = message.tool_calls ?? [];
@@ -599,6 +615,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
           messages,
           // Sólo si se pidió, y con el nombre que entienda el destino.
           ...(this.#maxOutputTokens !== null ? { [this.#maxOutputTokensParam]: this.#maxOutputTokens } : {}),
+          ...(this.#temperature !== null ? { temperature: this.#temperature } : {}),
           tools: tools.map((tool) => ({
             type: 'function',
             function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },

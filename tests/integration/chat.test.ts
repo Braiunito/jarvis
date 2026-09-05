@@ -505,6 +505,48 @@ describe('CHAT · durabilidad', () => {
     expect(answers.map((message) => message.text)).toEqual(['primera', 'segunda']);
   });
 
+  it('una conversación que se quedó pensando se cierra al arrancar', async () => {
+    /*
+     * Un turno vive en memoria. Si el proceso muere a mitad —un despliegue, un reinicio— la fila
+     * se queda en `thinking` y no vuelve sola nunca: la pantalla dice «pensando…» para siempre y
+     * quien mira no tiene forma de saber que ya no hay nadie pensando. Pasó en producción.
+     */
+    const db = openDatabase({ path: ':memory:' });
+    const local = new ScriptedBrain('local', [() => ({ kind: 'finish', summary: 'ya' })]);
+    const first = buildServices({
+      db,
+      index: new FakeSessionIndex([indexRow()]) as never,
+      model: new HybridModel({ local, cloud: null }),
+      mcp: fakeMcp().service,
+      config: {
+        hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-chat-spool',
+        sshCommand: fakeSshPath(), knownHostsFile: '',
+      },
+    });
+    const conversation = first.chat.create({ user });
+    // Se simula el proceso muerto a mitad de turno: la fila queda pensando y nadie la mueve.
+    db.prepare("UPDATE conversations SET status = 'thinking' WHERE id = ?").run(conversation.id);
+    first.planSupervisor.stop();
+    first.supervisor.stop();
+    first.retention.stop();
+
+    const second = buildServices({
+      db,
+      index: new FakeSessionIndex([indexRow()]) as never,
+      model: new HybridModel({ local: new ScriptedBrain('local2', []), cloud: null }),
+      mcp: fakeMcp().service,
+      config: {
+        hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-chat-spool',
+        sshCommand: fakeSshPath(), knownHostsFile: '',
+      },
+    });
+    open.push(second);
+
+    expect(second.chat.require(conversation.id).status).toBe('idle');
+    // Y no se cierra en silencio: se dice qué pasó, porque quien preguntó sigue esperando.
+    expect(second.chat.messages(conversation.id).at(-1)?.text).toContain('se reinició');
+  });
+
   it('los mensajes sobreviven a un reinicio del core', async () => {
     const db = openDatabase({ path: ':memory:' });
     const local = new ScriptedBrain('local', [() => ({ kind: 'finish', summary: 'apuntado' })]);

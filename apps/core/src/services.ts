@@ -62,6 +62,7 @@ function buildLocalModel(config: CoreConfig): AssistantModel | null {
      */
     maxToolResultChars: config.localModelToolResultChars,
     maxOutputTokens: config.localModelMaxOutputTokens,
+    temperature: config.localModelTemperature,
     /*
      * Con `JARVIS_VERBOSE` se dice dónde se va el tiempo de cada vuelta.
      *
@@ -311,10 +312,19 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
       : hybrid,
     mcp, attachments, evidence,
     maxToolCalls: config.chatMaxToolCalls,
+    maxTurnMs: config.chatMaxTurnMs,
     historyMessages: config.chatHistoryMessages,
     defaultAutonomy: config.chatDefaultAutonomy,
     starterCapabilities: config.mcpStarter,
   });
+  /*
+   * Un turno de chat vive en memoria, así que un reinicio deja conversaciones «pensando» que no
+   * vuelven solas. Se cierran al arrancar, diciendo qué pasó: es el equivalente conversacional de
+   * reconciliar un run, sólo que aquí no hay nada que adoptar —el turno no dejó rastro fuera—.
+   */
+  const stuck = chat.reconcile();
+  if (stuck > 0) console.warn(`[jarvis] ${stuck} conversación(es) se quedaron pensando en el arranque anterior`);
+
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
 
   /**

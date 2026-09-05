@@ -20,6 +20,7 @@ import { McpHttpClient } from '../src/mcp/client.js';
 import { McpService, summarize } from '../src/mcp/service.js';
 import { DEFAULT_DENIED_TOOLS, parseMcpServers, parsePairs } from '../src/mcp/config.js';
 import { fitToSchema } from '../src/mcp/service.js';
+import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
 import { readSseEvents } from '../src/platform/sse-read.js';
 
 const NOW = '2026-09-04T12:00:00.000Z';
@@ -479,5 +480,65 @@ describe('MCP · llamar con argumentos que sobran', () => {
     // Y al servidor le llegó la llamada limpia, no la que traía el argumento inventado.
     const call = server.calls.find((entry) => entry.method === 'tools/call');
     expect((call?.params as { arguments?: unknown })?.arguments).toEqual({});
+  });
+});
+
+
+/**
+ * El presupuesto de un turno también es de reloj.
+ *
+ * Contar consultas no acota nada cuando cada una cuesta dos minutos: ocho son veinte, y eso fue
+ * exactamente lo que tardó un «Hola» en producción antes de que existiera este tope.
+ */
+describe('el turno tiene un tope de tiempo, no sólo de consultas', () => {
+  const build = (now: () => number, maxTurnMs: number): CoreAssistantToolbox => new CoreAssistantToolbox({
+    sessions: {} as never, health: {} as never, runs: {} as never, audit: {} as never,
+    user: { userId: 'u1', username: 'braian' },
+    mcp: buildService(fakeMcpServer()),
+    maxObservations: 10,
+    maxTurnMs,
+    now,
+  });
+
+  it('mientras queda tiempo, no está agotado', async () => {
+    let clock = 1000;
+    const toolbox = build(() => clock, 60_000);
+    expect(toolbox.spent).toBe(false);
+    clock += 30_000;
+    expect(toolbox.spent).toBe(false);
+  });
+
+  it('pasado el plazo, se agota aunque sobren consultas', async () => {
+    let clock = 1000;
+    const toolbox = build(() => clock, 60_000);
+    clock += 61_000;
+    // Cero consultas hechas y aun así agotado: lo que se acabó es el tiempo de quien espera.
+    expect(toolbox.observations).toBe(0);
+    expect(toolbox.spent).toBe(true);
+  });
+
+  it('una lectura pasada de plazo se rechaza diciendo que es por tiempo', async () => {
+    let clock = 1000;
+    const toolbox = build(() => clock, 60_000);
+    clock += 61_000;
+    const outcome = await toolbox.invoke('use_capability', { name: 'docker_logs', args: {} });
+    expect(JSON.stringify(outcome)).toContain('demasiado tiempo');
+  });
+
+  it('las herramientas que deciden siguen disponibles: el turno acaba en respuesta, no en corte', async () => {
+    let clock = 1000;
+    const toolbox = build(() => clock, 60_000);
+    clock += 61_000;
+    // Cortar por lo sano perdería lo que ya sabe; lo que hay que hacer es pedirle que responda.
+    expect(toolbox.definitions({ decisionsOnly: true }).map((tool) => tool.name)).toContain('finish');
+  });
+
+  it('sin tope de reloj, sólo manda el número de consultas', () => {
+    const toolbox = new CoreAssistantToolbox({
+      sessions: {} as never, health: {} as never, runs: {} as never, audit: {} as never,
+      user: { userId: 'u1', username: 'braian' },
+      maxObservations: 0,
+    });
+    expect(toolbox.spent).toBe(true);
   });
 });
