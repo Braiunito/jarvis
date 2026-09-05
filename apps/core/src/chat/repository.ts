@@ -53,7 +53,12 @@ const toMessage = (row: MessageRow): ChatMessage => ({
   modelId: row.model_id,
   approvalId: row.approval_id,
   runIds: JSON.parse(row.run_ids) as string[],
-  refs: JSON.parse(row.refs_json ?? '[]') as ChatRef[],
+  refs: (JSON.parse(row.refs_json ?? '[]') as ChatRef[]).map((ref) => (
+    // Las referencias escritas antes de que `cwd` existiera no lo traen. Se completa al leer en
+    // vez de reescribir el histórico: migrar datos para ganar un campo derivable es cambiar el
+    // pasado por comodidad.
+    ref.kind === 'session' ? { ...ref, cwd: ref.cwd ?? null } : ref
+  )),
   createdAt: row.created_at,
 });
 

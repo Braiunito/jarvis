@@ -113,6 +113,14 @@ export interface CoreToolboxDeps {
    * una terminal viva, que sigue abriendo una persona.
    */
   workspaces?: WorkspaceService;
+  /**
+   * Lo que la conversación ya encontró en turnos anteriores.
+   *
+   * Hace falta porque **el toolbox se construye uno por turno**: lo que `search_sessions` dijo en
+   * el primero se ha perdido cuando en el tercero se pide una terminal sobre esa misma sesión, y
+   * la oferta salía sin directorio y sin workspace. Medido contra producción, no supuesto.
+   */
+  knownSessions?: readonly SeenSession[];
   health: HealthService;
   runs: RunService;
   audit: AuditLog;
@@ -240,8 +248,8 @@ const asInt = (value: unknown, fallback: number, max: number): number => {
  * el arreglo: buscar una sesión y no poder leerla es lo que hacía que resumiera el título y lo
  * llamara contenido.
  */
-/** Una sesión de la que ya se sabe algo en este turno. */
-interface SeenSession {
+/** Una sesión de la que ya se sabe algo. */
+export interface SeenSession {
   ref: { host: string; provider: Provider; sessionId: string };
   title: string | null;
   cwd: string | null;
@@ -688,6 +696,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     this.#maxObservations = deps.maxObservations ?? 6;
     this.#now = deps.now ?? (() => Date.now());
     this.#deadline = deps.maxTurnMs ? this.#now() + deps.maxTurnMs : null;
+    for (const session of deps.knownSessions ?? []) this.#remember(session);
     const scoped = Boolean(deps.workspace);
     const own = TOOL_DEFINITIONS.filter((tool) => scoped || !WORKSPACE_TOOL_NAMES.has(tool.name));
     /*
@@ -980,6 +989,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         provider: target.ref.provider,
         sessionId: target.ref.sessionId,
         title: target.title ?? transcript.preview,
+        cwd: target.cwd,
       });
     }
     return {

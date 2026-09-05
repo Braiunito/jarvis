@@ -59,6 +59,14 @@ export const ChatRef = Type.Union([
     provider: Provider,
     sessionId: Type.String(),
     title: Type.Union([Type.String(), Type.Null()]),
+    /**
+     * Su directorio de trabajo, si el índice lo sabía.
+     *
+     * Va aquí y no se busca otra vez porque es lo único que sobrevive al turno: el toolbox se
+     * construye uno por turno, así que lo que `search_sessions` dijo en el primero se ha perdido
+     * cuando en el tercero se pide una terminal. Sin esto la terminal arranca en el home.
+     */
+    cwd: Type.Union([Type.String(), Type.Null()]),
   }),
   Type.Object({
     kind: Type.Literal('terminal'),

@@ -38,7 +38,9 @@ import type { HybridModel } from '../assistant/hybrid.js';
 import type {
   AssistantDecision, AssistantToolbox, PlanContext, ToolDefinition, ToolOutcome,
 } from '../assistant/types.js';
-import { CoreAssistantToolbox, directCapacity, type ToolboxLimits } from '../assistant/toolbox.js';
+import {
+  CoreAssistantToolbox, directCapacity, type SeenSession, type ToolboxLimits,
+} from '../assistant/toolbox.js';
 import { ChatRepository } from './repository.js';
 import { ChatEventBus } from './events-bus.js';
 
@@ -723,6 +725,8 @@ export class ChatService {
       // Sólo la conversación: un plan ya trabaja sobre una sesión, y dejarle abrir otras le
       // ensancha el alcance sin que nadie lo haya pedido.
       workspaces: this.#deps.workspaces,
+      // Y lo que ya se encontró, porque el toolbox es de un turno y la conversación no.
+      knownSessions: this.#knownSessions(this.#repository.lastMessages(conversation.id, this.#historyMessages)),
       health: this.#deps.health,
       runs: this.#deps.runs,
       audit: this.#deps.audit,
@@ -794,6 +798,50 @@ export class ChatService {
     return [...byId.values()]
       .map((session) => ({ ...session, workspaceId: workspaceOf.get(session.sessionId) ?? null }))
       .slice(-6);
+  }
+
+  /**
+   * Lo que el hilo ya sabe de cada sesión, para el toolbox del turno que viene.
+   *
+   * Es lo mismo que `#foundIn` le cuenta al modelo, pero con el `cwd` y en la forma que consumen
+   * las herramientas. Existe porque el toolbox se construye uno por turno: sin esto, pedir en el
+   * tercer turno una terminal sobre la sesión que se encontró en el primero la abría en el home,
+   * y el modelo no reenvía el directorio que se le dio.
+   */
+  #knownSessions(history: readonly ChatMessage[]): SeenSession[] {
+    const byId = new Map<string, SeenSession>();
+    const opened: string[] = [];
+    for (const message of history) {
+      for (const ref of message.refs) {
+        if (ref.kind === 'workspace') opened.push(ref.workspaceId);
+        if (ref.kind !== 'session' && ref.kind !== 'terminal') continue;
+        const previous = byId.get(ref.sessionId);
+        byId.set(ref.sessionId, {
+          ref: { host: ref.host, provider: ref.provider, sessionId: ref.sessionId },
+          title: (ref.kind === 'session' ? ref.title : null) ?? previous?.title ?? null,
+          cwd: ref.cwd ?? previous?.cwd ?? null,
+          workspaceId: (ref.kind === 'terminal' ? ref.workspaceId : null) ?? previous?.workspaceId ?? null,
+        });
+      }
+    }
+    /*
+     * Un workspace abierto en un turno anterior le da a su sesión el `cwd` y el enlace de vuelta.
+     *
+     * La referencia `workspace` no dice de qué sesión es —eso lo sabe la base— así que se resuelve
+     * aquí, una vez por id y no dentro del bucle.
+     */
+    for (const workspaceId of new Set(opened)) {
+      const workspace = this.#deps.workspaces.find(workspaceId);
+      if (!workspace) continue;
+      const previous = byId.get(workspace.ref.sessionId);
+      byId.set(workspace.ref.sessionId, {
+        ref: workspace.ref,
+        title: previous?.title ?? workspace.title,
+        cwd: previous?.cwd ?? workspace.cwd,
+        workspaceId: workspace.id,
+      });
+    }
+    return [...byId.values()];
   }
 
   /**
