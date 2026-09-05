@@ -167,7 +167,10 @@ export class ChatService {
       cloudModel: model?.cloudId ?? null,
       capabilityCount: count,
       capabilityMode: this.#deps.directCapabilities && count > 0 && count <= room ? 'direct' : 'router',
-      capabilityRoom: Math.max(0, room),
+      // Lo que **queda**, no el cupo. El campo se llama «room» y la pantalla avisa cuando baja de
+      // tres: sirviendo el cupo entero, el aviso no saltaba nunca y el repliegue seguía siendo
+      // silencioso, que es justo lo que este campo venía a arreglar.
+      capabilityRoom: Math.max(0, room - count),
     };
   }
 
