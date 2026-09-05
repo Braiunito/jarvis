@@ -901,7 +901,7 @@ describe('CHAT · una sesión encontrada se lee y se puede continuar', () => {
  */
 describe('CHAT · lo que el hilo recuerda y lo que la pantalla enseña', () => {
   const variasSesiones = (): FakeSessionIndex => {
-    const filas = ['iod', 'pool', 'cámaras', 'backup', 'dns'].map((tema, indice) => indexRow({
+    const filas = ['iod', 'pool', 'cámaras', 'backup', 'dns'].map((tema) => indexRow({
       session_key: `local:claude:sid-${tema}`, session_id: `sid-${tema}`,
       title: `${tema}: lo que quedó a medias`, preview: `estábamos con ${tema}`,
     }));
