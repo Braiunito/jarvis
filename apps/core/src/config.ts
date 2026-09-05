@@ -286,6 +286,29 @@ export const config = {
   chatRetentionDays: Number(env['JARVIS_CHAT_RETENTION_DAYS'] || 90),
 
   /**
+   * Cuánto cuesta pensar, y cuánto se cargó.
+   *
+   * El proveedor no lo dice: una clave de proyecto recibe 403 al preguntar por el gasto de la
+   * cuenta. Así que se cuenta aquí y se le pone precio con esta tarifa, en dólares por millón de
+   * tokens y con la forma `modelo:entrada/caché/salida`. Los cacheados van aparte porque cuestan
+   * un orden de magnitud menos y son la mayor parte del prompt de una conversación.
+   *
+   * Los valores por defecto son los publicados en septiembre de 2026. Si cambian, se cambian aquí
+   * y **el histórico se recalcula solo**: lo que se guarda son los tokens, no el importe.
+   */
+  modelPrices: env['JARVIS_MODEL_PRICES']
+    || 'gpt-5-nano:0.05/0.005/0.40,gpt-5-mini:0.25/0.025/2.00,gpt-5:1.25/0.125/10.00',
+  /**
+   * Lo que se cargó en la cuenta, en dólares, y desde cuándo.
+   *
+   * Lo pone una persona: no se puede leer. Sin esto no se enseña ningún «te queda», porque un
+   * resto calculado sobre un presupuesto inventado es peor que no dar ninguno.
+   */
+  modelBudgetUsd: Number(env['JARVIS_MODEL_BUDGET_USD'] || 0),
+  modelBudgetSince: env['JARVIS_MODEL_BUDGET_SINCE'] || '',
+  modelSpendRetentionDays: Number(env['JARVIS_MODEL_SPEND_RETENTION_DAYS'] || 180),
+
+  /**
    * Un modelo guionizado en vez del de verdad. Existe para desarrollo y pruebas: deja ejercitar
    * la durabilidad de un plan sin red, sin credencial y sin gastar cuota.
    */

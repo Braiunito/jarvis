@@ -36,6 +36,7 @@ import { HybridModel, LOCAL_SYSTEM_PROMPT } from './assistant/hybrid.js';
 import { McpService } from './mcp/service.js';
 import { parseMcpServers } from './mcp/config.js';
 import { ChatService } from './chat/service.js';
+import { parseModelPrices, SpendService } from './spend/service.js';
 
 /**
  * El cerebro de casa: un `llama-server` en el bastión, API compatible con OpenAI.
@@ -44,9 +45,10 @@ import { ChatService } from './chat/service.js';
  * distinto: lo que a uno grande le da matiz, a éste le ocupa el contexto que necesita para
  * razonar. Y con más plazo, porque genera a unos 7 tokens por segundo y una API no.
  */
-function buildLocalModel(config: CoreConfig): AssistantModel | null {
+function buildLocalModel(config: CoreConfig, onUsage: (usage: ModelTurnUsage) => void): AssistantModel | null {
   if (!config.localModelBaseUrl) return null;
   return new OpenAiCompatibleModel({
+    onUsage,
     apiKey: config.localModelApiKey,
     baseUrl: config.localModelBaseUrl,
     model: config.localModelName || 'local',
@@ -72,19 +74,6 @@ function buildLocalModel(config: CoreConfig): AssistantModel | null {
      */
     ...(config.localModelTemperature !== '' ? { temperature: Number(config.localModelTemperature) } : {}),
     ...(config.localModelReasoningEffort ? { reasoningEffort: config.localModelReasoningEffort } : {}),
-    /*
-     * Con `JARVIS_VERBOSE` se dice dónde se va el tiempo de cada vuelta.
-     *
-     * `caché` es lo que el servidor NO tuvo que volver a leer. Si ese número es bajo en la segunda
-     * vuelta de un turno, se está pagando el prompt entero cada vez y el problema está en el
-     * servidor, no en el modelo.
-     */
-    ...(config.verbose ? {
-      onUsage: (usage: ModelTurnUsage) => console.log(
-        `[jarvis] modelo local · ${usage.elapsedMs} ms · prompt ${usage.promptTokens}`
-        + ` (caché ${usage.cachedTokens}) · generados ${usage.completionTokens}`,
-      ),
-    } : {}),
   });
 }
 
@@ -94,9 +83,10 @@ function buildLocalModel(config: CoreConfig): AssistantModel | null {
  * Un solo sitio donde se decide, porque el fallo que evita es el que no se ve: una credencial
  * puesta y un Assistant que sigue sin funcionar porque el core habla otro protocolo.
  */
-function buildCloudModel(config: CoreConfig): AssistantModel | null {
+function buildCloudModel(config: CoreConfig, onUsage: (usage: ModelTurnUsage) => void): AssistantModel | null {
   if (!config.cloudModelApiKey) return null;
   const options = {
+    onUsage,
     apiKey: config.cloudModelApiKey,
     baseUrl: config.cloudModelBaseUrl,
     model: config.cloudModelName,
@@ -146,6 +136,8 @@ export interface CoreServices {
   /** Las capacidades MCP que este core consume (ADR-009). */
   mcp: McpService;
   chat: ChatService;
+  /** Lo que cuesta pensar, contado en casa porque el proveedor no lo dice. */
+  spend: SpendService;
   imports: ImportService;
   titles: TitleService;
   metrics: MetricsService;
@@ -252,8 +244,38 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
    * escalada, porque no hay dos sitios entre los que escalar—, y añadir el local no le quita nada:
    * le pone delante quien piensa gratis.
    */
-  const localModel = buildLocalModel(config);
-  const cloudModel = buildCloudModel(config);
+  /**
+   * El contador de gasto.
+   *
+   * Se cablea a los dos escalones porque la pregunta que contesta —«¿cuánto llevo gastado?»— no
+   * distingue: lo que importa es el total, y el desglose por modelo es justo lo que enseña que
+   * escalar cuesta veinticinco veces más.
+   */
+  const spend = new SpendService({
+    db, clock,
+    prices: parseModelPrices(config.modelPrices),
+    budgetUsd: config.modelBudgetUsd,
+    ...(config.modelBudgetSince ? { since: config.modelBudgetSince } : {}),
+    retentionDays: config.modelSpendRetentionDays,
+  });
+
+  /** Apunta el gasto, y con `JARVIS_VERBOSE` cuenta además dónde se fue el tiempo de la vuelta. */
+  const meter = (source: 'local' | 'cloud') => (usage: ModelTurnUsage): void => {
+    spend.record({
+      model: usage.model,
+      source,
+      promptTokens: usage.promptTokens,
+      cachedTokens: usage.cachedTokens,
+      completionTokens: usage.completionTokens,
+    });
+    if (config.verbose) {
+      console.log(`[jarvis] ${source} · ${usage.elapsedMs} ms · prompt ${usage.promptTokens}`
+        + ` (caché ${usage.cachedTokens}) · generados ${usage.completionTokens}`);
+    }
+  };
+
+  const localModel = buildLocalModel(config, meter('local'));
+  const cloudModel = buildCloudModel(config, meter('cloud'));
   const hybrid = localModel || cloudModel ? new HybridModel({ local: localModel, cloud: cloudModel }) : null;
   const model = options.model !== undefined
     ? options.model
@@ -385,7 +407,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces, cwdResolver,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
-    plans, planSupervisor, retention, imports, titles, metrics, mcp, chat,
+    plans, planSupervisor, retention, imports, titles, metrics, mcp, chat, spend,
     close() {
       supervisor.stop();
       planSupervisor.stop();

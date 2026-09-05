@@ -1733,9 +1733,17 @@ a:hover { text-decoration: underline; }
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
   gap: 14px;
-  align-items: stretch;
-  /* El alto del área de trabajo menos el respiro de la página: lo que sobra es del hilo. */
-  min-height: calc(100vh - 190px);
+  /*
+   * Ocupa el alto que hay, y las columnas lo llenan.
+   *
+   * `.page` trae `align-content: start`, que para una pantalla de tarjetas es lo correcto —se
+   * apilan arriba y ya— y aquí dejaba el hilo midiendo lo que midiera su contenido, con medio
+   * viewport en gris debajo y el compositor flotando por la mitad de la pantalla. En una
+   * conversación el compositor va abajo del todo, siempre.
+   */
+  align-content: stretch;
+  height: 100%;
+  min-height: 0;
 }
 
 .chat-rail {
@@ -1797,16 +1805,48 @@ a:hover { text-decoration: underline; }
 
 .chat-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
 }
 
-.chat-head h2 { margin: 0 0 4px; font-size: 15px; }
+.chat-head-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
+.chat-head h2 {
+  margin: 0;
+  font-size: 15px;
+  /* Un título largo no puede empujar los distintivos fuera de la fila. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-head-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.chat-head-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+/* La puerta a la lista sólo existe donde la lista no cabe al lado. */
+.chat-head-list { display: none; }
+
+/* Lo que llevamos gastado: un distintivo que se abre, no un panel siempre presente. */
+.chat-spend { position: relative; }
+.chat-spend > button { cursor: pointer; }
+
+.chat-spend-detail {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: min(320px, calc(100vw - 32px));
+  box-shadow: var(--shadow-pop);
+}
+
+.chat-spend-models {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 3px;
+}
 
 .chat-messages {
   flex: 1;
@@ -1907,22 +1947,75 @@ a:hover { text-decoration: underline; }
 }
 
 @media (max-width: 900px) {
+  /*
+   * En estrecho, el hilo se queda con la pantalla entera y la lista se pide.
+   *
+   * Antes la lista era una tira horizontal arriba: ocupaba 132 px —un quinto de un móvil— en
+   * todos los mensajes para servir en uno de cada veinte, y encima empujaba el compositor hacia
+   * abajo justo cuando se quiere escribir. Es el mismo problema que ya resolvió el panel de
+   * detalle, así que se resuelve igual: hoja anclada abajo, velo detrás, y se va al elegir.
+   */
   .assistant-page {
     grid-template-columns: minmax(0, 1fr);
-    min-height: calc(100vh - 150px);
+    /*
+     * Sin `min-height` inventado.
+     *
+     * Restarle a `100vh` un número a ojo se pasaba de alto —no contaba la cabecera ni la barra
+     * inferior— y el compositor acababa por debajo del pulgar, medio tapado por la navegación. El
+     * área de trabajo ya reserva su sitio; aquí basta con ocupar el que hay.
+     */
+    min-height: 0;
   }
 
-  /*
-   * En el móvil la lista de hilos es una tira horizontal, no una columna.
-   *
-   * Ocupa dos líneas de alto en vez de un tercio del ancho, y el hilo abierto —que es a lo que se
-   * ha entrado— se queda con la pantalla entera.
-   */
-  .chat-rail { max-height: 132px; }
-  .chat-rail-list { grid-auto-flow: column; grid-auto-columns: 62%; overflow-x: auto; }
-  .chat-rail-list a { border: 1px solid var(--border); }
+  /* Una cabecera sin nada que decir no se queda ocupando una franja con su borde. */
+  .chat-head:empty { display: none; }
+
+  .chat-head-list { display: inline-flex; }
+  /* En un móvil la palabra sobra: el icono va con su etiqueta accesible. */
+  .chat-head-word { display: none; }
+  .chat-head-actions { width: 100%; margin-left: 0; }
+  .chat-head-actions .segmented { flex: 1; }
+
+  .chat-rail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 70;
+    max-height: min(70vh, 520px);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: 0;
+    box-shadow: 0 -14px 44px rgb(0 0 0 / 45%);
+    /* Respeta la barra del sistema para que la última conversación no quede bajo el gesto. */
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    animation: detail-sheet-in 160ms ease-out;
+    display: none;
+  }
+  .assistant-page.list-open .chat-rail { display: flex; }
+
+  .chat-rail-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 69;
+    background: rgb(0 0 0 / 45%);
+    border: 0;
+    padding: 0;
+    animation: detail-sheet-in 160ms ease-out;
+  }
+
+  .chat-rail-list a { min-height: var(--touch); align-content: center; }
   .chat-capabilities { display: none; }
   .chat-bubble, .chat-tool, .chat-approval { max-width: 100%; }
+
+  /* El compositor manda: es a lo que se ha venido, y no se persigue al llegar una respuesta. */
+  .chat-composer { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  .chat-composer textarea { font-size: 16px; }
+  .chat-send { min-width: var(--touch); min-height: var(--touch); justify-content: center; }
+}
+
+/* En ancho no hay hoja ni velo: la lista es la columna de siempre. */
+@media (min-width: 901px) {
+  .chat-rail-backdrop { display: none; }
 }
 
 .visually-hidden {

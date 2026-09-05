@@ -13,3 +13,4 @@ export * from './identity.js';
 export * from './import.js';
 export * from './mcp.js';
 export * from './chat.js';
+export * from './spend.js';

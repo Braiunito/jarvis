@@ -19,16 +19,17 @@
 import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { Approval, AutonomyMode, ChatMessage } from '@jarvis/contracts';
+import type { SpendSummary } from '@jarvis/contracts';
 import {
   useCapabilityCatalog, useConversation, useConversations, useCreateConversation,
-  useDeleteConversation, useResolveApproval, useSendMessage, useSetAutonomy,
+  useDeleteConversation, useResolveApproval, useSendMessage, useSetAutonomy, useSpend,
 } from '../api/queries.js';
 import { useChatStream } from '../api/chat-stream.js';
 import { useRoute } from '../router.js';
 import { Empty, ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, SOURCE_ICON, STATUS_ICON } from '../ui/icons.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
-import { Segmented } from '../ui/primitives.jsx';
+import { DataRow, Segmented } from '../ui/primitives.jsx';
 
 const AUTONOMY_OPTIONS: Array<{ value: AutonomyMode; label: string; hint: string }> = [
   {
@@ -44,22 +45,28 @@ const AUTONOMY_OPTIONS: Array<{ value: AutonomyMode; label: string; hint: string
   },
 ];
 
+/** El nombre corto de un modelo: lo que cabe en un distintivo sin dejar de identificarlo. */
+const shortModel = (model: string | null): string => model?.split('/').pop() ?? 'modelo';
+
 /**
- * De dónde salió esto.
+ * Con qué se contestó esto.
  *
- * Va en la burbuja y no en una leyenda porque la pregunta —«¿esto lo ha contestado el de casa o
- * ha costado dinero?»— se hace sobre una respuesta concreta, no sobre la conversación entera.
+ * Enseña **el modelo**, no dónde vive. Durante un tiempo puso «casa» y «nube», que era cierto
+ * cuando el primer escalón era un `llama-server` en el bastión; hoy los dos están fuera y esa
+ * etiqueta sería una mentira en cada mensaje. Lo que de verdad se quiere saber mirando una
+ * respuesta concreta es si la contestó el barato o costó veinticinco veces más, y eso lo dice el
+ * nombre.
  */
 function SourceBadge({ source, model }: { source: string | null; model: string | null }): JSX.Element | null {
   if (!source) return null;
-  const cloud = source === 'cloud';
+  const escalado = source === 'cloud';
   return (
     <span
-      className={`badge ${cloud ? 'warn' : 'ok'} tiny`}
-      title={model ? `${cloud ? 'Consultado fuera' : 'Pensado en casa'} con ${model}` : undefined}
+      className={`badge ${escalado ? 'warn' : 'ok'} tiny`}
+      title={escalado ? `Escalado: contestó ${model}` : `Contestó ${model}`}
     >
-      <Glyph icon={cloud ? SOURCE_ICON.cloud : SOURCE_ICON.local} />
-      {cloud ? 'nube' : 'casa'}
+      {escalado ? <Glyph icon={SOURCE_ICON.cloud} /> : null}
+      {shortModel(model)}
     </span>
   );
 }
@@ -151,6 +158,84 @@ function ApprovalCard({ approval, onDecide, pending }: {
   );
 }
 
+/**
+ * Lo que llevamos gastado.
+ *
+ * Dice «gastado», nunca «te queda en la cuenta», y la diferencia no es de estilo: **el proveedor
+ * no da el saldo** —una clave de proyecto recibe un 403 al pedirlo— así que esto son los tokens
+ * que este core ha visto pasar, con la tarifa que tiene puesta. Presentarlo como saldo sería
+ * inventarse un dato que alguien va a mirar justo antes de que la clave deje de funcionar.
+ *
+ * El resto en consultas sólo aparece si se declaró cuánto se cargó, y se calcula con la media de
+ * las vueltas de verdad. Sin presupuesto declarado se enseña sólo lo gastado, que es lo que se
+ * sabe.
+ */
+function SpendBadge({ spend }: { spend: SpendSummary }): JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  if (!spend.turns) return null;
+
+  const dinero = (usd: number): string => (usd < 0.01 ? `${(usd * 100).toFixed(2)} ¢` : `${usd.toFixed(2)} $`);
+  const gastadoPct = spend.budgetUsd ? Math.min(100, (spend.spentUsd / spend.budgetUsd) * 100) : 0;
+  // Amarillo a partir de tres cuartos y rojo en el último décimo: hay tiempo de reaccionar.
+  const tono = gastadoPct >= 90 ? 'danger' : gastadoPct >= 75 ? 'warn' : 'ok';
+
+  return (
+    <div className="chat-spend">
+      <button
+        type="button"
+        className={`badge ${spend.budgetUsd ? tono : 'neutral'} tiny`}
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        title="Estimado a partir de los tokens que ha visto este servidor. No es el saldo de la cuenta."
+      >
+        <Glyph icon={STATUS_ICON.gauge} />
+        {spend.remainingTurns !== null
+          ? `~${spend.remainingTurns.toLocaleString('es-ES')} consultas`
+          : dinero(spend.spentUsd)}
+      </button>
+
+      {open ? (
+        <div className="chat-spend-detail card">
+          <p className="tiny faint" style={{ margin: '0 0 8px' }}>
+            Estimado con los tokens que ha visto este servidor y la tarifa configurada.
+            <strong> No es el saldo de la cuenta</strong>: la clave de API no puede consultarlo.
+          </p>
+          <DataRow label="Gastado">
+            {dinero(spend.spentUsd)} en {spend.turns.toLocaleString('es-ES')} vueltas
+          </DataRow>
+          {spend.budgetUsd !== null ? (
+            <>
+              <DataRow label="De lo cargado">{dinero(spend.budgetUsd)}</DataRow>
+              <DataRow label="Queda">{dinero(spend.remainingUsd ?? 0)}</DataRow>
+            </>
+          ) : (
+            <p className="tiny faint" style={{ margin: '6px 0 0' }}>
+              Para saber cuánto queda, declara lo cargado en <code>JARVIS_MODEL_BUDGET_USD</code>.
+            </p>
+          )}
+          {spend.avgTurnUsd ? <DataRow label="Por vuelta">{dinero(spend.avgTurnUsd)}</DataRow> : null}
+
+          <div className="chat-spend-models">
+            {spend.byModel.map((entry) => (
+              <div key={`${entry.model}:${entry.source}`} className="row between tiny">
+                <span className="mono">{entry.model}</span>
+                <span className="faint">
+                  {entry.turns} · {entry.usd === null ? 'sin tarifa' : dinero(entry.usd)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {spend.unpriced.length ? (
+            <p className="tiny warn" style={{ margin: '8px 0 0' }}>
+              Sin tarifa configurada: {spend.unpriced.join(', ')}. Su gasto no está contado.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }): JSX.Element {
   if (message.role === 'tool') return <ToolTrace message={message} />;
 
@@ -201,7 +286,17 @@ export function AssistantScreen(): JSX.Element {
   const remove = useDeleteConversation();
   const resolve = useResolveApproval();
 
+  const spend = useSpend();
   const [draft, setDraft] = useState('');
+  /**
+   * La lista de conversaciones, en estrecho, como hoja.
+   *
+   * En un móvil el hilo abierto es a lo que se ha entrado, y una tira de títulos robándole un
+   * quinto de la pantalla estorba en todos los mensajes para servir en uno de cada veinte. Es el
+   * mismo problema que ya resolvió el panel de detalle, así que se resuelve igual: la lista se
+   * pide, tapa lo de detrás mientras se usa, y se va.
+   */
+  const [listOpen, setListOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
   /*
@@ -224,6 +319,17 @@ export function AssistantScreen(): JSX.Element {
     bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length, status]);
 
+  // Cada turno gasta, así que el contador se refresca al terminar uno y no cada pocos segundos.
+  useEffect(() => {
+    if (status === 'idle') void spend.refetch();
+  }, [status, messages.length]);
+
+  /** Elegir una conversación cierra la hoja: seguir viéndola tapando el hilo no ayuda a nadie. */
+  function open(id: string | null): void {
+    setListOpen(false);
+    route.navigate(id ? `/assistant/${id}` : '/assistant');
+  }
+
   function submit(event: React.FormEvent): void {
     event.preventDefault();
     const text = draft.trim();
@@ -243,16 +349,21 @@ export function AssistantScreen(): JSX.Element {
   const noModel = capabilities && !capabilities.localAvailable && !capabilities.cloudAvailable;
 
   return (
-    <div className="page assistant-page">
+    <div className={`page assistant-page ${listOpen ? 'list-open' : ''}`}>
+      {/* Velo: apaga el hilo de detrás para que se entienda que la hoja manda. Sólo en estrecho. */}
+      {listOpen ? (
+        <button
+          type="button"
+          className="chat-rail-backdrop"
+          aria-label="Cerrar la lista de conversaciones"
+          onClick={() => setListOpen(false)}
+        />
+      ) : null}
+
       <aside className="chat-rail">
         <div className="row between" style={{ marginBottom: 8 }}>
           <strong className="small">Conversaciones</strong>
-          <button
-            type="button"
-            className="btn small"
-            onClick={() => route.navigate('/assistant')}
-            disabled={!active}
-          >
+          <button type="button" className="btn small" onClick={() => open(null)} disabled={!active}>
             <Glyph icon={ACTION_ICON.send} />
             Nueva
           </button>
@@ -269,7 +380,7 @@ export function AssistantScreen(): JSX.Element {
                 className={item.id === active ? 'current' : undefined}
                 onClick={(event) => {
                   event.preventDefault();
-                  route.navigate(`/assistant/${item.id}`);
+                  open(item.id);
                 }}
               >
                 <span className="chat-rail-title">{item.title}</span>
@@ -310,39 +421,63 @@ export function AssistantScreen(): JSX.Element {
           <p className="note warn" role="status">
             <Glyph icon={ACTION_ICON.error} size={16} />
             <span>
-              No hay ningún modelo configurado en el core. Con <code>JARVIS_LOCAL_MODEL_BASE_URL</code> el
-              asistente piensa en casa; con <code>JARVIS_MODEL_API_KEY</code>, en la nube.
+              No hay ningún modelo configurado en el core. El asistente necesita al menos
+              <code> JARVIS_ASSISTANT_MODEL_BASE_URL</code> y su clave.
             </span>
           </p>
         ) : null}
 
+        {/*
+          * La cabecera sólo si tiene algo que decir.
+          *
+          * Sin conversación abierta ni modelo configurado se quedaba una franja con su borde y
+          * nada dentro, que en un móvil es una línea de pantalla gastada en no informar.
+          */}
+        {active || capabilities?.localAvailable || capabilities?.cloudAvailable ? (
         <header className="chat-head">
-          <div>
-            <h2>{stream.title ?? conversation?.title ?? 'Asistente'}</h2>
-            <div className="row tight small">
-              {capabilities?.localAvailable ? (
-                <span className="badge ok tiny" title={capabilities.localModel ?? undefined}>
-                  <Glyph icon={SOURCE_ICON.local} />
-                  {capabilities.localModel?.split('/').pop() ?? 'local'}
-                </span>
-              ) : null}
-              {capabilities?.cloudAvailable ? (
-                <span className="badge neutral tiny" title={`Escalada disponible: ${capabilities.cloudModel}`}>
-                  <Glyph icon={SOURCE_ICON.cloud} />
-                  {capabilities.cloudModel}
-                </span>
-              ) : null}
-              {capabilities?.capabilityCount ? (
-                <span className="badge neutral tiny">
-                  <Glyph icon={ACTION_ICON.capability} />
-                  {capabilities.capabilityCount} capacidades
-                </span>
-              ) : null}
-            </div>
+          <div className="chat-head-title">
+            {/* En estrecho, la puerta a la lista. En ancho no existe: la lista está al lado. */}
+            {/* Sólo si hay algo que listar, y sólo donde la lista no cabe al lado. */}
+            {(list.data?.conversations.length ?? 0) > 0 ? (
+              <button
+                type="button"
+                className="btn small chat-head-list"
+                onClick={() => setListOpen(true)}
+                aria-label="Ver las conversaciones"
+              >
+                <Glyph icon={NAV_ICON.runs} />
+              </button>
+            ) : null}
+            {/*
+              * El título del hilo, no el de la sección: la cabecera de la página ya pone
+              * «Asistente», y repetirlo debajo gasta una línea de un móvil para no decir nada.
+              */}
+            {active ? <h2>{stream.title ?? conversation?.title ?? 'Conversación'}</h2> : null}
+          </div>
+
+          <div className="chat-head-meta">
+            {capabilities?.localAvailable ? (
+              <span className="badge ok tiny" title={`Contesta ${capabilities.localModel}`}>
+                {shortModel(capabilities.localModel)}
+              </span>
+            ) : null}
+            {capabilities?.cloudAvailable ? (
+              <span className="badge neutral tiny" title={`Se escala a ${capabilities.cloudModel}, con tu permiso`}>
+                <Glyph icon={SOURCE_ICON.cloud} />
+                {shortModel(capabilities.cloudModel)}
+              </span>
+            ) : null}
+            {capabilities?.capabilityCount ? (
+              <span className="badge neutral tiny">
+                <Glyph icon={ACTION_ICON.capability} />
+                {capabilities.capabilityCount}
+              </span>
+            ) : null}
+            {spend.data ? <SpendBadge spend={spend.data} /> : null}
           </div>
 
           {active ? (
-            <div className="row tight">
+            <div className="chat-head-actions">
               <Segmented
                 label="Autonomía"
                 value={autonomy}
@@ -354,16 +489,16 @@ export function AssistantScreen(): JSX.Element {
               <button
                 type="button"
                 className="btn small danger"
-                onClick={() => {
-                  remove.mutate(active, { onSuccess: () => route.navigate('/assistant') });
-                }}
+                aria-label="Borrar la conversación"
+                onClick={() => remove.mutate(active, { onSuccess: () => open(null) })}
               >
                 <Glyph icon={ACTION_ICON.delete} />
-                Borrar
+                <span className="chat-head-word">Borrar</span>
               </button>
             </div>
           ) : null}
         </header>
+        ) : null}
 
         <div className="chat-messages">
           {!active ? (
@@ -415,9 +550,14 @@ export function AssistantScreen(): JSX.Element {
               }
             }}
           />
-          <button type="submit" className="btn primary" disabled={!draft.trim() || send.isPending || create.isPending}>
+          <button
+            type="submit"
+            className="btn primary chat-send"
+            disabled={!draft.trim() || send.isPending || create.isPending}
+            aria-label="Enviar"
+          >
             <Glyph icon={ACTION_ICON.send} />
-            Enviar
+            <span className="chat-head-word">Enviar</span>
           </button>
         </form>
       </section>

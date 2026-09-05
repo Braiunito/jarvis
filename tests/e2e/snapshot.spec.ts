@@ -48,6 +48,17 @@ test('capturas', async ({ page }, testInfo) => {
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-salud.png`, fullPage: false });
 
+  /*
+   * El Asistente, que es donde más se nota el ancho.
+   *
+   * En estrecho la lista de conversaciones es una hoja que se pide, no una tira permanente: la
+   * captura sirve justo para ver que el hilo se queda con la pantalla y que el compositor no se ha
+   * ido debajo del pulgar.
+   */
+  await nav(page, /^Asistente/).click();
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-asistente.png` });
+
   await nav(page, /^Inicio/).click();
   await page.waitForTimeout(1000);
   await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-inicio.png`, fullPage: false });

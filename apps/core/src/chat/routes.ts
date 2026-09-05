@@ -91,6 +91,15 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
     return reply.send({ servers, areas, capabilities });
   });
 
+  /**
+   * Lo que llevamos gastado, contado en casa.
+   *
+   * No es el saldo de la cuenta y la respuesta no finge serlo: el proveedor no lo da —una clave de
+   * proyecto recibe 403 al preguntarlo— así que esto son los tokens que este core ha visto pasar,
+   * con la tarifa que tiene configurada.
+   */
+  app.get('/api/spend', async (_request, reply) => reply.send(services.spend.summary()));
+
   app.get('/events/chat/:id', (request, reply) => {
     const { id } = request.params as { id: string };
     streamChat(request, reply, services, id);

@@ -8,7 +8,7 @@ import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type {
   Approval, Attachment, AutonomyMode, ChatCapabilities, ChatMessage, Conversation, Draft, Health,
-  HostCapabilities, McpCapability, McpServerState, Plan, PlanStep, Run, RunEvent,
+  HostCapabilities, McpCapability, McpServerState, Plan, PlanStep, Run, RunEvent, SpendSummary,
   SessionSearchResult, TargetPlan, TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
 import { api, get, post, put } from './client.js';
@@ -67,6 +67,7 @@ export const keys = {
   plans: (workspaceId: string) => ['plans', workspaceId] as const,
   plan: (planId: string) => ['plan', planId] as const,
   conversations: (workspaceId: string) => ['conversations', workspaceId] as const,
+  spend: ['spend'] as const,
   conversation: (id: string) => ['conversation', id] as const,
   capabilities: ['capabilities'] as const,
 };
@@ -699,3 +700,17 @@ export function useDeleteConversation() {
     },
   });
 }
+
+
+/**
+ * Lo que llevamos gastado.
+ *
+ * Se refresca al cambiar de conversación y poco más: es un contador acumulado, no un indicador en
+ * vivo, y verlo saltar mientras se lee una respuesta distrae de lo que se estaba leyendo.
+ */
+export const useSpend = (): UseQueryResult<SpendSummary> => useQuery({
+  queryKey: keys.spend,
+  queryFn: () => get<SpendSummary>('/api/spend'),
+  staleTime: 60_000,
+  refetchOnWindowFocus: false,
+});

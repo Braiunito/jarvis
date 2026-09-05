@@ -434,4 +434,36 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE plans ADD COLUMN escalate_for_step INTEGER;
     `,
   },
+  {
+    version: 12,
+    name: 'model_spend',
+    sql: `
+      -- Lo que cuesta pensar.
+      --
+      -- Se guardan **los tokens, no el precio**: los tokens son el hecho y el precio es un
+      -- parámetro que cambia y que además puede haberse configurado mal. Guardando el importe, un
+      -- error de tarifa se congela en el histórico y ya no hay forma de recalcularlo; guardando
+      -- los tokens, corregir la tarifa corrige también el pasado.
+      --
+      -- Existe porque la API no lo dice: una clave de proyecto no puede leer el saldo de la cuenta
+      -- —contesta 403, le falta el scope— así que la única forma honesta de saber cuánto se lleva
+      -- gastado es contarlo aquí, donde se gasta.
+      CREATE TABLE model_spend (
+        id                TEXT PRIMARY KEY,
+        at                TEXT NOT NULL,
+        model             TEXT NOT NULL,
+        -- Cuál de los dos escalones: el que contesta siempre o el de la escalada.
+        source            TEXT NOT NULL,
+        conversation_id   TEXT,
+        prompt_tokens     INTEGER NOT NULL,
+        -- Los que no hubo que volver a leer. Se cobran aparte y mucho más baratos, así que
+        -- mezclarlos con el resto haría que el gasto pareciera bastante mayor de lo que es.
+        cached_tokens     INTEGER NOT NULL,
+        completion_tokens INTEGER NOT NULL
+      );
+      CREATE INDEX idx_model_spend_at ON model_spend (at DESC);
+      CREATE INDEX idx_model_spend_conversation ON model_spend (conversation_id)
+        WHERE conversation_id IS NOT NULL;
+    `,
+  },
 ];
