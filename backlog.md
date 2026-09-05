@@ -260,8 +260,9 @@ Y de paso: que el distintivo de capacidades salga en ámbar con `108 · quedan 3
 
 Límite conocido y medido al cerrar IA-02b, no un fallo nuevo. Una sesión **sin workspace** que se
 buscó en un turno anterior se ofrece con la terminal sin directorio, así que arranca en el home en
-vez de en la carpeta del trabajo. Pasa **una de cada dos veces**, y la mitad no es aleatoria:
-depende de que el modelo se acuerde de pasar el `cwd` que ya vio.
+vez de en la carpeta del trabajo. **De los dos hilos que se midieron, pasó en uno** —son dos, no
+una tasa—, y no es azar del muestreo: depende de que el modelo se acuerde de pasar el `cwd` que ya
+vio, así que el caso existe siempre y lo que varía es si se da.
 
 La salida sería que `open_workspace` resolviera el `cwd` del índice en vez de fiarlo a que el
 modelo lo reenvíe —es el mismo criterio que ya se aplicó al `workspaceId` en `a088bf2`, una capa
