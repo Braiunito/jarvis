@@ -2011,6 +2011,170 @@ a:hover { text-decoration: underline; }
 }
 .md-table th { background: var(--bg-sunken); color: var(--text-strong); font-weight: 600; white-space: nowrap; }
 
+/* ------------------------------------------------------------- los artifacts */
+
+/*
+ * Un artifact `inline` es contenido dentro de la burbuja, no una tarjeta encima.
+ *
+ * Lleva un borde suave y su cabecera, lo justo para que se vea dónde empieza y dónde acaba lo que
+ * el asistente enseña, sin convertirlo en un objeto distinto de la respuesta que lo acompaña.
+ */
+.artifact {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.artifact-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.artifact-head > span:first-child { flex: 1 1 auto; min-width: 0; }
+/* La procedencia va en su propia línea: es texto, no un distintivo, y no compite con el título. */
+.artifact-caption { flex: 1 1 100%; }
+
+.artifact-body { padding: 10px; overflow-x: auto; }
+.artifact-body > .md { white-space: normal; }
+
+/*
+ * La pastilla que abre un panel o un modal.
+ *
+ * Es más alta que un botón normal porque lleva dos líneas —el título y qué hay dentro— y esa
+ * segunda línea es la que hace que se pulse sabiendo si detrás hay tres filas o trescientas.
+ */
+.artifact-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 5px 10px;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.artifact-chip:hover { border-color: var(--border-strong); background: var(--bg-sunken); }
+
+/*
+ * El HTML ejecutable, enmarcado y dicho.
+ *
+ * Es el único artifact que dibuja lo que quiere, así que es el único que puede parecerse a esta
+ * consola. No puede actuar —origen opaco, no alcanza nada de aquí— pero sí puede pedir una
+ * contraseña con una tarjeta que imite a las de verdad. El marco y la etiqueta son lo que separa
+ * «esto lo dice Jarvis» de «esto lo dibujó algo que Jarvis leyó».
+ */
+.artifact-html { display: grid; gap: 0; }
+.artifact-html-mark {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 7px 9px;
+  font-size: 11.5px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+.artifact-frame {
+  width: 100%;
+  height: min(60vh, 480px);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: #fff;
+  display: block;
+}
+
+/*
+ * El panel y el modal, componentes propios.
+ *
+ * No reutilizan `.detail-sheet` porque aquello no es un panel: por encima de 1180 px no tiene
+ * estilos —es una columna de un grid `main-side`— así que un diálogo con esas clases dejaría una
+ * tarjeta sin posicionar justo en la pantalla donde más sitio hay.
+ *
+ * El panel es **no modal** a propósito: se consulta mientras se sigue leyendo el hilo, y eso es
+ * exactamente lo que lo separa de un modal. Por eso tampoco lleva velo.
+ */
+.artifact-panel, .artifact-modal {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-pop);
+  animation: detail-sheet-in 160ms ease-out;
+}
+
+.artifact-panel {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 92vw);
+  border-right: 0;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+}
+
+.artifact-modal {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(920px, 94vw);
+  max-height: 88vh;
+  border-radius: var(--radius-lg);
+}
+
+.artifact-overlay { position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 45%); }
+
+.artifact-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.artifact-sheet-head h2, .artifact-sheet-head > .truncate {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 640;
+  color: var(--text-strong);
+  min-width: 0;
+}
+.artifact-sheet-body { padding: 12px; overflow: auto; flex: 1; min-height: 0; }
+/* Dentro de la hoja el artifact ya está enmarcado por ella: no hace falta un borde más. */
+.artifact-sheet-body > .artifact { border: 0; }
+.artifact-sheet-body > .artifact .artifact-head { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+
+/* En estrecho, el panel es una hoja de abajo: es donde llega el pulgar, como el resto de hojas. */
+@media (max-width: 900px) {
+  .artifact-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: 82vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-right: 1px solid var(--border-strong);
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+  .artifact-modal { width: 96vw; max-height: 90vh; }
+  .artifact-frame { height: min(52vh, 380px); }
+}
+
 .chat-tool { align-self: flex-start; max-width: 46rem; width: 100%; }
 
 .chat-tool-head {

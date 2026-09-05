@@ -18,7 +18,7 @@
  */
 import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import type { Approval, AutonomyMode, ChatMessage, ChatRef } from '@jarvis/contracts';
+import type { Approval, AutonomyMode, ChatArtifact, ChatMessage, ChatRef } from '@jarvis/contracts';
 import type { SpendSummary } from '@jarvis/contracts';
 import {
   useCapabilityCatalog, useConversation, useConversations, useDeleteConversation,
@@ -32,6 +32,7 @@ import {
   ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, SOURCE_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
 import { useAskAssistant } from '../ui/ask-assistant.jsx';
+import { ArtifactChip, InlineArtifact } from '../ui/artifact.jsx';
 import { Markdown } from '../ui/markdown.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { DataRow, Segmented } from '../ui/primitives.jsx';
@@ -332,10 +333,28 @@ function TerminalRef({ target }: { target: Extract<ChatRef, { kind: 'terminal' }
  * mitad del trabajo: quien pregunta quiere abrirla. Por eso cada referencia se pinta como algo
  * que se pulsa y vive dentro de la burbuja —es parte de la respuesta, no una lista aparte—.
  */
-function MessageRefs({ message }: { message: ChatMessage }): JSX.Element | null {
+function MessageRefs({ message, conversationId, bodies }: {
+  message: ChatMessage;
+  conversationId: string | null;
+  /** Los cuerpos de los `inline` que ya han llegado, por identificador. */
+  bodies: Map<string, ChatArtifact>;
+}): JSX.Element | null {
   const refs = message.refs;
   const terminals = refs.filter(
     (ref): ref is Extract<ChatRef, { kind: 'terminal' }> => ref.kind === 'terminal');
+
+  /*
+   * Los artifacts se reparten por **presentación**, no por tipo.
+   *
+   * Un `inline` es contenido: va como bloque debajo del texto, porque es parte de la respuesta.
+   * Un `panel` o un `modal` es una puerta: va como pastilla junto a las demás acciones. Es la
+   * misma distinción que separa la oferta de terminal de un enlace a un trabajo, y por eso se
+   * pintan en los mismos dos sitios.
+   */
+  const artifacts = refs.filter(
+    (ref): ref is Extract<ChatRef, { kind: 'artifact' }> => ref.kind === 'artifact');
+  const inline = artifacts.filter((ref) => ref.presentation === 'inline');
+  const opened = artifacts.filter((ref) => ref.presentation !== 'inline');
   /*
    * Las pastillas de acción: workspace, sesión y trabajo.
    *
@@ -358,11 +377,12 @@ function MessageRefs({ message }: { message: ChatMessage }): JSX.Element | null 
     .map((ref) => ref.runId));
   const legacyRuns = message.runIds.filter((runId) => !cited.has(runId));
 
-  if (!compact.length && !terminals.length && !legacyRuns.length) return null;
+  if (!compact.length && !terminals.length && !legacyRuns.length
+    && !inline.length && !opened.length) return null;
 
   return (
     <div className="chat-refs">
-      {compact.length || legacyRuns.length ? (
+      {compact.length || legacyRuns.length || opened.length ? (
         <div className="row tight">
           {compact.map((ref, index) => {
             if (ref.kind === 'workspace') {
@@ -391,8 +411,20 @@ function MessageRefs({ message }: { message: ChatMessage }): JSX.Element | null 
               Ver el trabajo
             </Link>
           ))}
+          {conversationId ? opened.map((ref) => (
+            <ArtifactChip key={`a:${ref.artifactId}`} conversationId={conversationId} target={ref} />
+          )) : null}
         </div>
       ) : null}
+
+      {conversationId ? inline.map((ref) => (
+        <InlineArtifact
+          key={`i:${ref.artifactId}`}
+          conversationId={conversationId}
+          target={ref}
+          artifact={bodies.get(ref.artifactId)}
+        />
+      )) : null}
       {terminals.map((ref, index) => (
         <TerminalRef key={`t:${index}:${ref.sessionId}`} target={ref} />
       ))}
@@ -400,7 +432,11 @@ function MessageRefs({ message }: { message: ChatMessage }): JSX.Element | null 
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }): JSX.Element {
+function MessageBubble({ message, conversationId, bodies }: {
+  message: ChatMessage;
+  conversationId: string | null;
+  bodies: Map<string, ChatArtifact>;
+}): JSX.Element {
   if (message.role === 'tool') return <ToolTrace message={message} />;
 
   if (message.role === 'event') {
@@ -429,7 +465,7 @@ function MessageBubble({ message }: { message: ChatMessage }): JSX.Element {
       {message.role === 'assistant'
         ? <div className="chat-bubble-text"><Markdown source={message.text} /></div>
         : <div className="chat-bubble-text">{message.text}</div>}
-      <MessageRefs message={message} />
+      <MessageRefs message={message} conversationId={conversationId} bodies={bodies} />
     </div>
   );
 }
@@ -479,6 +515,16 @@ export function AssistantScreen(): JSX.Element {
   for (const message of detail.data?.messages ?? []) merged.set(message.seq, message);
   for (const message of stream.messages) merged.set(message.seq, message);
   const messages = [...merged.values()].sort((a, b) => a.seq - b.seq);
+
+  /*
+   * Los cuerpos de los `inline`, de los dos sitios por los que pueden llegar: la carga inicial
+   * —para entrar a una conversación ya escrita— y el stream —para el turno que estás esperando—.
+   * Se funden por identificador, como los mensajes por `seq`, y por el mismo motivo: son la misma
+   * cosa contada por dos canales y el que llegue segundo no puede borrar al primero.
+   */
+  const artifactBodies = new Map<string, ChatArtifact>();
+  for (const artifact of detail.data?.artifacts ?? []) artifactBodies.set(artifact.id, artifact);
+  for (const artifact of stream.artifacts) artifactBodies.set(artifact.id, artifact);
 
   const conversation = detail.data?.conversation;
   const status = stream.status ?? conversation?.status ?? 'idle';
@@ -703,7 +749,10 @@ export function AssistantScreen(): JSX.Element {
           {detail.isLoading ? <Loading rows={4} shape="timeline" /> : null}
           {detail.error ? <ErrorNote error={detail.error} onRetry={() => void detail.refetch()} /> : null}
 
-          {messages.map((message) => <MessageBubble key={message.seq} message={message} />)}
+          {messages.map((message) => (
+            <MessageBubble key={message.seq} message={message}
+              conversationId={active} bodies={artifactBodies} />
+          ))}
 
           {approvals.map((approval) => (
             <ApprovalCard

@@ -12,10 +12,20 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ChatMessage } from '@jarvis/contracts';
+import type { ChatArtifact, ChatMessage } from '@jarvis/contracts';
 
 export interface ChatStreamState {
   messages: ChatMessage[];
+  /**
+   * Los cuerpos de los artifacts `inline` que venían pegados al mensaje.
+   *
+   * Llegan por aquí y no por una consulta aparte a propósito. El mensaje trae **punteros**, y si
+   * el cuerpo hubiera que pedirlo, el turno que acabas de esperar treinta segundos pintaría el
+   * bloque vacío hasta que algo disparara un refetch —y la consulta del hilo tiene
+   * `refetchOnWindowFocus: false`, así que podría no dispararse nunca—. El caso de entrar a una
+   * conversación ya escrita lo cubre la carga inicial; éste es el que se ve todos los días.
+   */
+  artifacts: ChatArtifact[];
   status: string | null;
   source: string | null;
   autonomy: string | null;
@@ -24,7 +34,8 @@ export interface ChatStreamState {
 }
 
 const EMPTY: ChatStreamState = {
-  messages: [], status: null, source: null, autonomy: null, title: null, connected: false,
+  messages: [], artifacts: [], status: null, source: null, autonomy: null, title: null,
+  connected: false,
 };
 
 export function useChatStream(conversationId: string | null): ChatStreamState {
@@ -41,10 +52,20 @@ export function useChatStream(conversationId: string | null): ChatStreamState {
     source.onopen = () => setState((previous) => ({ ...previous, connected: true }));
 
     source.addEventListener('chat.message', (event) => {
-      const message = JSON.parse((event as MessageEvent<string>).data) as ChatMessage;
+      /*
+       * El frame es aditivo: `data` sigue siendo el `ChatMessage` de siempre y sólo aparece una
+       * clave `artifacts` cuando el turno produjo alguno `inline`.
+       */
+      const payload = JSON.parse((event as MessageEvent<string>).data) as
+        ChatMessage & { artifacts?: ChatArtifact[] };
+      const { artifacts = [], ...message } = payload;
       if (seen.current.has(message.seq)) return;
       seen.current.add(message.seq);
-      setState((previous) => ({ ...previous, messages: [...previous.messages, message] }));
+      setState((previous) => ({
+        ...previous,
+        messages: [...previous.messages, message],
+        ...(artifacts.length ? { artifacts: [...previous.artifacts, ...artifacts] } : {}),
+      }));
       /*
        * Un mensaje puede traer una aprobación o un trabajo recién lanzado, y esos viven en otras
        * consultas. Refrescarlas aquí es lo que evita que la tarjeta de permiso tarde en aparecer

@@ -15,8 +15,11 @@ navegador. Ahí una dependencia buena vale su peso.
 
 El presupuesto es el del ADR-007: **400 KiB gzip**.
 
-**Dónde estamos: 219 KiB gzip** (medido el 2026-09-05 sobre `apps/web/dist`: 210 de JS y 9 de CSS).
-Quedan unos 180.
+**Dónde estamos: 221 KiB gzip** (medido el 2026-09-05 sobre `apps/web/dist`: 211 de JS y
+10 de CSS). Quedan unos 179.
+
+La cifra va en **KiB de 1024**, como el presupuesto del ADR-007. Contarla en miles da unos seis de
+más y la diferencia se nota cuando el margen aprieta, así que conviene medir siempre igual.
 
 Esta línea decía «hoy vamos por 156» y se quedó con la cifra del día que se escribió, mientras la
 tabla de abajo la desmentía cuatro párrafos más allá. No es una errata: una sesión estuvo a punto
@@ -81,12 +84,17 @@ No entran:
 | 2026-09-02 | `react-json-view-lite` | 2.5.0 | incluido en la línea anterior | UX-08, JSON plegable |
 | 2026-09-02 | `@axe-core/playwright` | 4.13.0 | 0 (sólo desarrollo) | UX-07, auditoría de accesibilidad |
 | 2026-09-05 | *(ninguno)* — `ui/markdown.tsx` propio | — | 217 → 219 KiB gzip (**+1,8 KiB**) | F1, formato en la burbuja |
+| 2026-09-05 | *(ninguno)* — `ui/artifact.tsx` propio | — | 219 → 221 KiB gzip (**+2.1 KiB**) | F2, artifacts en el hilo |
 
 El coste de los iconos es de 4 KiB para cuarenta siluetas porque se importan por nombre y el
 paquete es ESM: sólo viaja lo que se usa. Importar `import * as icons` costaría el paquete entero,
 así que no se hace.
 
-La última fila no es un alta, y por eso está: es la **medición de lo que se evitó**. Formatear las
+Las dos últimas filas no son altas, y por eso están: son la **medición de lo que se evitó**. Los
+artifacts —tabla, JSON, gráfico, panel y modal— salieron enteros de piezas que ya estaban: Radix
+Dialog, `react-json-view-lite` y `charts.tsx`. Cero dependencias nuevas.
+
+Y en cuanto al markdown: Formatear las
 respuestas del asistente con `react-markdown` + `remark-gfm` habría costado entre 40 y 55 KiB gzip
 por micromark y sus plugins; un renderizador propio del subconjunto que el prompt promete costó
 1,8 KiB. La decisión no se tomó por el tamaño sino porque un renderizador que devuelve nodos de

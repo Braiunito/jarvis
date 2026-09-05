@@ -7,8 +7,8 @@
 import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type {
-  Approval, Attachment, AutonomyMode, ChatCapabilities, ChatMessage, Conversation, Draft, Health,
-  HostCapabilities, McpCapability, McpServerState, Plan, PlanStep, Run, RunEvent, SpendSummary,
+  Approval, Attachment, AutonomyMode, ChatArtifact, ChatCapabilities, ChatMessage, Conversation,
+  Draft, Health, HostCapabilities, McpCapability, McpServerState, Plan, PlanStep, Run, RunEvent, SpendSummary,
   SessionSearchResult, TargetPlan, TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
 import { api, get, post, put } from './client.js';
@@ -608,6 +608,8 @@ export interface ConversationDetail {
   conversation: Conversation;
   messages: ChatMessage[];
   approvals: Approval[];
+  /** Los cuerpos de los `inline`, ya atados: la carga inicial no puede parpadear. */
+  artifacts: ChatArtifact[];
 }
 
 export interface CapabilityCatalog {
@@ -656,6 +658,25 @@ export const useConversation = (id: string | null): UseQueryResult<ConversationD
   enabled: Boolean(id),
   refetchOnWindowFocus: false,
   staleTime: 5_000,
+});
+
+/**
+ * El cuerpo de un artifact que no viene pegado al mensaje.
+ *
+ * Los `panel` y los `modal` se piden al abrirlos: no se enseñan hasta que alguien los pulsa y
+ * traerlos antes sería pagar por lo que casi nadie mira. `staleTime: Infinity` porque un artifact
+ * es inmutable —nace con el turno y no se edita—, así que volver a pedirlo no puede dar otra cosa.
+ */
+export const useArtifact = (
+  conversationId: string | null,
+  artifactId: string | null,
+): UseQueryResult<ChatArtifact> => useQuery({
+  queryKey: ['artifact', conversationId ?? 'none', artifactId ?? 'none'],
+  queryFn: () => get<ChatArtifact>(
+    `/api/chat/${conversationId as string}/artifacts/${artifactId as string}`),
+  enabled: Boolean(conversationId && artifactId),
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
 });
 
 /** Qué capacidades hay enchufadas. Cambian cuando alguien toca la configuración, o sea casi nunca. */

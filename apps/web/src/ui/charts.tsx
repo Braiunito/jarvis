@@ -121,7 +121,15 @@ export function Donut({ slices, total, caption, size = 132 }: {
           <div style={{ fontSize: 24, fontWeight: 680, letterSpacing: '-0.03em', color: 'var(--text-strong)' }}>
             {total}
           </div>
-          <div className="tiny muted">{caption}</div>
+          {/*
+            * El hueco del anillo es estrecho y la leyenda que lo ocupa no siempre la escribimos
+            * nosotros: desde que un artifact puede traer la suya, un texto un poco largo se salía
+            * por los dos lados del aro. Se acota al ancho del hueco —el diámetro interior menos su
+            * grosor— y se parte en dos líneas antes que desbordar.
+            */}
+          <div className="tiny muted" style={{ maxWidth: size * 0.62, overflowWrap: 'anywhere' }}>
+            {caption}
+          </div>
         </div>
       </div>
     </div>

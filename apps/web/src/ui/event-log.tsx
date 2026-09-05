@@ -211,7 +211,13 @@ function describe(event: RunEvent): Rendered {
  * array de mil elementos es más trabajo del que parece. Los estilos sí son nuestros —se le pasan
  * las clases del producto— para que no traiga su propia paleta.
  */
-const JSON_STYLES = {
+/**
+ * Se exporta para que el artifact `json` use el mismo visor y los mismos colores.
+ *
+ * No importa el CSS de la librería a propósito —ver abajo—, así que estos estilos son la única
+ * definición que hay: copiarlos en otro fichero sería tener dos JSON con dos aspectos.
+ */
+export const JSON_STYLES = {
   container: 'jsonview',
   basicChildStyle: 'json-row',
   label: 'json-label',
