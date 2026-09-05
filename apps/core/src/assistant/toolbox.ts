@@ -843,7 +843,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     const sessionId = asString(input['sessionId']);
 
     if (sessionId) {
-      const seen = this.#seen.get(sessionId);
+      const seen = this.#seen.get(sessionId) ?? this.#fromOpenWorkspace(input, sessionId);
       // El provider ya se validó antes de llegar aquí, con su propio error: ver `badProvider`.
       if (host && provider && (PROVIDERS as readonly string[]).includes(provider)) {
         return {
@@ -858,6 +858,24 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     }
     if (!fallback) return null;
     return { ref: fallback.ref, title: fallback.title, cwd: fallback.cwd, workspaceId: fallback.id };
+  }
+
+  /**
+   * Lo que se sabe de una sesión porque alguien ya la abrió.
+   *
+   * Última red, y la que de verdad salva la oferta de terminal. `search_sessions` trae el `cwd`
+   * pero no deja referencia —ocho botones bajo una respuesta no son una acción—, así que dos
+   * turnos después ese dato ya no existe en ninguna parte. El workspace sí: es una fila, tiene el
+   * directorio y da el enlace de vuelta. Una consulta a SQLite, sólo cuando falta el dato.
+   */
+  #fromOpenWorkspace(input: Record<string, unknown>, sessionId: string): SeenSession | null {
+    const host = asString(input['host']);
+    const provider = asString(input['provider']);
+    if (!host || !provider || !(PROVIDERS as readonly string[]).includes(provider)) return null;
+    const ref = { host, provider: provider as Provider, sessionId };
+    const workspace = this.#deps.workspaces?.findByRef(ref);
+    if (!workspace) return null;
+    return { ref, title: workspace.title, cwd: workspace.cwd, workspaceId: workspace.id };
   }
 
   /** Apunta lo que se sabe de una sesión, sin perder lo que ya se sabía. */

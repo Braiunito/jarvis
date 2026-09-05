@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type {
-  Draft, OpenWorkspaceRequest, Provider, UserIdentity, Workspace,
+  Draft, OpenWorkspaceRequest, Provider, SessionRef, UserIdentity, Workspace,
 } from '@jarvis/contracts';
 import { JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
@@ -130,6 +130,11 @@ export class WorkspaceService {
       payload: { provider: ref.provider, sessionId: ref.sessionId },
     });
     return { workspace, created: true };
+  }
+
+  /** El workspace de una sesión, si alguien la abrió alguna vez. Es lo que hace `open` idempotente. */
+  findByRef(ref: SessionRef): Workspace | null {
+    return this.#repository.findByRef(ref);
   }
 
   /** El workspace, o nada. Para quien pregunta por uno que puede haberse borrado. */
