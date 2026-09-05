@@ -83,6 +83,21 @@ export function securityHeaders(reply: FastifyReply, { isHtml }: { isHtml: boole
       "base-uri 'self'",
       "object-src 'none'",
       "frame-ancestors 'none'",
+      /*
+       * Y `frame-src` explícito, que es lo que impide que un artifact llame a casa.
+       *
+       * Un artifact HTML se pinta en un iframe aislado con origen opaco, así que no puede leer
+       * nada de aquí. Lo que sí puede es **navegarse a sí mismo** —`location = 'https://…?lo-ha-
+       * leído'`— y eso no lo bloquea ninguna directiva del propio iframe: la navegación de un
+       * contexto anidado se comprueba contra el `frame-src` **del documento que lo embebe**, o sea
+       * contra esta línea. Es la misma baliza que se excluyó de las imágenes del markdown, y por
+       * el mismo motivo: filtra la IP de quien lee y el hecho de que lo ha leído.
+       *
+       * Cae en `'self'` por el `default-src`, así que hasta ahora estaba cerrado **por herencia**.
+       * Se escribe explícito para que el día que alguien necesite embeber un mapa o un vídeo vea
+       * lo que está abriendo, en vez de abrirlo sin enterarse.
+       */
+      "frame-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
