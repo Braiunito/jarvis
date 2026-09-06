@@ -100,6 +100,27 @@ Al cerrar:
 const OUT_OF_BUDGET = 'Me quedé sin margen para seguir mirando en este turno. Lo que llevo '
   + 'consultado está arriba; vuelve a preguntarme y sigo desde ahí.';
 
+/**
+ * Cómo se decide cuánto pensar, cuando se pide `auto`.
+ *
+ * Va en un prompt aparte y muy corto a propósito: esta llamada existe para ser barata. Si costara
+ * lo que el turno, no ahorraría nada — y si tardara lo que el turno, se notaría más que lo que
+ * arregla. Las pistas son de forma, no de tema: lo que decide el esfuerzo no es de qué habla la
+ * pregunta sino cuántos pasos hay entre ella y la respuesta.
+ */
+const EFFORT_JUDGE_PROMPT = `Decides cuánto tiene que pensar un asistente antes de contestar.
+Responde SÓLO con una palabra: low, medium o high.
+
+low    — saludos, charla, dar las gracias; algo que ya está dicho en la conversación; pedir un
+         formato o un resumen de lo que ya se sabe; una única consulta obvia y directa.
+medium — hay que mirar dos o tres cosas y juntarlas; elegir entre opciones acotadas; explicar algo
+         que se sabe pero hay que ordenar.
+high   — hay que planear varios pasos; diagnosticar algo cuya causa no se ve directa; comparar
+         varias máquinas o sesiones; decidir algo que va a tener efectos sobre una máquina.
+
+Guíate por cuántos pasos hay entre la pregunta y la respuesta, no por lo largo que suene el tema.
+Ante la duda, medium.`;
+
 export class ScriptedModel implements AssistantModel {
   readonly id = 'scripted';
   readonly #maxSteps: number;
@@ -232,8 +253,22 @@ interface AnthropicMessage {
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 /** Lo que costó una vuelta contra el modelo. `cachedTokens` es lo que NO hubo que volver a leer. */
+/**
+ * Cuánto se le deja pensar antes de contestar.
+ *
+ * `auto` no es un nivel: es pedir que lo decida una pasada previa barata. Se guarda el nivel que
+ * salió, no el `auto`, porque lo que hay que poder auditar es **qué eligió**, no que se le dejó
+ * elegir. El fallo más probable de esto no es que se rompa, es que conteste siempre lo mismo — y
+ * eso, sin el dato de cada turno, se ve idéntico a que funcione.
+ */
+export const REASONING_EFFORTS = ['low', 'medium', 'high'] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+export const AUTO_EFFORT = 'auto';
+
 export interface ModelTurnUsage {
   model: string;
+  /** Con cuánto esfuerzo se pidió esta vuelta, si el destino lo admite. */
+  effort?: ReasoningEffort | null;
   promptTokens: number;
   cachedTokens: number;
   completionTokens: number;
@@ -627,6 +662,8 @@ export class OpenAiCompatibleModel implements AssistantModel {
   readonly #maxOutputTokensParam: string;
   readonly #temperature: number | null;
   readonly #reasoningEffort: string | null;
+  /** El esfuerzo elegido para el turno en curso, cuando se pide `auto`. */
+  #turnEffort: ReasoningEffort | null = null;
   readonly #onUsage: ((usage: ModelTurnUsage) => void) | null;
 
   constructor(options: AnthropicModelOptions) {
@@ -647,6 +684,15 @@ export class OpenAiCompatibleModel implements AssistantModel {
   }
 
   async decide(context: PlanContext, toolbox: AssistantToolbox): Promise<AssistantDecision> {
+    /*
+     * El esfuerzo se decide **una vez y para todo el turno**.
+     *
+     * Podría recalcularse en cada vuelta, pero entonces lo que se enseña arriba mientras piensa y
+     * lo que queda escrito de esa respuesta dirían cosas distintas, y no habría un nivel del que
+     * decir «éste costó». Una decisión por turno es la que se puede auditar.
+     */
+    this.#turnEffort = this.#reasoningEffort === AUTO_EFFORT ? await this.#judgeEffort(context) : null;
+
     const messages: OpenAiMessage[] = [
       { role: 'system', content: this.#systemPrompt },
       { role: 'user', content: renderContext(context) },
@@ -776,7 +822,61 @@ export class OpenAiCompatibleModel implements AssistantModel {
       cachedTokens: timings?.cache_n ?? usage?.prompt_tokens_details?.cached_tokens ?? 0,
       completionTokens: usage?.completion_tokens ?? 0,
       elapsedMs: Date.now() - started,
+      // Con qué esfuerzo se pidió. Es el dato que permite contestar «¿la pasada previa está
+      // eligiendo bien?» dentro de una semana, en vez de mirarlo pasar y perderlo.
+      effort: (REASONING_EFFORTS as readonly string[]).includes(this.#effortNow() ?? '')
+        ? this.#effortNow() as ReasoningEffort
+        : null,
     });
+  }
+
+  /** El esfuerzo con el que se pide **esta** llamada. Con `auto`, el que decidió la pasada previa. */
+  #effortNow(): string | null {
+    if (this.#reasoningEffort === AUTO_EFFORT) return this.#turnEffort;
+    return this.#reasoningEffort;
+  }
+
+  /**
+   * Una pasada previa barata que decide cuánto pensar en la de verdad.
+   *
+   * Cuesta una llamada corta —sin herramientas, con esfuerzo bajo y sitio para una palabra— y
+   * ahorra el turno entero cuando la pregunta no lo pedía. Un saludo no necesita razonamiento alto,
+   * y pagarlo en todos por si acaso es lo que hace que el asistente tarde minutos en decir hola.
+   *
+   * Si falla o contesta cualquier otra cosa, sale `medium`: quedarse sin respuesta por no saber
+   * cuánto pensar sería cambiar un coste por una avería.
+   */
+  async #judgeEffort(context: PlanContext): Promise<ReasoningEffort> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
+      try {
+        const response = await this.#fetch(`${this.#baseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.#apiKey}` },
+          body: JSON.stringify({
+            model: this.#model,
+            messages: [
+              { role: 'system', content: EFFORT_JUDGE_PROMPT },
+              { role: 'user', content: context.objective.slice(0, 1000) },
+            ],
+            reasoning_effort: 'low',
+            // Sitio para una palabra y para lo que piense antes de decirla. Con menos, en un modelo
+            // que razona la respuesta llega vacía y el juez decide siempre lo mismo por accidente.
+            [this.#maxOutputTokensParam]: 600,
+          }),
+        });
+        if (!response.ok) return 'medium';
+        const body = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
+        const said = (body.choices?.[0]?.message?.content ?? '').toLowerCase();
+        return REASONING_EFFORTS.find((level) => said.includes(level)) ?? 'medium';
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      return 'medium';
+    }
   }
 
   async #ask(messages: OpenAiMessage[], tools: ToolDefinition[]): Promise<OpenAiMessage> {
@@ -800,7 +900,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
            * inofensivo aquí: tumba la petición entera.
            */
           ...(this.#temperature !== null ? { temperature: this.#temperature } : {}),
-          ...(this.#reasoningEffort !== null ? { reasoning_effort: this.#reasoningEffort } : {}),
+          ...(this.#effortNow() !== null ? { reasoning_effort: this.#effortNow() } : {}),
           tools: tools.map((tool) => ({
             type: 'function',
             function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },

@@ -276,7 +276,8 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     });
     if (config.verbose) {
       console.log(`[jarvis] ${source} · ${usage.elapsedMs} ms · prompt ${usage.promptTokens}`
-        + ` (caché ${usage.cachedTokens}) · generados ${usage.completionTokens}`);
+        + ` (caché ${usage.cachedTokens}) · generados ${usage.completionTokens}`
+        + (usage.effort ? ` · esfuerzo ${usage.effort}` : ''));
     }
   };
 

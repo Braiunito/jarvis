@@ -250,6 +250,43 @@ function validateChart(parsed: unknown): ArtifactRejection | null {
 }
 
 /**
+ * Si esto ya se enseñó en este turno, aunque esté escrito con otras palabras.
+ *
+ * Medido en producción: a «¿qué puedes hacer?» el asistente presentó **cuatro veces** la misma
+ * lista, cambiando el título y una palabra del cuerpo —«marcador» por «marcadores»—. El memo de
+ * repeticiones no podía verlo porque compara argumentos y aquí diferían en una letra, y el tope de
+ * tres no lo evita: lo corta cuando ya se ha gastado.
+ *
+ * Se compara por **palabras y no por texto**: reformular es cambiar el orden y alguna palabra, no
+ * el contenido. Nueve de cada diez compartidas es el mismo cuadro escrito otra vez.
+ */
+export function samePresentation(a: string, b: string): boolean {
+  const words = (text: string): Set<string> => new Set(
+    text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .split(/[^a-z0-9]+/).filter((word) => word.length > 2),
+  );
+  const one = words(a);
+  const two = words(b);
+  /*
+   * En algo muy corto una palabra pesa demasiado para decidir por proporción, así que ahí se
+   * compara el texto y punto. El umbral es para cuadros de verdad, que es donde el modelo
+   * reformula.
+   */
+  if (one.size < 6 || two.size < 6) return a.trim() === b.trim();
+  let shared = 0;
+  for (const word of one) if (two.has(word)) shared += 1;
+  /*
+   * Jaccard: compartidas sobre el total distinto.
+   *
+   * 0,85 y no 0,9 porque el umbral tiene que aguantar textos cortos: dos listas idénticas de
+   * dieciocho palabras que difieren en una dan 0,895, y ésas son el caso que hay que cazar. Dos
+   * cuadros distintos del mismo tema comparten mucho menos —una tabla de discos frente a una lista
+   * de capacidades ronda 0,03— así que el margen es amplio por los dos lados.
+   */
+  return shared / (one.size + two.size - shared) >= 0.85;
+}
+
+/**
  * Qué es esto de verdad, cuando el modelo confundió los dos campos.
  *
  * Visto en producción: llamó con `kind: "panel"` y `presentation: "panel"`. Son dos enumerados

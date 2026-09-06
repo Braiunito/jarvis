@@ -12,11 +12,15 @@ import { openDatabase } from '../src/platform/db.js';
 import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
 import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
-import { ArtifactRepository, MAX_ARTIFACT_BYTES, previewOf, resolveKind } from '../src/chat/artifacts.js';
+import {
+  ArtifactRepository, MAX_ARTIFACT_BYTES, previewOf, resolveKind, samePresentation,
+} from '../src/chat/artifacts.js';
 import type {
   AssistantToolbox, PlanContext, ToolDefinition, ToolOutcome,
 } from '../src/assistant/types.js';
-import { OpenAiCompatibleModel, type FetchLike } from '../src/assistant/model.js';
+import {
+  OpenAiCompatibleModel, REASONING_EFFORTS, type FetchLike, type ModelTurnUsage,
+} from '../src/assistant/model.js';
 
 const user = { userId: 'u1', username: 'braian' };
 const NOW = '2026-09-05T12:00:00.000Z';
@@ -114,6 +118,50 @@ describe('ARTIFACT · un cuerpo mal formado se corrige, no se rechaza y ya', () 
     served(await caja.invoke('present', {
       kind: 'table', presentation: 'inline', title: 'Disco', body: table([{ host: 'zeus', libre: '40G' }]),
     }));
+  });
+});
+
+describe('ARTIFACT · lo mismo escrito de otra forma sigue siendo lo mismo', () => {
+  // Medido en producción: a «¿qué puedes hacer?» presentó cuatro veces la misma lista, cambiando
+  // el título y una palabra del cuerpo. El memo por argumentos no podía verlo.
+  const lista = 'Localizar sesiones de agente en toda la flota y abrir sus workspace como marcador.\n'
+    + 'Encargar trabajo al agente de sesión y supervisarlo; dura horas y sobrevive a reinicios.';
+  const reformulada = 'Localizar sesiones de agente en toda la flota y abrir sus workspace como marcadores.\n'
+    + 'Encargar trabajo al agente de sesión y supervisarlo; dura horas y sobrevive a reinicios.';
+
+  it('una palabra distinta no lo convierte en otro cuadro', () => {
+    expect(samePresentation(lista, reformulada)).toBe(true);
+  });
+
+  it('pero dos cuadros distintos del mismo tema siguen siendo dos', () => {
+    expect(samePresentation(lista, 'Disco por máquina: zeus 40G libres, bastion 12G, serverC 210G'))
+      .toBe(false);
+  });
+
+  it('repetir devuelve el que ya había y no gasta uno de los tres', async () => {
+    const caja = toolbox();
+    const primero = served(await caja.invoke('present', {
+      kind: 'markdown', presentation: 'panel', title: 'Qué puedes hacer', body: lista,
+    }));
+    const segundo = served(await caja.invoke('present', {
+      kind: 'markdown', presentation: 'panel', title: 'Capacidades', body: reformulada,
+    }));
+
+    expect(segundo['repeated']).toBe(true);
+    expect(segundo['artifactId']).toBe(primero['artifactId']);
+    // Un solo artifact colgado, no dos: el turno enseñó una cosa porque enseñó una cosa.
+    expect(caja.refs.filter((ref) => ref.kind === 'artifact')).toHaveLength(1);
+    expect(caja.repeats).toBe(1);
+  });
+
+  it('y quedan los tres huecos para lo que de verdad sea distinto', async () => {
+    const caja = toolbox();
+    await caja.invoke('present', { kind: 'markdown', presentation: 'inline', title: 'A', body: lista });
+    await caja.invoke('present', { kind: 'markdown', presentation: 'inline', title: 'A2', body: reformulada });
+    served(await caja.invoke('present', { kind: 'markdown', presentation: 'inline', title: 'B', body: 'disco y memoria de las tres máquinas' }));
+    served(await caja.invoke('present', { kind: 'markdown', presentation: 'inline', title: 'C', body: 'trabajos en marcha ahora mismo y su estado' }));
+
+    expect(caja.refs.filter((ref) => ref.kind === 'artifact')).toHaveLength(3);
   });
 });
 
@@ -365,5 +413,63 @@ describe('TURNO · el presupuesto cuenta lo que consulta, no lo que enseña', ()
     const summary = (decision as { summary: string }).summary;
     expect(summary).not.toContain('presupuesto');
     expect(summary).toContain('vuelve a preguntarme');
+  });
+});
+
+/**
+ * Cuánto se piensa lo decide una pasada previa, y hay que poder comprobar que decide de verdad.
+ *
+ * El fallo probable de esto no es que se rompa: es que conteste siempre lo mismo. Desde fuera se
+ * ve idéntico a que funcione, así que lo que se fija aquí es que **el nivel que sale cambia con la
+ * pregunta** y que llega a la telemetría, que es donde se podrá auditar dentro de una semana.
+ */
+describe('ESFUERZO · lo decide una pasada previa y queda anotado', () => {
+  const conJuez = (dice: string, usos: ModelTurnUsage[]) => {
+    let primera = true;
+    const enviados: Array<Record<string, unknown>> = [];
+    const fetchImpl = (async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      enviados.push(body);
+      const message = primera
+        ? { content: dice }
+        : { tool_calls: [{ id: 'c1', type: 'function', function: { name: 'finish', arguments: '{}' } }] };
+      primera = false;
+      const payload = { choices: [{ message }] };
+      return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
+    }) as unknown as FetchLike;
+    const model = new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'https://api.test', model: 'gpt-5-nano',
+      reasoningEffort: 'auto', onUsage: (u) => usos.push(u), fetchImpl,
+    });
+    return { model, enviados };
+  };
+
+  it('la pasada previa va sin herramientas y con esfuerzo bajo: existe para ser barata', async () => {
+    const usos: ModelTurnUsage[] = [];
+    const { model, enviados } = conJuez('high', usos);
+    await model.decide(contexto, new ContadorToolbox());
+
+    expect(enviados[0]?.['tools']).toBeUndefined();
+    expect(enviados[0]?.['reasoning_effort']).toBe('low');
+  });
+
+  it('y el turno de verdad se pide con lo que ella dijo', async () => {
+    for (const nivel of REASONING_EFFORTS) {
+      const usos: ModelTurnUsage[] = [];
+      const { model, enviados } = conJuez(nivel, usos);
+      await model.decide(contexto, new ContadorToolbox());
+
+      expect(enviados[1]?.['reasoning_effort']).toBe(nivel);
+      expect(usos.at(-1)?.effort).toBe(nivel);
+    }
+  });
+
+  it('si la pasada previa contesta cualquier cosa, se piensa lo normal en vez de romperse', async () => {
+    const usos: ModelTurnUsage[] = [];
+    const { model, enviados } = conJuez('no tengo ni idea', usos);
+    const decision = await model.decide(contexto, new ContadorToolbox());
+
+    expect(decision.kind).toBe('finish');
+    expect(enviados[1]?.['reasoning_effort']).toBe('medium');
   });
 });

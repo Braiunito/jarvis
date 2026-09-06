@@ -23,7 +23,7 @@ import { JarvisError, MCP_AREAS } from '@jarvis/contracts';
 import type { ArtifactPresentation, ChatRef, McpCapability } from '@jarvis/contracts';
 import { ARTIFACT_KINDS, ARTIFACT_PRESENTATIONS } from '@jarvis/contracts';
 import {
-  MAX_ARTIFACTS_PER_TURN, previewOf, resolveKind, type ArtifactRepository,
+  MAX_ARTIFACTS_PER_TURN, previewOf, resolveKind, samePresentation, type ArtifactRepository,
 } from '../chat/artifacts.js';
 import type { McpService } from '../mcp/service.js';
 import type { SessionService } from '../sessions/service.js';
@@ -777,6 +777,9 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   /** Los artifacts que este turno ha dejado, para atarlos al mensaje cuando cierre. */
   readonly #presented: string[] = [];
 
+  /** Y lo que decían, para que reformular lo mismo no cuente como enseñar otra cosa. */
+  readonly #presentedBodies: Array<{ id: string; body: string }> = [];
+
   /**
    * El catálogo de **este** toolbox.
    *
@@ -1014,6 +1017,29 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     if (!kind || !title || body === null) {
       return toolError('BAD_INPUT', 'faltan kind, title o body');
     }
+
+    /*
+     * Lo que ya se enseñó no se vuelve a enseñar, aunque venga escrito de otra forma.
+     *
+     * Se comprueba **antes** del tope, igual que el memo de consultas: repetir no debe gastar uno
+     * de los tres, porque no aporta nada que no esté ya colgado de la respuesta. Se le devuelve el
+     * mismo identificador para que sepa que sigue ahí y no lo intente por tercera vez.
+     */
+    const repetido = this.#presentedBodies.find((seen) => samePresentation(seen.body, body ?? ''));
+    if (repetido) {
+      this.#repeats += 1;
+      return {
+        type: 'observation',
+        content: {
+          ok: true,
+          artifactId: repetido.id,
+          repeated: true,
+          hint: 'esto ya lo has enseñado en este turno y sigue colgado de tu respuesta. '
+            + 'Escribe ya tu respuesta con finish, sin repetir su contenido en el texto',
+        },
+      };
+    }
+
     /*
      * El modelo confunde los dos enumerados, y cuando lo hace el cuerpo dice lo que es.
      *
@@ -1043,6 +1069,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     if ('code' in created) return toolError(created.code, created.message, created.hint);
 
     this.#presented.push(created.id);
+    this.#presentedBodies.push({ id: created.id, body });
     this.#refs.push({
       kind: 'artifact',
       artifactId: created.id,
@@ -1061,7 +1088,10 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         // pidió `inline` tiene que saber que se enseña de otra forma antes de escribir su frase.
         presentation: created.presentation,
         truncated: created.truncated,
-        hint: 'ya está colgado de tu respuesta: no repitas su contenido en el texto, preséntalo',
+        // «preséntalo» se podía leer como «vuelve a presentarlo», y es justo lo que hizo cuatro
+        // veces seguidas. La pista ahora dice qué toca ahora, que es escribir la respuesta.
+        hint: 'ya está colgado de tu respuesta y no hay que volver a enseñarlo. '
+          + 'Escribe tu respuesta con finish sin repetir su contenido en el texto',
       },
     };
   }
