@@ -105,6 +105,61 @@ export class ScriptedModel implements AssistantModel {
       await toolbox.invoke('open_terminal_offer', { reason: 'conviene mirarlo en vivo' });
     }
 
+    /*
+     * `@@artifact` ejercita lo que el asistente **enseña**, que no se puede ver de otra forma.
+     *
+     * Sin esto, el stack de desarrollo levanta el producto entero y no hay manera de mirar un
+     * artifact: las herramientas que consultan tienen su directiva desde el principio, pero
+     * presentar contenido no consulta nada y no aparecía por ningún camino. Se dejan tres, que
+     * son las tres formas de presentación, y una de ellas ejecuta JavaScript para que el marco
+     * y el aislamiento también se vean con los ojos.
+     */
+    if (context.objective.includes('@@artifact') && toolbox) {
+      await toolbox.invoke('present', {
+        kind: 'table',
+        presentation: 'inline',
+        title: 'Disco por máquina',
+        caption: 'de la última sonda de capacidades',
+        body: JSON.stringify({
+          columns: [
+            { key: 'host', label: 'Máquina' },
+            { key: 'libre', label: 'Libre', align: 'right' },
+            { key: 'uso', label: 'Uso', align: 'right' },
+          ],
+          rows: [
+            { host: 'bastion', libre: '40G', uso: '62%' },
+            { host: 'serverB', libre: '12G', uso: '88%' },
+            { host: 'serverC', libre: '210G', uso: '19%' },
+          ],
+        }),
+      });
+      await toolbox.invoke('present', {
+        kind: 'chart',
+        presentation: 'panel',
+        title: 'Reparto de trabajos',
+        body: JSON.stringify({
+          shape: 'donut',
+          caption: 'trabajos',
+          total: 9,
+          slices: [
+            { key: 'claude', label: 'Claude', value: 5 },
+            { key: 'codex', label: 'Codex', value: 3 },
+            { key: 'opencode', label: 'OpenCode', value: 1 },
+          ],
+        }),
+      });
+      await toolbox.invoke('present', {
+        kind: 'html',
+        presentation: 'panel',
+        title: 'Informe de la sonda',
+        caption: 'documento generado: no le des credenciales',
+        body: '<style>body{font:14px system-ui;color:#ddd;background:#111;padding:16px}'
+          + 'b{color:#7ab8ff}</style><h3>Sonda de la flota</h3>'
+          + '<p>Tres máquinas alcanzables, <b id="n">…</b> avisos.</p>'
+          + '<script>document.getElementById("n").textContent = 2 + 1;</script>',
+      });
+    }
+
     // `@@ask` ejercita el camino humano: preguntar, dormir, y seguir con lo que contestaron. La
     // respuesta tiene que llegar al paso siguiente; si no llega, el plan pregunta al vacío.
     if (context.objective.includes('@@ask') && !context.history.some((step) => step.kind === 'input')) {
