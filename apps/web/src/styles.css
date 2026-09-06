@@ -1916,6 +1916,20 @@ a:hover { text-decoration: underline; }
 .chat-status.danger { color: var(--danger); }
 
 /*
+ * El punto late mientras piensa.
+ *
+ * Es lo que distingue «está trabajando» de «así está la casa» sin añadir otro indicador: la línea
+ * es la misma y lo que cambia es que se mueve. Con `prefers-reduced-motion` se queda quieto —abajo
+ * hay una regla que apaga las animaciones— y el texto sigue diciendo lo mismo, que es lo que de
+ * verdad informa.
+ */
+.chat-status-dot.pulsing { animation: chat-pulse 1.4s ease-in-out infinite; }
+@keyframes chat-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.72); }
+}
+
+/*
  * La autonomía: visible siempre, pero en un chip.
  *
  * Sigue leyéndose de un vistazo en qué modo estás —que es la decisión que más cambia lo que va a

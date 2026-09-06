@@ -35,6 +35,37 @@ export const PERMISSION: Record<PermissionProfile, PermissionLabel> = {
 export const permissionName = (profile: string): string =>
   PERMISSION[profile as PermissionProfile]?.name ?? profile;
 
+/**
+ * Cuánto está pensando, dicho para quien mira.
+ *
+ * `low`, `medium` y `high` son las palabras de la API y no dicen nada de lo que va a pasar: lo
+ * que quiere saber quien lee es si esta pregunta le ha parecido fácil o si se está tomando su
+ * tiempo, porque eso es lo que explica que la respuesta tarde ocho segundos o treinta.
+ *
+ * El nivel lo decide una pasada previa barata que **no deja rastro en el hilo**: no llama a
+ * ninguna herramienta y no escribe ningún mensaje. Así que este indicador es el único sitio donde
+ * se ve que esa decisión existió, y por eso dice también el porqué en su ayuda.
+ */
+export const EFFORT: Record<string, { name: string; help: string; tone: 'ok' | 'neutral' | 'warn' }> = {
+  low: {
+    name: 'poco',
+    help: 'Le ha parecido una pregunta directa y no se va a entretener.',
+    tone: 'ok',
+  },
+  medium: {
+    name: 'lo normal',
+    help: 'Esfuerzo intermedio: ni una respuesta de memoria ni un análisis largo.',
+    tone: 'neutral',
+  },
+  high: {
+    name: 'a fondo',
+    help: 'Le ha parecido que esto pide pensar. Tarda más y cuesta más.',
+    tone: 'warn',
+  },
+};
+
+export const effortName = (effort: string): string => EFFORT[effort]?.name ?? effort;
+
 export interface StatusLabel {
   name: string;
   tone: 'neutral' | 'running' | 'warn' | 'ok' | 'danger';

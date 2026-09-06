@@ -27,6 +27,14 @@ export interface ChatStreamState {
    */
   artifacts: ChatArtifact[];
   status: string | null;
+  /**
+   * Con cuánto esfuerzo está pensando ahora mismo.
+   *
+   * Nulo cuando no está pensando y cuando el esfuerzo no lo decide él. Llega por el estado y no
+   * por el mensaje porque lo interesante es **verlo mientras pasa**: la pasada previa que lo elige
+   * no deja rastro en el hilo, así que si no se ve aquí no se ve en ninguna parte.
+   */
+  effort: string | null;
   source: string | null;
   autonomy: string | null;
   title: string | null;
@@ -34,8 +42,8 @@ export interface ChatStreamState {
 }
 
 const EMPTY: ChatStreamState = {
-  messages: [], artifacts: [], status: null, source: null, autonomy: null, title: null,
-  connected: false,
+  messages: [], artifacts: [], status: null, effort: null, source: null, autonomy: null,
+  title: null, connected: false,
 };
 
 export function useChatStream(conversationId: string | null): ChatStreamState {
@@ -81,7 +89,7 @@ export function useChatStream(conversationId: string | null): ChatStreamState {
 
     source.addEventListener('chat.state', (event) => {
       const next = JSON.parse((event as MessageEvent<string>).data) as {
-        status: string; source: string; autonomy: string; title: string;
+        status: string; source: string; autonomy: string; title: string; effort?: string | null;
       };
       setState((previous) => ({ ...previous, ...next }));
       // El estado también cambia la lista de la izquierda: el título y quién está pensando.

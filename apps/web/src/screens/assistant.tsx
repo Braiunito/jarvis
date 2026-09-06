@@ -33,7 +33,7 @@ import { Empty, ErrorNote, Link, Loading, relativeTime } from '../ui/bits.jsx';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, SOURCE_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
-import { PERMISSION, permissionName } from '../ui/labels.js';
+import { EFFORT, PERMISSION, permissionName } from '../ui/labels.js';
 import { useAskAssistant } from '../ui/ask-assistant.jsx';
 import { ArtifactChip, InlineArtifact } from '../ui/artifact.jsx';
 import { Composer } from '../ui/composer.jsx';
@@ -573,10 +573,36 @@ function AutonomyChip({ value, onChange, pending }: {
  * el índice y seis hosts en una palabra es un indicador que no se puede comprobar; aquí cada cosa
  * se cuenta con su número, y el que esté mal se lee.
  */
-function StatusLine({ hosts, capabilities }: {
+function StatusLine({ hosts, capabilities, thinking, effort }: {
   hosts: { reachable: boolean }[] | undefined;
   capabilities: ChatCapabilities | undefined;
+  thinking: boolean;
+  /** El nivel elegido para este turno, o nulo si no lo decide él. */
+  effort: string | null;
 }): JSX.Element | null {
+  /*
+   * Mientras piensa, la línea dice con cuánto esfuerzo.
+   *
+   * Ocupa el sitio de lo de siempre en vez de añadir un indicador nuevo: el modelo y las máquinas
+   * no cambian mientras dura un turno, y lo que sí cambia —y sólo se puede ver ahora— es esto. La
+   * pasada previa que elige el nivel no llama a ninguna herramienta y no escribe ningún mensaje,
+   * así que si no se ve aquí no se ve en ningún sitio.
+   *
+   * Cuando acaba, la línea vuelve. Un indicador que se queda diciendo «a fondo» después de
+   * contestar no informa de nada: informa de lo que pasó, y para eso está el hilo.
+   */
+  if (thinking) {
+    const nivel = effort ? EFFORT[effort] : null;
+    return (
+      <span className={`chat-status ${nivel?.tone ?? 'neutral'}`} title={nivel?.help}>
+        <span className="chat-status-dot pulsing" aria-hidden="true" />
+        <span className="truncate">
+          {nivel ? `pensando · ${nivel.name}` : 'pensando…'}
+        </span>
+      </span>
+    );
+  }
+
   if (!capabilities) return null;
   const responden = hosts?.filter((host) => host.reachable).length ?? null;
   const total = hosts?.length ?? 0;
@@ -826,7 +852,12 @@ export function AssistantScreen(): JSX.Element {
               <h2 className="truncate">
                 {active ? (stream.title ?? conversation?.title ?? 'Conversación') : 'Asistente'}
               </h2>
-              <StatusLine hosts={hosts.data?.hosts} capabilities={capabilities} />
+              <StatusLine
+                hosts={hosts.data?.hosts}
+                capabilities={capabilities}
+                thinking={thinking}
+                effort={stream.effort}
+              />
             </span>
           </div>
 
