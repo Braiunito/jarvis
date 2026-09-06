@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeSessionIndex, indexRow } from '@jarvis/testkit';
-import type { Plan, Workspace } from '@jarvis/contracts';
+import type { AutonomyMode, Plan, Workspace } from '@jarvis/contracts';
 import { openDatabase } from '../src/platform/db.js';
 import { fixedClock } from '../src/platform/clock.js';
 import { newRunId } from '../src/platform/ids.js';
@@ -49,13 +49,25 @@ const planOn = (workspace: Workspace): Plan => ({
   currentStep: 0, createdAt: NOW, updatedAt: NOW, finishedAt: null, summary: null,
 });
 
-const toolboxFor = (workspace: Workspace): CoreAssistantToolbox => new CoreAssistantToolbox({
+/**
+ * Un toolbox de plan, con su autonomía declarada.
+ *
+ * No la declaraba, y por eso `create_run` con perfil seguro devolvía un checkpoint directo: el gate
+ * leía `undefined`, no era «manual» ni «auto», y caía en «no preguntes». La prueba estaba en verde
+ * **por el fallo**. Ahora se declara `auto`, que es lo que hace que un perfil seguro vaya solo por
+ * el motivo que dice el producto y no por una omisión.
+ */
+const toolboxFor = (
+  workspace: Workspace,
+  autonomy: AutonomyMode = 'auto',
+): CoreAssistantToolbox => new CoreAssistantToolbox({
   plan: planOn(workspace),
   workspace,
   sessions: services.sessions,
   health: services.health,
   runs: services.runs,
   audit: services.audit,
+  autonomy,
   user,
 });
 
@@ -202,6 +214,32 @@ describe('las decisiones son las acciones que el core sabe ejecutar', () => {
         permissionProfile: 'safe', rationale: '',
       },
     });
+  });
+
+  it('en manual, hasta el perfil seguro pasa por tarjeta', async () => {
+    const outcome = await toolboxFor(openWorkspace(), 'manual').invoke('create_run', {
+      title: 'Reunir contexto', prompt: 'mira el log', permission_profile: 'safe',
+    });
+    expect(outcome).toMatchObject({ type: 'decision', decision: { kind: 'approval' } });
+  });
+
+  it('en automático, escribir sigue pidiendo tarjeta: es lo que promete el contrato', async () => {
+    const outcome = await toolboxFor(openWorkspace(), 'auto').invoke('create_run', {
+      title: 'Arreglarlo', prompt: 'toca el fichero', permission_profile: 'auto',
+    });
+    expect(outcome).toMatchObject({ type: 'decision', decision: { kind: 'approval' } });
+  });
+
+  it('una autonomía que no reconocemos pregunta, no deja pasar', async () => {
+    /*
+     * El caso de L-01 y el motivo de que el gate se escriba en negativo: una errata en el `.env`
+     * —`'Manual'`, `'automatico'`— no era ninguno de los dos valores esperados, así que el
+     * condicional escrito en positivo la dejaba pasar y se lanzaba trabajo de escritura sin firma.
+     */
+    const outcome = await toolboxFor(openWorkspace(), 'Manual' as AutonomyMode).invoke('create_run', {
+      title: 'Arreglarlo', prompt: 'toca el fichero', permission_profile: 'auto',
+    });
+    expect(outcome).toMatchObject({ type: 'decision', decision: { kind: 'approval' } });
   });
 
   it('sin restricciones no se concede por la vía rápida', async () => {
