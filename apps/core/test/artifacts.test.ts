@@ -641,3 +641,32 @@ describe('un cuerpo con forma no es texto libre, y una tabla se escribe como se 
     expect(JSON.parse(normalizeTable(canonica))).toEqual(JSON.parse(canonica));
   });
 });
+
+describe('la tolerancia no puede traer un silencio nuevo', () => {
+  it('una fila corta se le devuelve al modelo, no se rellena con huecos', () => {
+    /*
+     * Rellenar con `null` lo que falta convertía «te faltan celdas» en una celda vacía y en
+     * silencio, que es lo que fuimos a quitar con lo del `markdown`. Y era asimétrico: la misma
+     * tabla escrita como objetos sí recibía el error.
+     */
+    const corta = normalizeTable(JSON.stringify({
+      columns: ['maquina', 'estado', 'disco'],
+      rows: [['zeus', 'activa', '40G'], ['goro2', 'parada']],
+    }));
+    const fallo = validateBody('table', corta);
+
+    expect(fallo?.code).toBe('BAD_INPUT');
+    expect(fallo?.message).toContain('fila 2');
+    expect(fallo?.message).toContain('2 celdas');
+    expect(fallo?.message).toContain('3 columnas');
+  });
+
+  it('y una fila con celdas de más tampoco se traga en silencio', () => {
+    // El otro lado del mismo problema: sobran datos que no tienen columna donde ir.
+    const larga = normalizeTable(JSON.stringify({
+      columns: ['maquina', 'estado'],
+      rows: [['zeus', 'activa', 'sobra']],
+    }));
+    expect(validateBody('table', larga)?.message).toContain('3 celdas');
+  });
+});

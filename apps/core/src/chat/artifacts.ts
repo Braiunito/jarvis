@@ -195,6 +195,15 @@ function validateTable(parsed: unknown): ArtifactRejection | null {
   }
   const rows = parsed['rows'] as unknown[];
   for (const [index, row] of rows.entries()) {
+    if (Array.isArray(row)) {
+      // Llega aquí sólo si la normalización no la pudo emparejar: el número de celdas no casa con
+      // el de columnas. Se dice cuántas hay y cuántas se esperaban, que es lo accionable.
+      return {
+        code: 'BAD_INPUT',
+        message: `la fila ${index + 1} trae ${row.length} celdas y hay ${keys.length} columnas`,
+        hint: `las columnas declaradas son ${keys.join(', ')}`,
+      };
+    }
     if (!isRecord(row)) {
       return { code: 'BAD_INPUT', message: `la fila ${index + 1} no es un objeto` };
     }
@@ -414,6 +423,16 @@ export function normalizeTable(body: string): string {
   const keys = columns.map((column) => (isRecord(column) ? String(column['key'] ?? '') : ''));
   const rows = (parsed['rows'] as unknown[]).map((row) => {
     if (!Array.isArray(row)) return row;
+    /*
+     * Sólo si el número casa. Una fila que no casa se deja como venía.
+     *
+     * Rellenar con `null` lo que falta convertía «te faltan celdas» en una celda vacía, en
+     * silencio — y el silencio es exactamente lo que fuimos a quitar con lo del `markdown`. Peor:
+     * la misma tabla escrita como objetos **sí** recibía el error, así que dos formas de escribir
+     * lo mismo recibían dos tratos. Dejarla intacta hace que `validateTable` la vea y le diga al
+     * modelo qué fila y cuántas celdas le faltan, que es por donde aprende a mandarlas completas.
+     */
+    if (row.length !== keys.length) return row;
     // Una fila-lista se empareja por posición con las columnas, que es lo que significa.
     return Object.fromEntries(keys.map((key, index) => [key, row[index] ?? null]));
   });
