@@ -6,7 +6,9 @@
  * contrato entre ambos —qué se ve, qué se puede decidir— es lo que hace que un plan sea
  * reproducible y auditable. Si esto se mueve, se rompe el histórico.
  */
-import type { ChatRef, ModelSource, PermissionProfile, Provider } from '@jarvis/contracts';
+import type {
+  ChatRef, ModelSource, PermissionProfile, Provider, WorkflowEnvelope,
+} from '@jarvis/contracts';
 
 /** Lo que el modelo ve de un paso ya ocurrido. Resúmenes y referencias, nunca buffers. */
 export interface PlanHistoryEntry {
@@ -18,6 +20,16 @@ export interface PlanHistoryEntry {
   /** La evidencia se cita por id: el contenido se consulta con `get_run` si hace falta. */
   runId: string | null;
   errorCode: string | null;
+  /**
+   * Lo que el paso dejó, acotado.
+   *
+   * Va además del resumen porque el resumen mira cuatro claves conocidas —`summary`, `answer`,
+   * `error`, `status`— y un paso estimativo le cuenta al siguiente cosas que no están en esa lista:
+   * ahí el resumen sale nulo y el paso siguiente no se entera de nada. Se recorta por
+   * `MAX_STEP_OUTPUT_CHARS` y **se dice que se recorta**; lo que haga falta entero es evidencia y se
+   * pide con `get_run`.
+   */
+  output?: string | null;
 }
 
 /**
@@ -89,6 +101,32 @@ export interface PlanContext {
     workspaces: Array<{ id: string; title: string | null; host: string; provider: Provider }>;
     runs: Array<{ runId: string; status: string; title: string | null }>;
   };
+  /**
+   * El perímetro que una persona firmó para este workflow, si lo hay.
+   *
+   * Va en el contexto porque el modelo tiene que saber dentro de qué se mueve **antes** de proponer
+   * el paso siguiente: proponer algo que se sale y que el core convierta en tarjeta funciona, pero
+   * gasta un turno y una pregunta que no hacía falta. Un plan de los de antes no lo tiene, y
+   * entonces no se comprueba nada — que es distinto de comprobarlo y que pase todo.
+   */
+  envelope?: WorkflowEnvelope | null;
+  /**
+   * El esquema que se aprobó, con lo que aún no se sabía de cada paso.
+   *
+   * Es lo que convierte un paso `estimate` en algo que se puede atar: al llegar al paso k, el
+   * modelo ve qué se prometió ahí, qué se esperaba que quedara y qué incógnitas había, y con eso
+   * elige la herramienta concreta. Sin esto tendría que deducir el plan de los pasos ya hechos.
+   */
+  plannedSteps?: Array<{
+    ordinal: number;
+    title: string;
+    intent: string;
+    expects: string;
+    unknowns: string[];
+    writes: boolean;
+    /** `pending`, `current` o `done`: dónde está el turno dentro del plan. */
+    state: 'pending' | 'current' | 'done';
+  }>;
   /** Lo que dijo la persona cuando se le preguntó algo, sin usar todavía. */
   pendingInput: string | null;
   /** Aprobaciones vivas de este plan: pedir otra vez lo ya pedido es ruido. */
@@ -169,6 +207,32 @@ export type AssistantDecision =
    * de mandar el contexto fuera de casa no son decisiones del modelo que se está quedando corto.
    */
   | { kind: 'escalate'; reason: string }
+  /**
+   * Proponer el plan entero antes de tocar nada.
+   *
+   * Los pasos son **estimativos**: dicen qué se quiere conseguir y qué se espera que quede, no con
+   * qué se hará. Eso se decide al llegar a cada uno, y por eso lo que se firma es el perímetro y no
+   * la lista — un plan que va a corregirse no se puede firmar por su contenido.
+   */
+  | {
+      kind: 'workflow';
+      objective: string;
+      steps: Array<{ title: string; intent: string; expects: string; unknowns?: string[]; writes?: boolean }>;
+      hosts?: string[];
+      maxRuns?: number;
+      highestPermissionProfile: PermissionProfile;
+      capabilities?: string[];
+      rationale: string;
+    }
+  /**
+   * Corregir un workflow en marcha.
+   *
+   * Sólo toca pasos que no han empezado: lo hecho tiene un `output` del que cuelga el siguiente y
+   * una evidencia, así que reescribirlo no cambiaría lo que pasó, sólo lo que el plan dice que pasó.
+   */
+  | { kind: 'revision'; reason: string; changes: Array<Record<string, unknown>> }
+  /** Pausar, reanudar o cancelar un workflow propio. Cancelar no deshace lo hecho. */
+  | { kind: 'steer'; planId: string; op: 'pause' | 'resume' | 'cancel'; reason: string }
   | { kind: 'finish'; summary: string; evidenceRunIds?: string[] };
 
 /** Esquema JSON de la entrada de una herramienta, tal como lo espera la API del modelo. */

@@ -183,6 +183,14 @@ export interface CoreToolboxDeps {
    */
   capabilityWrites?: boolean;
   /**
+   * Si desde aquí se pueden proponer y gobernar workflows, y sobre qué conversación.
+   *
+   * Sólo la conversación: un plan que propusiera otro plan sería el motor llamándose a sí mismo, y
+   * lo que hace falta dentro de un plan es **atar** el paso que toca, que se hace con las
+   * herramientas de siempre.
+   */
+  plans?: { conversationId: string; workspaceId: string | null };
+  /**
    * Dónde se guardan los artifacts, y de qué conversación son.
    *
    * Opcional porque un plan no tiene hilo al que colgarlos: `present` no se le ofrece y no se
@@ -581,6 +589,85 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
  * ninguna máquina, y volver a abrirlo devuelve el mismo—. Una terminal viva es otra cosa y sigue
  * abriéndola una persona.
  */
+/**
+ * Proponer, corregir y gobernar un plan de varios pasos.
+ *
+ * Es **una** herramienta con tres operaciones y no tres herramientas, y el motivo es de presupuesto
+ * y no de estilo: el catálogo entero cabe bajo el tope de 128 funciones por los pelos —128 menos las
+ * propias menos los extras deja sitio para las 108 capacidades del sistema con dos huecos— y cada
+ * nombre nuevo se come uno. Tres nombres aquí apagarían el modo directo para toda la casa, en
+ * silencio, y lo único que se notaría es que el asistente va más lento.
+ */
+export const WORKFLOW_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
+  name: 'workflow',
+  description: 'Propón, corrige o gobierna un plan de varios pasos, para lo que no cabe en una '
+    + 'sola acción. Con `draft` propones el plan **entero y estimativo**: di qué quieres conseguir '
+    + 'en cada paso y qué esperas que quede, NO con qué herramienta lo harás — eso lo averiguarás '
+    + 'al llegar. Lo que no sepas todavía va en `unknowns`, y es lo más valioso del borrador: quien '
+    + 'lo aprueba tiene que ver qué queda por decidir. Lo que se aprueba es el **perímetro** —qué '
+    + 'máquinas, cuántos trabajos, con qué permiso, qué capacidades—, no la lista literal, así que '
+    + 'dentro de él podrás corregirte sin volver a preguntar. Con `revise` corriges los pasos que '
+    + 'aún no han empezado cuando lo que encuentras no cuadra con lo que suponías; si el cambio se '
+    + 'sale de lo aprobado, el servidor volverá a pedir permiso, así que dilo claro en `reason`. Con '
+    + '`steer` pausas, reanudas o cancelas uno tuyo. Cierra tu turno.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      op: { type: 'string', enum: ['draft', 'revise', 'steer'] },
+      objective: { type: 'string', description: 'Sólo para draft: qué se quiere conseguir en total.' },
+      steps: {
+        type: 'array',
+        description: 'Sólo para draft. Los pasos, en orden.',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Nombre corto, para la lista.' },
+            intent: { type: 'string', description: 'Qué se quiere conseguir aquí.' },
+            expects: { type: 'string', description: 'Qué habrá cuando termine, para saber si salió.' },
+            unknowns: { type: 'array', items: { type: 'string' }, description: 'Lo que aún no sabes.' },
+            writes: { type: 'boolean', description: 'Si este paso modificaría algo en una máquina.' },
+          },
+          required: ['title', 'intent', 'expects'],
+        },
+      },
+      hosts: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Sólo para draft: las máquinas que esperas tocar. Sólo las que ya has visto.',
+      },
+      max_runs: { type: 'integer', description: 'Sólo para draft: cuántos trabajos como mucho.' },
+      highest_permission_profile: { type: 'string', enum: ['safe', 'auto'] },
+      capabilities: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Sólo para draft: las capacidades del sistema que vas a necesitar, por su nombre.',
+      },
+      rationale: { type: 'string', description: 'Sólo para draft: por qué así y no de otra forma.' },
+      reason: { type: 'string', description: 'Para revise y steer: qué has descubierto que obliga a esto.' },
+      changes: {
+        type: 'array',
+        description: 'Sólo para revise. Cambios sobre pasos que aún no han empezado.',
+        items: {
+          type: 'object',
+          properties: {
+            op: { type: 'string', enum: ['replace', 'insert_after', 'drop'] },
+            ordinal: { type: 'integer' },
+            title: { type: 'string' },
+            intent: { type: 'string' },
+            expects: { type: 'string' },
+            writes: { type: 'boolean' },
+          },
+          required: ['op', 'ordinal'],
+        },
+      },
+      plan_id: { type: 'string', description: 'Sólo para steer: cuál.' },
+      action: { type: 'string', enum: ['pause', 'resume', 'cancel'], description: 'Sólo para steer.' },
+    },
+    required: ['op'],
+  },
+  decides: true,
+});
+
 export const OPEN_WORKSPACE_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
   name: 'open_workspace',
   description: 'Abre en Jarvis el workspace de una sesión, y deja el enlace listo para pulsar. No '
@@ -722,11 +809,14 @@ export function directCapacity(options: {
   capabilityWrites: boolean;
   canOpenWorkspaces: boolean;
   canEscalate: boolean;
+  /** Si desde aquí se pueden proponer y gobernar workflows. Cuenta un hueco como las demás. */
+  canWorkflow: boolean;
 }): number {
   const own = TOOL_DEFINITIONS.filter((tool) => options.scoped || !WORKSPACE_TOOL_NAMES.has(tool.name)).length;
   const extras = (options.capabilityWrites ? 1 : 0)
     + (options.canOpenWorkspaces ? 1 : 0)
-    + (options.canEscalate ? 1 : 0);
+    + (options.canEscalate ? 1 : 0)
+    + (options.canWorkflow ? 1 : 0);
   return (options.maxTools ?? 128) - own - extras;
 }
 
@@ -823,6 +913,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       capabilityWrites: Boolean(deps.mcp?.configured && deps.capabilityWrites),
       canOpenWorkspaces: Boolean(deps.workspaces),
       canEscalate: Boolean(deps.canEscalate),
+      canWorkflow: Boolean(deps.plans),
     });
     const direct = deps.capabilityTools ?? [];
     this.#direct = direct.length > 0 && direct.length <= room
@@ -836,6 +927,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       ...(deps.mcp?.configured && deps.capabilityWrites ? [REQUEST_CAPABILITY_TOOL] : []),
       ...(deps.workspaces ? [OPEN_WORKSPACE_TOOL] : []),
       ...(deps.canEscalate ? [ESCALATE_TOOL] : []),
+      ...(deps.plans ? [WORKFLOW_TOOL] : []),
     ]);
   }
 
@@ -986,6 +1078,95 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       }
       return toolError('TOOL_FAILED', (error as Error).message);
     }
+  }
+
+  /**
+   * Propone, corrige o gobierna un plan de varios pasos.
+   *
+   * Aquí no se valida el perímetro ni se toca la base: se traduce lo que dijo el modelo a la
+   * decisión que el core sabe persistir, y ya está. Construir el sobre, firmarlo y comprobar que
+   * una acción no se sale es de `plans/workflow.ts`, que es puro y se prueba sin levantar nada.
+   *
+   * Lo que sí se hace aquí es **rechazar lo que no se entiende antes de gastar un turno**: un
+   * `draft` sin pasos o un `steer` sin plan son errores que el modelo puede corregir en la vuelta
+   * siguiente si se le dice qué falta.
+   */
+  #workflow(input: Record<string, unknown>): ToolOutcome {
+    if (!this.#deps.plans) {
+      return toolError('NO_WORKFLOWS', 'aquí no se pueden proponer planes de varios pasos',
+        'haz lo que puedas en un paso, o dilo en tu respuesta');
+    }
+    const op = asString(input['op']);
+
+    if (op === 'draft') {
+      const steps = Array.isArray(input['steps']) ? input['steps'] : [];
+      const objective = asString(input['objective']);
+      if (!objective || steps.length === 0) {
+        return toolError('BAD_INPUT', 'un borrador necesita objetivo y al menos un paso',
+          'cada paso lleva title, intent y expects; lo que no sepas va en unknowns');
+      }
+      const limpios = steps.flatMap((raw) => {
+        const step = raw as Record<string, unknown>;
+        const title = asString(step['title']);
+        const intent = asString(step['intent']);
+        const expects = asString(step['expects']);
+        if (!title || !intent || !expects) return [];
+        return [{
+          title,
+          intent,
+          expects,
+          unknowns: Array.isArray(step['unknowns']) ? step['unknowns'].map(String) : [],
+          writes: step['writes'] === true,
+        }];
+      });
+      if (limpios.length !== steps.length) {
+        return toolError('BAD_INPUT', 'algún paso venía sin title, intent o expects',
+          'los tres son obligatorios: qué se llama, qué se quiere conseguir y qué habrá al terminar');
+      }
+      return {
+        type: 'decision',
+        decision: {
+          kind: 'workflow',
+          objective,
+          steps: limpios,
+          hosts: Array.isArray(input['hosts']) ? input['hosts'].map(String) : [],
+          maxRuns: typeof input['max_runs'] === 'number' ? input['max_runs'] : limpios.length,
+          highestPermissionProfile: asProfile(input['highest_permission_profile'], 'safe'),
+          capabilities: Array.isArray(input['capabilities']) ? input['capabilities'].map(String) : [],
+          rationale: asString(input['rationale']) ?? '',
+        },
+      };
+    }
+
+    if (op === 'revise') {
+      const changes = Array.isArray(input['changes']) ? input['changes'] : [];
+      const reason = asString(input['reason']);
+      if (!reason || changes.length === 0) {
+        return toolError('BAD_INPUT', 'una corrección necesita reason y al menos un cambio',
+          'di qué has descubierto que obliga a cambiar el plan');
+      }
+      return {
+        type: 'decision',
+        decision: { kind: 'revision', reason, changes: changes as Array<Record<string, unknown>> },
+      };
+    }
+
+    if (op === 'steer') {
+      const planId = asString(input['plan_id']);
+      const action = asString(input['action']);
+      const reason = asString(input['reason']);
+      if (!planId || !action || !reason) {
+        return toolError('BAD_INPUT', 'gobernar un plan necesita plan_id, action y reason');
+      }
+      if (action !== 'pause' && action !== 'resume' && action !== 'cancel') {
+        return toolError('BAD_INPUT', `no sé hacer «${action}» con un plan`,
+          'las acciones son pause, resume y cancel');
+      }
+      return { type: 'decision', decision: { kind: 'steer', planId, op: action, reason } };
+    }
+
+    return toolError('BAD_INPUT', `no sé hacer «${op ?? ''}» con un workflow`,
+      'las operaciones son draft, revise y steer');
   }
 
   /**
@@ -1196,6 +1377,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       case 'read_evidence': return this.#readEvidence(input);
       case 'get_changes': return this.#getChanges(input);
       case 'present': return this.#present(input);
+      case 'workflow': return this.#workflow(input);
       case 'list_capabilities': return this.#listCapabilities(input);
       case 'search_capabilities': return this.#searchCapabilities(input);
       case 'use_capability': return this.#useCapability(input);

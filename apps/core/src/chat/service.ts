@@ -21,8 +21,7 @@ import { createHash } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import type {
   Approval, AutonomyMode, ChatArtifact, ChatCapabilities, ChatMessage, ChatRef, Conversation,
-  ModelSource,
-  UserIdentity,
+  ModelSource, UserIdentity, WorkflowEnvelope,
 } from '@jarvis/contracts';
 import { AUTONOMY_MODES, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
@@ -44,10 +43,14 @@ import {
   CoreAssistantToolbox, directCapacity, type SeenSession, type ToolboxLimits,
 } from '../assistant/toolbox.js';
 import { ArtifactRepository, MAX_ARTIFACTS_PER_TURN } from './artifacts.js';
+import { buildEnvelope } from '../plans/workflow.js';
 import { ChatRepository, type NewMessage } from './repository.js';
 import { ChatEventBus } from './events-bus.js';
 
 /** Lo que se guarda de un resultado de herramienta en el hilo. Lo completo ya está en su sitio. */
+/** Lo que cabe en un workflow. Doce pasos es lo que el motor de planes sabe llevar. */
+const DEFAULT_MAX_WORKFLOW_STEPS = 12;
+
 const TOOL_ECHO_CHARS = 1200;
 /**
  * El único tipo de trabajo que se encola, y de momento no hay más.
@@ -58,6 +61,41 @@ const TOOL_ECHO_CHARS = 1200;
  */
 const CHAT_TURN_JOB = 'chat.turn';
 const TITLE_CHARS = 60;
+
+/**
+ * Lo que la conversación necesita del motor de planes para gobernar un workflow.
+ *
+ * Un tipo estructural y no `PlanService` entero a propósito. Son cuatro operaciones, y decirlo así
+ * es el contrato entre las dos mitades: quien escribe el motor sabe exactamente qué tiene que
+ * ofrecer, y quien lee esto no se tiene que leer setecientas líneas para saber qué se le pide.
+ *
+ * Es opcional en las dependencias: sin motor, la herramienta no se ofrece y el asistente no promete
+ * planes que nadie va a ejecutar.
+ */
+export interface WorkflowEngine {
+  /** Crea el plan en `draft`, con sus pasos estimativos y el sobre propuesto. No lo arranca. */
+  createWorkflow(input: {
+    conversationId: string;
+    workspaceId: string | null;
+    objective: string;
+    steps: ReadonlyArray<{ title: string; intent: string; expects: string; unknowns: string[]; writes: boolean }>;
+    envelope: WorkflowEnvelope;
+    autonomy: AutonomyMode;
+    user: UserIdentity;
+  }): { id: string };
+  /** Lo pasa de `draft` a `ready`: a partir de aquí el supervisor lo empuja. */
+  activate(planId: string, user: UserIdentity): void;
+  /** Corrige los pasos que no han empezado. Devuelve por qué no, si no se puede. */
+  revise(input: {
+    planId: string; reason: string; changes: ReadonlyArray<Record<string, unknown>>; user: UserIdentity;
+  }): { ok: true } | { ok: false; message: string };
+  /** Pausa, reanuda o cancela. Cancelar no deshace lo hecho. */
+  steer(input: {
+    planId: string; op: 'pause' | 'resume' | 'cancel'; reason: string; user: UserIdentity;
+  }): { ok: true } | { ok: false; message: string };
+  /** Para contarlo en el hilo y para el contexto de la casa. */
+  describe(planId: string): { objective: string; steps: number; status: string } | null;
+}
 
 export interface ChatServiceDeps {
   db: Db;
@@ -70,6 +108,12 @@ export interface ChatServiceDeps {
   /** Sin modelo no hay conversación, y la interfaz lo dice en vez de fallar al enviar. */
   model: HybridModel | null;
   mcp?: McpService;
+  /** El motor de planes, para los workflows. Sin él, la herramienta no se ofrece. */
+  plans?: WorkflowEngine;
+  /** La allowlist de la casa. Un sobre no puede firmar una máquina que el core no alcanza. */
+  hosts?: readonly string[];
+  /** Cuántos pasos admite un workflow. Un plan más largo que esto no se puede prometer. */
+  maxWorkflowSteps?: number;
   attachments?: AttachmentService;
   evidence?: EvidenceService;
   maxToolCalls?: number;
@@ -254,6 +298,7 @@ export class ChatService {
       capabilityWrites: Boolean(this.#deps.mcp?.configured),
       canOpenWorkspaces: true,
       canEscalate: model?.canEscalate === true,
+      canWorkflow: Boolean(this.#deps.plans),
     });
     return {
       localAvailable: Boolean(model?.localId),
@@ -652,6 +697,113 @@ export class ChatService {
         role: 'assistant', text: decision.summary, source, modelId, approvalId: approval.id, refs,
       });
       this.#repository.setStatus(id, 'waiting_approval');
+      return;
+    }
+
+    if (decision.kind === 'workflow') {
+      const engine = this.#deps.plans;
+      if (!engine) {
+        this.#say(id, {
+          role: 'event',
+          text: 'El asistente propuso un plan de varios pasos, pero este servidor no tiene motor de planes.',
+          refs,
+        });
+        this.#repository.setStatus(id, 'idle', 'local');
+        return;
+      }
+      const sobre = buildEnvelope({
+        objective: decision.objective,
+        steps: decision.steps,
+        ...(decision.hosts ? { hosts: decision.hosts } : {}),
+        ...(decision.maxRuns === undefined ? {} : { maxRuns: decision.maxRuns }),
+        highestPermissionProfile: decision.highestPermissionProfile,
+        ...(decision.capabilities ? { capabilities: decision.capabilities } : {}),
+      }, {
+        allowedHosts: this.#deps.hosts ?? [],
+        maxSteps: this.#deps.maxWorkflowSteps ?? DEFAULT_MAX_WORKFLOW_STEPS,
+      });
+      if (!sobre.ok) {
+        /*
+         * Un borrador que no cabe en la casa se le devuelve **como mensaje**, no como error mudo.
+         *
+         * Es la misma regla que en las herramientas: decirle qué no encaja le deja proponer otro en
+         * el turno siguiente, y a la persona le explica por qué no hay nada que aprobar.
+         */
+        this.#say(id, {
+          role: 'event',
+          text: `No se puede proponer ese plan: ${sobre.message}${sobre.hint ? `. ${sobre.hint}` : ''}`,
+          refs,
+        });
+        this.#repository.setStatus(id, 'idle', 'local');
+        return;
+      }
+
+      const plan = engine.createWorkflow({
+        conversationId: id,
+        workspaceId: conversation.workspaceId,
+        objective: decision.objective,
+        steps: decision.steps.map((step) => ({
+          title: step.title,
+          intent: step.intent,
+          expects: step.expects,
+          unknowns: step.unknowns ?? [],
+          writes: step.writes === true,
+        })),
+        envelope: sobre.envelope,
+        autonomy: conversation.autonomy,
+        user,
+      });
+
+      /*
+       * La tarjeta firma el **sobre**, no la lista de pasos.
+       *
+       * Por eso el `target` es el perímetro y el digest sale de él: un plan estimativo va a
+       * cambiar, y firmar los pasos lo invalidaría en la primera corrección. Lo que no puede
+       * cambiar sin volver a preguntar es dónde toca, cuánto gasta y con qué permiso.
+       */
+      const approval = this.#createApproval(conversation, {
+        actionType: 'workflow',
+        target: { planId: plan.id, objective: decision.objective, envelope: sobre.envelope },
+        summary: `Ejecutar un plan de ${decision.steps.length} pasos: ${clipText(decision.objective, 200)}`,
+        user,
+      });
+      this.#say(id, {
+        role: 'assistant',
+        text: `${decision.rationale}`.trim() || `Propongo un plan de ${decision.steps.length} pasos.`,
+        source, modelId, approvalId: approval.id, refs,
+      });
+      this.#repository.setStatus(id, 'waiting_approval');
+      return;
+    }
+
+    if (decision.kind === 'revision' || decision.kind === 'steer') {
+      const engine = this.#deps.plans;
+      const hecho = !engine
+        ? { ok: false as const, message: 'este servidor no tiene motor de planes' }
+        : decision.kind === 'revision'
+          ? engine.revise({
+            planId: String((decision.changes[0] ?? {})['plan_id'] ?? ''),
+            reason: decision.reason,
+            changes: decision.changes,
+            user,
+          })
+          : engine.steer({ planId: decision.planId, op: decision.op, reason: decision.reason, user });
+
+      /*
+       * Se cuenta en el hilo, siempre, salga o no.
+       *
+       * Un plan que se corrige callado es peor que uno rígido: quien lo aprobó tiene derecho a ver
+       * que cambió y por qué, y quien mira después necesita que el cambio esté donde está el resto
+       * de la conversación.
+       */
+      this.#say(id, {
+        role: 'event',
+        text: hecho.ok
+          ? `${decision.kind === 'revision' ? 'Plan corregido' : 'Plan actualizado'}: ${decision.reason}`
+          : `No se pudo: ${hecho.message}`,
+        refs,
+      });
+      this.#repository.setStatus(id, 'idle', 'local');
       return;
     }
 
