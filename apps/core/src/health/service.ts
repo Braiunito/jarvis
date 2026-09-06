@@ -13,6 +13,7 @@ import type { FleetService } from '../fleet/service.js';
 import type { SessionIndex } from '../sessions/index-client.js';
 import type { RunRepository } from '../runs/repository.js';
 import type { McpService } from '../mcp/service.js';
+import type { JobRepository } from '../platform/jobs.js';
 
 export interface HealthServiceDeps {
   db: Db;
@@ -22,6 +23,8 @@ export interface HealthServiceDeps {
   runs: RunRepository;
   /** Las capacidades MCP, si las hay. Opcional: sin servidores no hay salto que comprobar. */
   mcp?: McpService;
+  /** La cola de turnos, si esta casa la tiene. Sin ella no hay nada que vigilar aquí. */
+  jobs?: JobRepository;
   version: string;
 }
 
@@ -110,6 +113,21 @@ export class HealthService {
     checks['runs'] = stuck.length
       ? { status: 'degraded', code: 'CANCEL_UNCONFIRMED', message: `${stuck.length} run(s) waiting for cancellation to be confirmed`, detail: { runIds: stuck.map((run) => run.id) } }
       : { status: 'ok', detail: { active: this.#deps.runs.countActive() } };
+
+    /*
+     * La cola de turnos.
+     *
+     * Lo que se vigila es lo **fallido**, no lo pendiente: unos cuantos esperando es una casa
+     * ocupada, pero uno que agotó sus intentos es una pregunta que alguien hizo y nadie contestó,
+     * y sin esto no se enteraría nadie. El pendiente va en el detalle para poder distinguir «hay
+     * cola» de «hay atasco».
+     */
+    if (this.#deps.jobs) {
+      const counts = this.#deps.jobs.counts();
+      checks['chatJobs'] = counts.failed
+        ? { status: 'degraded', code: 'JOBS_FAILED', message: `${counts.failed} turno(s) quedaron sin contestar`, detail: { ...counts } }
+        : { status: 'ok', detail: { ...counts } };
+    }
 
     checks['runnerSweep'] = { status: this.#lastSweepAt ? 'ok' : 'unknown', lastAt: this.#lastSweepAt };
     checks['eventRetention'] = {

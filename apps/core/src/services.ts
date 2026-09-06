@@ -102,6 +102,8 @@ function buildCloudModel(config: CoreConfig, onUsage: (usage: ModelTurnUsage) =>
     : new OpenAiCompatibleModel(options);
 }
 import { PlanService } from './plans/service.js';
+import { JobRepository } from './platform/jobs.js';
+import { JobSupervisor } from './platform/job-supervisor.js';
 import { PlanSupervisor } from './plans/supervisor.js';
 import { ImportService } from './import/service.js';
 import { OpenAiCompatibleTitleModel, TitleService } from './workspaces/title.js';
@@ -133,6 +135,10 @@ export interface CoreServices {
   terminal: TerminalService;
   plans: PlanService;
   planSupervisor: PlanSupervisor;
+  /** El consumidor de la cola de turnos. Lo arranca `main`, como el de planes. */
+  jobSupervisor: JobSupervisor;
+  /** La cola en sí, para el salto de salud y para las pruebas. */
+  jobs: JobRepository;
   /** Las capacidades MCP que este core consume (ADR-009). */
   mcp: McpService;
   chat: ChatService;
@@ -316,7 +322,14 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
 
   const usage = new UsageService({ db, clock, sshConfig, ttlMs: config.usageTtlMs, probeTimeoutMs: config.usageProbeTimeoutMs });
   const metrics = new MetricsService({ db, clock });
-  const health = new HealthService({ db, clock, fleet, index, runs: runRepository, mcp, version: VERSION });
+  /*
+   * La cola durable de turnos.
+   *
+   * Va aquí y no dentro del chat porque el supervisor que la consume necesita el mismo
+   * repositorio, y dos instancias sobre la misma tabla serían dos ideas de qué está en marcha.
+   */
+  const jobs = new JobRepository(db);
+  const health = new HealthService({ db, clock, fleet, index, runs: runRepository, mcp, jobs, version: VERSION });
   /**
    * El barrido de spools le cuenta a Salud cuándo ocurrió.
    *
@@ -349,7 +362,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
    * aprobación firmada detrás.
    */
   const chat = new ChatService({
-    db, clock, runs, workspaces, sessions, health, audit,
+    db, clock, runs, workspaces, sessions, health, audit, jobs,
     model: options.model !== undefined
       ? (options.model instanceof HybridModel ? options.model : null)
       : hybrid,
@@ -372,6 +385,18 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const stuck = chat.reconcile();
   if (stuck > 0) console.warn(`[jarvis] ${stuck} conversación(es) se quedaron pensando en el arranque anterior`);
 
+  /*
+   * El único consumidor de la cola.
+   *
+   * `reconcile()` acaba de decidir qué trabajos son seguros de rehacer —los que no llegaron a
+   * escribir nada— y los ha dejado listos. Esto es lo que los termina.
+   */
+  const jobSupervisor = new JobSupervisor({
+    jobs,
+    clock,
+    handlers: { 'chat.turn': (job) => chat.resume(job.resourceId) },
+    onError: (error, job) => console.warn(`[jarvis] el turno de ${job.resourceId} falló: ${error.message}`),
+  });
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
 
   /**
@@ -421,10 +446,11 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces, cwdResolver,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
-    plans, planSupervisor, retention, imports, titles, metrics, mcp, chat, spend,
+    plans, planSupervisor, jobSupervisor, jobs, retention, imports, titles, metrics, mcp, chat, spend,
     close() {
       supervisor.stop();
       planSupervisor.stop();
+      jobSupervisor.stop();
       retention.stop();
       db.close();
     },

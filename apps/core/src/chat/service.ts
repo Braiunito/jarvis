@@ -27,6 +27,7 @@ import type {
 import { AUTONOMY_MODES, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId } from '../platform/ids.js';
+import type { JobRepository } from '../platform/jobs.js';
 import type { AuditLog } from '../platform/audit.js';
 import type { AttachmentService } from '../attachments/service.js';
 import type { EvidenceService } from '../evidence/service.js';
@@ -48,6 +49,14 @@ import { ChatEventBus } from './events-bus.js';
 
 /** Lo que se guarda de un resultado de herramienta en el hilo. Lo completo ya está en su sitio. */
 const TOOL_ECHO_CHARS = 1200;
+/**
+ * El único tipo de trabajo que se encola, y de momento no hay más.
+ *
+ * La regla para añadir otro: va a `jobs` lo que **una persona pidió y un reinicio perdería en
+ * silencio**. Lo que observa estado externo —el spool, los planes, la retención— se sigue mirando
+ * con su supervisor, porque ahí el estado está fuera y volver a mirarlo es gratis.
+ */
+const CHAT_TURN_JOB = 'chat.turn';
 const TITLE_CHARS = 60;
 
 export interface ChatServiceDeps {
@@ -91,6 +100,15 @@ export interface ChatServiceDeps {
   allowUnrestricted?: boolean;
   maxTools?: number;
   toolLimits?: Partial<ToolboxLimits>;
+  /**
+   * La cola durable de turnos. Opcional: sin ella el chat funciona como siempre.
+   *
+   * Es opcional a propósito y no por comodidad de las pruebas: lo que aporta es que un turno
+   * sobreviva a un reinicio, y eso sólo importa donde hay un proceso que se reinicia. Un servicio
+   * levantado para una prueba de otra cosa no necesita cola, y obligarle a tenerla haría que
+   * todas las pruebas hablaran de jobs.
+   */
+  jobs?: JobRepository;
 }
 
 export class ChatService {
@@ -139,18 +157,74 @@ export class ChatService {
    * pasó.
    */
   reconcile(): number {
+    const jobs = this.#deps.jobs;
+    const at = this.#deps.clock.nowIso();
+
+    /*
+     * Qué turnos se pueden rehacer, y es una minoría.
+     *
+     * Un turno escribe **según ocurre**: lo primero que deja en el hilo es la consulta a una
+     * herramienta, mucho antes de que exista respuesta. Y el memo que impide repetir esas
+     * consultas vive en el toolbox, que nace vacío. Así que rehacer un turno que ya escribió no lo
+     * reanuda: repite lo que preguntó y duplica el hilo, que es el bucle que costó 25 consultas
+     * con 12 repeticiones en la conversación que originó todo esto.
+     *
+     * Por eso sólo se rehace lo que **no llegó a escribir nada**, y eso se sabe comparando con la
+     * marca de agua que se guardó al encolar. Es el caso que la cola venía a cubrir —un reinicio
+     * entre que la persona escribe y el modelo contesta— y resulta ser también el único seguro.
+     */
+    const rehacer = new Set<string>();
+    for (const job of jobs?.orphans(CHAT_TURN_JOB) ?? []) {
+      const escribio = job.watermarkSeq === null || this.#lastSeq(job.resourceId) > job.watermarkSeq;
+      if (escribio) {
+        jobs?.abandon(job.id, 'el turno ya había escrito en el hilo: rehacerlo lo duplicaría', at);
+      } else {
+        jobs?.retry(job.id, 'el proceso se reinició antes de que el turno escribiera nada', at, at);
+        rehacer.add(job.resourceId);
+      }
+    }
+
     const stuck = this.#deps.db
       .prepare("SELECT id FROM conversations WHERE status = 'thinking'")
       .all() as Array<{ id: string }>;
     for (const { id } of stuck) {
-      this.#repository.append(id, {
-        role: 'event',
-        text: 'El servidor se reinició mientras el asistente pensaba, así que ese turno se perdió. '
-          + 'Vuelve a preguntar cuando quieras.',
-      });
+      /*
+       * Al que se va a rehacer no se le cuenta que se perdió, porque no se ha perdido.
+       *
+       * Se le devuelve igualmente a `idle` en vez de dejarlo en `thinking` esperando: si el
+       * supervisor no llegara a cogerlo, la conversación quedaría diciendo «pensando…» para
+       * siempre, que es exactamente el fallo que este método existía para evitar. Cuando el
+       * trabajo se ejecute, el turno la volverá a poner a pensar.
+       */
+      if (!rehacer.has(id)) {
+        this.#repository.append(id, {
+          role: 'event',
+          text: 'El servidor se reinició mientras el asistente pensaba, así que ese turno se perdió. '
+            + 'Vuelve a preguntar cuando quieras.',
+        });
+      }
       this.#repository.setStatus(id, 'idle', 'local');
     }
     return stuck.length;
+  }
+
+  /**
+   * La clave con la que este turno lanza trabajo, para que reintentarlo no lance dos.
+   *
+   * El id del job es estable durante todo el turno. Sin cola se cae a contar mensajes, que es lo
+   * que había: no empeora donde no la hay, pero tampoco arregla nada allí.
+   */
+  #turnKey(id: string): string {
+    const job = this.#deps.jobs?.alive('conversation', id, CHAT_TURN_JOB);
+    return job ? `job:${job.id}` : `chat:${id}:${this.#repository.messages(id).length}`;
+  }
+
+  /** Por dónde va el hilo. `0` si no tiene mensajes, que es menos que cualquier marca de agua. */
+  #lastSeq(conversationId: string): number {
+    const row = this.#deps.db
+      .prepare('SELECT COALESCE(MAX(seq), -1) AS seq FROM chat_messages WHERE conversation_id = ?')
+      .get(conversationId) as { seq: number };
+    return row.seq;
   }
 
   // ---- consulta -----------------------------------------------------------
@@ -307,6 +381,20 @@ export class ChatService {
     if (conversation.messageCount === 0) {
       this.#repository.setTitle(id, body.slice(0, TITLE_CHARS) + (body.length > TITLE_CHARS ? '…' : ''));
     }
+    /*
+     * La intención queda escrita **antes** de empezar a pensar.
+     *
+     * Éste es el punto que justifica la cola entera: entre esta línea y la primera fila que
+     * escriba el turno, lo que la persona pidió sólo existía en un `Map` en memoria. Un reinicio
+     * ahí no dejaba ni rastro de que hubiera que hacer nada.
+     */
+    this.#deps.jobs?.enqueue({
+      kind: CHAT_TURN_JOB,
+      resourceType: 'conversation',
+      resourceId: id,
+      watermarkSeq: message.seq,
+      at: this.#deps.clock.nowIso(),
+    });
     this.bus.notify(id);
     void this.#kick(id, user);
     return message;
@@ -327,6 +415,23 @@ export class ChatService {
     }
   }
 
+  /**
+   * Retoma un turno que quedó encolado y sin hacer, después de un reinicio.
+   *
+   * La identidad sale de quien creó la conversación, no de una sesión abierta: cuando esto se
+   * ejecuta puede no haber nadie conectado. Es la misma persona que escribió el mensaje que quedó
+   * sin contestar, así que el trabajo se hace en su nombre y la auditoría lo cuenta como suyo.
+   *
+   * Sólo lo llama el supervisor, y sólo con trabajos que `reconcile()` ya declaró seguros de
+   * rehacer: aquí no se vuelve a comprobar la marca de agua porque la decisión ya está tomada y
+   * repetirla en dos sitios es como se acaban desincronizando.
+   */
+  async resume(conversationId: string): Promise<void> {
+    const conversation = this.#repository.find(conversationId);
+    if (!conversation) return;
+    await this.#kick(conversationId, { userId: conversation.createdBy, username: conversation.createdBy });
+  }
+
   /** Encola un turno. Si ya hay uno corriendo, éste espera: nunca dos a la vez sobre el mismo hilo. */
   #kick(id: string, user: UserIdentity): Promise<void> {
     const running = this.#turns.get(id);
@@ -336,6 +441,10 @@ export class ChatService {
     this.#turns.set(id, next);
     const release = (): void => {
       if (this.#turns.get(id) === next) this.#turns.delete(id);
+      // El turno acabó —bien o mal—, así que lo que se pidió ya no está pendiente. Se cierra aquí
+      // y no dentro de `#turn` porque aquí es donde se sabe que no queda nada encadenado detrás.
+      const alive = this.#deps.jobs?.alive('conversation', id, CHAT_TURN_JOB);
+      if (alive) this.#deps.jobs?.finish(alive.id, this.#deps.clock.nowIso());
     };
     next.then(release, release);
     return next;
@@ -531,7 +640,16 @@ export class ChatService {
         workspaceId: conversation.workspaceId,
         prompt: decision.prompt,
         permissionProfile: decision.permissionProfile,
-        idempotencyKey: `chat:${id}:${this.#repository.messages(id).length}`,
+        /*
+         * La clave es del trabajo encolado, no de cuántos mensajes lleva el hilo.
+         *
+         * Contando mensajes, la clave **cambiaba sola**: si el core caía entre `runs.create()` y
+         * el `append()` que escribe el resultado, al reintentar el hilo tenía un mensaje menos y
+         * salía otra clave, así que se lanzaba un segundo trabajo por lo mismo. El id del job es
+         * estable durante todo el turno, que es justo lo que una clave de idempotencia necesita
+         * ser. Sin cola se cae a lo de antes: no empeora donde no la hay.
+         */
+        idempotencyKey: this.#turnKey(id),
       }, user, `chat:${id}`);
       this.#say(id, {
         role: 'assistant',

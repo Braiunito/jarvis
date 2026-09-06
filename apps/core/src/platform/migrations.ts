@@ -534,4 +534,44 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE plans ADD COLUMN autonomy TEXT NOT NULL DEFAULT 'manual';
     `,
   },
+  {
+    version: 16,
+    name: 'chat_turn_jobs',
+    sql: `
+      -- La cola despierta, y sólo para lo que un reinicio perdería en silencio.
+      --
+      -- La tabla existe desde la v2 y nunca se usó. No se despierta como cola distribuida —sigue
+      -- habiendo **un solo consumidor**, así que ADR-002 se mantiene— sino como registro durable
+      -- de intención: hoy un turno vive en un \`Map\` en memoria, de modo que si el proceso muere
+      -- entre que la persona escribe y el modelo contesta, lo que pidió **no existe en ningún
+      -- sitio**. \`reconcile()\` puede decir que se perdió; no puede saber que hubo que hacerlo.
+      --
+      -- \`leases\` se queda vacía a propósito y esto no es un olvido: un lease sirve para repartir
+      -- trabajo entre varios consumidores, y aquí no hay varios. El día que los haya, la tabla
+      -- está.
+
+      -- Desde qué punto de la conversación se encoló, para saber si el turno llegó a escribir.
+      --
+      -- Es la columna que hace seguro reintentar. Un turno escribe **según ocurre** —las consultas
+      -- a herramientas quedan en el hilo antes de que exista la respuesta— y el memo que evita
+      -- repetirlas vive en el toolbox, que nace vacío en cada turno. Así que rehacer un turno que
+      -- ya escribió no lo reanuda: repite sus consultas y duplica el hilo, que es exactamente el
+      -- bucle que costó 25 consultas con 12 repeticiones en la conversación que abrió todo esto.
+      --
+      -- Con esto la regla es comprobable: si el \`seq\` de la conversación subió desde que se
+      -- encoló, el turno escribió y **no se reintenta**; se cierra diciendo lo que pasó, como
+      -- hasta ahora. Se guarda el \`seq\` y no un contador de filas porque \`seq\` es identidad
+      -- pública dentro de la conversación y no se reutiliza jamás.
+      ALTER TABLE jobs ADD COLUMN watermark_seq INTEGER;
+
+      -- Un trabajo vivo por recurso, y lo impone la base.
+      --
+      -- Sin esto, dos \`send()\` seguidos sobre la misma conversación dejan dos jobs y el turno se
+      -- ejecuta dos veces. Es parcial —sólo sobre \`ready\` y \`running\`— para que los terminados
+      -- y los fallidos se acumulen sin estorbar: son el historial de lo que pasó.
+      CREATE UNIQUE INDEX idx_jobs_alive
+        ON jobs (kind, resource_type, resource_id)
+        WHERE status IN ('ready', 'running');
+    `,
+  },
 ];
