@@ -280,10 +280,6 @@ function SpendBadge({ spend }: { spend: SpendSummary }): JSX.Element | null {
   );
 }
 
-/** Un título de sesión puede ser un párrafo. En un botón cabe una línea. */
-const short = (text: string, max = 56): string =>
-  (text.length > max ? `${text.slice(0, max - 1)}…` : text);
-
 /**
  * Una sesión citada.
  *
@@ -297,9 +293,9 @@ function SessionRef({ target }: { target: Extract<ChatRef, { kind: 'session' }> 
     <>
       <button
         type="button"
-        className="btn small"
+        className="btn small ref-chip"
         disabled={open.isPending}
-        title={`${target.provider} · ${target.host} · ${target.sessionId}`}
+        title={`${target.title ?? target.sessionId} — ${target.provider} · ${target.host}`}
         onClick={() => open.mutate(
           {
             ref: { host: target.host, provider: target.provider, sessionId: target.sessionId },
@@ -309,7 +305,9 @@ function SessionRef({ target }: { target: Extract<ChatRef, { kind: 'session' }> 
         )}
       >
         <Glyph icon={PROVIDER_ICON[target.provider] ?? ACTION_ICON.session} />
-        {open.isPending ? 'Abriendo…' : short(target.title ?? target.sessionId)}
+        <span className="ref-label">
+          {open.isPending ? 'Abriendo…' : (target.title ?? target.sessionId)}
+        </span>
       </button>
       {open.error ? (
         <span style={{ flex: '1 1 100%' }}><ErrorNote error={open.error} /></span>
@@ -343,7 +341,9 @@ function TerminalRef({ target }: { target: Extract<ChatRef, { kind: 'terminal' }
             <Glyph icon={NAV_ICON.terminal} />
             Abrir terminal en {target.host}
           </Link>
-          <span className="tiny faint mono">{target.cwd ?? target.sessionId}</span>
+          <span className="tiny faint mono ref-label" title={target.cwd ?? target.sessionId}>
+            {target.cwd ?? target.sessionId}
+          </span>
         </span>
       </span>
     </div>
@@ -412,18 +412,20 @@ function MessageRefs({ message, conversationId, bodies }: {
             if (ref.kind === 'workspace') {
               return (
                 <Link key={`w:${index}:${ref.workspaceId}`} to={`/w/${ref.workspaceId}`}
-                  className="btn small" title="Abrir el workspace de esta sesión">
+                  className="btn small ref-chip"
+                  title={ref.title ? `${ref.title} — abrir el workspace` : 'Abrir el workspace de esta sesión'}>
                   <Glyph icon={ACTION_ICON.open} />
-                  {short(ref.title ?? 'Abrir workspace')}
+                  <span className="ref-label">{ref.title ?? 'Abrir workspace'}</span>
                 </Link>
               );
             }
             if (ref.kind === 'run') {
               return (
                 <Link key={`r:${index}:${ref.runId}`} to={`/runs/${ref.runId}`}
-                  className="btn small" title="Ver el trabajo y lo que dejó">
+                  className="btn small ref-chip"
+                  title={ref.title ? `${ref.title} — ver el trabajo` : 'Ver el trabajo y lo que dejó'}>
                   <Glyph icon={NAV_ICON.runs} />
-                  {short(ref.title ?? 'Ver el trabajo')}
+                  <span className="ref-label">{ref.title ?? 'Ver el trabajo'}</span>
                 </Link>
               );
             }

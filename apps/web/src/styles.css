@@ -2039,6 +2039,15 @@ a:hover { text-decoration: underline; }
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /*
+   * Y de lado, nunca.
+   *
+   * Es una red, no el arreglo: lo que desborde hay que acotarlo donde se produce, y lo ancho de
+   * verdad —una tabla, una valla de código— lleva su propio contenedor con scroll. Pero un hilo
+   * que se puede arrastrar horizontalmente deja el texto cortado por la izquierda y no hay forma
+   * de saber que se ha movido, así que aquí se corta de raíz.
+   */
+  overflow-x: hidden;
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -2072,6 +2081,30 @@ a:hover { text-decoration: underline; }
  * —lleva escrito el motivo— mientras que los botones cortos comparten fila.
  */
 .chat-refs { display: grid; gap: 8px; margin-top: 8px; }
+
+/*
+ * Una pastilla de referencia nunca es más ancha que el hilo.
+ *
+ * El título lo escribe el índice —es el primer turno aprovechable de una sesión— y venía recortado
+ * a 56 caracteres. Eso funciona en un escritorio y falla siempre en un teléfono: 53 caracteres
+ * pasaban el filtro y medían 374 px dentro de un hilo de 364, así que la conversación entera se
+ * podía arrastrar de lado y el texto salía cortado por la izquierda. Contar letras cuando lo que
+ * falta es ancho es contar la unidad equivocada.
+ *
+ * Ahora lo acota el ancho que haya: la pastilla no pasa del 100 % y la etiqueta se recorta con
+ * puntos suspensivos. El texto entero sigue estando en el `title`.
+ */
+/*
+ * Y los contenedores tienen que **poder** encogerse, o el tope de la pastilla no sirve de nada.
+ *
+ * Una rejilla o un flex traen `min-width: auto`, que significa «no menos que mi contenido». Con
+ * eso, `.chat-refs` medía 374 px dentro de una burbuja de 336: el tope del 100 % de la pastilla se
+ * calculaba contra una fila que ya se había desbordado, así que no ataba nada. Medido antes de
+ * ponerlo, con el título que lo destapó.
+ */
+.chat-refs, .chat-refs .row { min-width: 0; }
+.ref-chip { max-width: 100%; min-width: 0; justify-content: flex-start; }
+.ref-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ------------------------------------------------- el markdown del asistente */
 
