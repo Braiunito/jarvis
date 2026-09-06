@@ -24,6 +24,14 @@ cada turno.
 sostenido, que es una petición razonable y que obliga a decir en voz alta qué es exactamente lo que
 no se abre nunca.
 
+Ese nombre, además, **ya está cogido**: «Sin restricciones» es la etiqueta visible del perfil de
+permiso `yolo` (`ui/labels.ts`), con tono de peligro y la ayuda «Ejecuta cualquier cosa en la
+máquina». Llamar igual al modo de autonomía haría que el mismo texto significara dos cosas
+distintas en la misma pantalla, y precisamente las dos que este documento existe para no confundir:
+**qué permiso lleva un trabajo** y **cuánta cuerda hay sin firma**. En la interfaz el tercer modo se
+llama **«Sin preguntar»**, que nombra el eje. El valor del enum se queda en `unrestricted`, que es
+contrato y no etiqueta.
+
 Medido en producción el 2026-09-05, antes de tocar nada: `JARVIS_CHAT_DEFAULT_AUTONOMY=manual`, las
 40 conversaciones existentes en `manual` —ninguna se ha cambiado nunca—, dos planes en toda la vida
 del sistema, y los 16 trabajos con perfil de escritura lanzados por una persona. El agujero es real

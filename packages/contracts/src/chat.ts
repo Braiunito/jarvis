@@ -23,7 +23,10 @@ import { HostName, Iso8601, Provider } from './common.js';
  * `manual`       — todo lo que tenga efectos se pregunta, incluido lanzar un trabajo en perfil seguro.
  * `auto`         — el perfil seguro y las lecturas van solos. Escribir en una máquina sigue
  *                  pidiendo tarjeta, y las capacidades con efectos también.
- * `unrestricted` — además va solo el trabajo en perfil de escritura y la capacidad **etiquetada**
+ * `unrestricted` — «Sin preguntar» en la interfaz, y no «sin restricciones», que es la etiqueta del
+ *                  perfil `yolo` y nombra el otro eje: uno dice qué permiso lleva el trabajo y el
+ *                  otro cuánta cuerda hay sin firma.
+ *                  Además va solo el trabajo en perfil de escritura y la capacidad **etiquetada**
  *                  con efectos. Se relaja lo conocido, nunca lo desconocido: una capacidad sin
  *                  etiquetar, cuyo efecto se infiere, sigue pidiendo tarjeta.
  *
