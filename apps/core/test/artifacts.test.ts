@@ -456,7 +456,9 @@ describe('ESFUERZO · lo decide una pasada previa y queda anotado', () => {
   });
 
   it('y el turno de verdad se pide con lo que ella dijo', async () => {
-    for (const nivel of REASONING_EFFORTS) {
+    // `minimal` no entra aquí: el juez lo puede decir, pero el turno no baja de `low`. Eso tiene
+    // su propia prueba, con el motivo medido.
+    for (const nivel of REASONING_EFFORTS.filter((level) => level !== 'minimal')) {
       const usos: ModelTurnUsage[] = [];
       const { model, enviados } = conJuez(nivel, usos);
       await model.decide(contexto, new ContadorToolbox());
@@ -511,11 +513,13 @@ describe('ESFUERZO · el stack de desarrollo también puede enseñarlo', () => {
   });
 });
 
-describe('ESFUERZO · `minimal` significa que no hay nada que averiguar', () => {
-  it('con ese nivel sólo se le ofrecen las que cierran, así que un saludo es una llamada', async () => {
+describe('ESFUERZO · `minimal` sirve para juzgar, no para contestar', () => {
+  it('el juez puede decir minimal, pero el turno no baja de low', async () => {
     const toolbox = new ContadorToolbox();
     let primera = true;
-    const fetchImpl = (async () => {
+    const enviados: Array<Record<string, unknown>> = [];
+    const fetchImpl = (async (_url: string, init: { body: string }) => {
+      enviados.push(JSON.parse(init.body) as Record<string, unknown>);
       const message = primera
         ? { content: 'minimal' }
         : { tool_calls: [{ id: 'c1', type: 'function', function: { name: 'finish', arguments: '{}' } }] };
@@ -530,9 +534,11 @@ describe('ESFUERZO · `minimal` significa que no hay nada que averiguar', () => 
     await model.decide({ ...contexto, objective: 'gracias!' }, toolbox);
 
     /*
-     * Medido en producción antes de esto: «gracias!» gastó cinco consultas y «Hola» cuatro, porque
-     * el turno obliga a llamar a alguna herramienta y sin deliberar no elige la que cierra.
+     * Medido en producción: con el turno en `minimal`, a «hola» contestó «¿qué quieres hacer con
+     * las workspaces listadas?». Sin deliberar nada se agarra a lo primero del contexto en vez de
+     * componer una frase. Clasificar es reconocer; contestar es componer.
      */
-    expect(toolbox.calls).toEqual(['finish']);
+    expect(enviados[0]?.['reasoning_effort']).toBe('minimal');
+    expect(enviados[1]?.['reasoning_effort']).toBe('low');
   });
 });

@@ -756,20 +756,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
      */
     const maxRounds = this.#maxToolCalls + MAX_ARTIFACTS_PER_TURN + 1;
     for (let round = 0; round <= maxRounds; round += 1) {
-      /*
-       * Con `minimal` no se le ofrecen lecturas, y esto no es una optimización: es lo que hace que
-       * el nivel signifique lo que dice.
-       *
-       * `minimal` es «no hay nada que averiguar». Pero el turno obliga a llamar a **alguna**
-       * herramienta en cada vuelta, y sin deliberar el modelo no elige la que cierra: elige una
-       * cualquiera. Medido en producción: «gracias!» gastó cinco consultas —búsqueda de sesiones,
-       * abrir un workspace, leer contexto— y «Hola», cuatro. Peor que antes de existir el nivel.
-       *
-       * Ofreciéndole sólo las que deciden, un saludo es una llamada. Y si de verdad hiciera falta
-       * mirar algo, el juez no habría dicho `minimal`.
-       */
-      const decisionsOnly = this.#turnEffort === 'minimal'
-        || spent >= this.#maxToolCalls || toolbox.spent || nudged;
+      const decisionsOnly = spent >= this.#maxToolCalls || toolbox.spent || nudged;
       const tools = toolbox.definitions({ decisionsOnly });
       const free = new Set(tools.filter((tool) => tool.free).map((tool) => tool.name));
       const message = await this.#ask(messages, tools);
@@ -915,7 +902,22 @@ export class OpenAiCompatibleModel implements AssistantModel {
         if (!response.ok) return 'medium';
         const body = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
         const said = (body.choices?.[0]?.message?.content ?? '').toLowerCase();
-        return REASONING_EFFORTS.find((level) => said.includes(level)) ?? 'medium';
+        const elegido = REASONING_EFFORTS.find((level) => said.includes(level)) ?? 'medium';
+        /*
+         * `minimal` sirve para juzgar y no para contestar.
+         *
+         * Medido en producción con el nivel ya puesto: sin lecturas que ofrecerle, un saludo dejó
+         * de gastar consultas —de cuatro a cero— pero **la respuesta seguía siendo un disparate**:
+         * a «hola» contestó «¿qué quieres hacer con las workspaces listadas?» y a «gracias!»,
+         * «inicia revisión de espacios de trabajo». Sin deliberar nada se agarra a lo primero que
+         * ve en el contexto en vez de componer una frase.
+         *
+         * Son dos tareas distintas y hay que decirlo así: clasificar contra una lista corta es
+         * reconocer, y ahí `minimal` gana; contestar es componer, y ahí hace falta un mínimo. El
+         * juez sigue eligiendo entre cuatro —su respuesta se guarda tal cual y es la que se
+         * enseña— pero el turno nunca baja de `low`.
+         */
+        return elegido === 'minimal' ? 'low' : elegido;
       } finally {
         clearTimeout(timer);
       }
