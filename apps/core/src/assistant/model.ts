@@ -777,6 +777,10 @@ export class OpenAiCompatibleModel implements AssistantModel {
     ];
     /** Si ya se le tuvo que pedir que contestara. Se hace una vez por turno, no en bucle. */
     let nudged = false;
+    /** Si ya se le desmintió una afirmación de haber enseñado algo. Bandera aparte de `nudged`. */
+    let desmentido = false;
+    /** Lo último que llegó a escribir, para no perderlo si la vuelta siguiente viene muda. */
+    let ultimoTexto: string | null = null;
 
     /*
      * El presupuesto cuenta las vueltas que **consultan**, no las que enseñan.
@@ -834,8 +838,15 @@ export class OpenAiCompatibleModel implements AssistantModel {
        *
        * Juntas: se piensa lo justo para contestar y no hay con qué irse por las ramas.
        */
+      /*
+       * `desmentido` también estrecha la elección, y a propósito.
+       *
+       * Tras decirle que no ha enseñado nada, lo que tiene que hacer es una de dos cosas: colgarlo
+       * o escribirlo. `present` es `free` y sobrevive al corte, así que sigue pudiendo hacer lo que
+       * el aviso le pide; lo que se le quita es irse a consultar otra cosa.
+       */
       const decisionsOnly = this.#turnJudged === 'minimal'
-        || spent >= presupuesto || toolbox.spent || nudged;
+        || spent >= presupuesto || toolbox.spent || nudged || desmentido;
       const tools = toolbox.definitions({ decisionsOnly });
       const free = new Set(tools.filter((tool) => tool.free).map((tool) => tool.name));
       const message = await this.#ask(messages, tools);
@@ -852,8 +863,18 @@ export class OpenAiCompatibleModel implements AssistantModel {
            * misma economía que el nudge de arriba— y si insiste, se cierra con lo que dijo: una
            * respuesta rara es mejor que un bucle.
            */
-          if (!nudged && toolbox.presented === 0 && CLAIMS_PRESENTED.test(text)) {
-            nudged = true;
+          if (!desmentido && toolbox.presented === 0 && claimsPresented(text)) {
+            /*
+             * Bandera propia, y no la del mensaje vacío.
+             *
+             * Compartirla encadenaba dos guardas correctas en un fallo: se desmentía la respuesta,
+             * el modelo contestaba vacío en la vuelta siguiente —cosa vista con este modelo— y como
+             * la bandera ya estaba gastada se cerraba con «no llegó a proponer ningún paso»,
+             * tirando la respuesta original. Y al revés: si el vacío saltaba primero, una respuesta
+             * que decía «mostrado» se publicaba sin comprobar.
+             */
+            desmentido = true;
+            ultimoTexto = text;
             messages.push({ role: 'assistant', content: message.content ?? null });
             messages.push({ role: 'user', content: NOTHING_WAS_SHOWN });
             continue;
@@ -870,7 +891,12 @@ export class OpenAiCompatibleModel implements AssistantModel {
          * tampoco así, entonces sí se cierra diciendo lo que pasó.
          */
         if (nudged) {
-          return { kind: 'finish', summary: 'el modelo no llegó a proponer ningún paso en este turno' };
+          // Si antes dijo algo, eso es lo que se publica: una respuesta mala es mejor que una frase
+          // genérica que además sería falsa —sí propuso algo, sólo que después se quedó mudo—.
+          return {
+            kind: 'finish',
+            summary: ultimoTexto?.slice(0, 4000) ?? 'el modelo no llegó a proponer ningún paso en este turno',
+          };
         }
         nudged = true;
         messages.push({
@@ -1066,7 +1092,26 @@ export class OpenAiCompatibleModel implements AssistantModel {
  * Se busca al **cerrar el turno**, y sólo cuando el core sabe que no se colgó nada. No es adivinar
  * lo que quiso decir: es comprobar una afirmación concreta contra un hecho que tenemos delante.
  */
-const CLAIMS_PRESENTED = /\b(mostrad|most(ré|re)|enseñad|enseñ(é|e)|generad|gener(é|e)|adjunt|presentad|present(é|e)|te dejo (la|el) (tabla|gr[áa]fico|informe|documento)|arriba tienes|aqu[íi] tienes (la|el) (tabla|gr[áa]fico|informe))/i;
+const CLAIM_WORDS = /\b(mostrad[oa]s?|enseñad[oa]s?|generad[oa]s?|adjuntad[oa]s?|presentad[oa]s?|most(ré|re)|enseñ(é|e)|gener(é|e)|te dejo|aqu[íi] tienes|arriba tienes)\b/i;
+/** Un tercero haciendo la acción: «el agente **ha** generado», «Salud **ha** mostrado». */
+const THIRD_PARTY = /\b(ha|han|hab[íi]a|hab[íi]an)\b/i;
+
+function claimsPresented(text: string): boolean {
+  /*
+   * Sólo la primera frase, y sólo si el sujeto puede ser él.
+   *
+   * Los participios sueltos casan con frases donde el que hace la acción es otro —«el agente ha
+   * generado tres ficheros», «Salud ha mostrado un aviso»— y desmentir eso cuesta una vuelta y
+   * reescribe una respuesta que estaba bien.
+   *
+   * La asimetría está elegida: **es mejor dejar pasar una mentira que desmentir una verdad.** Una
+   * mentira que se escapa produce una respuesta mala, que es lo que ya había; un falso positivo
+   * gasta el turno y puede tirar la respuesta buena. Así que se caza la forma en que él habla de sí
+   * mismo —«Mostrado el contenido…», «Informe HTML generado…»— y se deja pasar lo demás.
+   */
+  const primera = text.split(/(?<=[.!?])\s|\n/)[0] ?? '';
+  return CLAIM_WORDS.test(primera) && !THIRD_PARTY.test(primera);
+}
 
 /**
  * Lo que se le dice cuando dice haber enseñado algo que no enseñó.

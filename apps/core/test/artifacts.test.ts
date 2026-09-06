@@ -784,3 +784,67 @@ describe('un gráfico escrito en el dialecto que existe en el mundo', () => {
     expect(valida(bueno)).toBeNull();
   });
 });
+
+describe('no se publica una respuesta que dice haber enseñado algo que no está', () => {
+  const conModelo = (respuestas: string[]): { model: OpenAiCompatibleModel; vueltas: () => number } => {
+    let n = 0;
+    const fetchImpl: FetchLike = async () => {
+      const content = respuestas[Math.min(n, respuestas.length - 1)] ?? '';
+      n += 1;
+      return new Response(JSON.stringify({
+        choices: [{ message: { role: 'assistant', content } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    return {
+      model: new OpenAiCompatibleModel({
+        apiKey: 'k', baseUrl: 'https://api.test', model: 'nano', fetchImpl, maxToolCalls: 3,
+      }),
+      vueltas: () => n,
+    };
+  };
+
+  const contexto = (): PlanContext => ({
+    objective: 'enséñame /etc/os-release como bloque de código',
+    history: [], pendingInput: null, pendingApprovals: [],
+    limits: { stepsUsed: 0, maxSteps: 1, maxToolCalls: 3, maxToolOutputBytes: 1000 },
+  });
+
+  it('se le devuelve una vuelta, y si arregla se publica lo arreglado', async () => {
+    const { model, vueltas } = conModelo([
+      'Mostrado el contenido de /etc/os-release: PRETTY_NAME, NAME, VERSION_ID.',
+      'PRETTY_NAME="Ubuntu 24.04", NAME="Ubuntu", VERSION_ID="24.04".',
+    ]);
+    const decision = await model.decide(contexto(), toolbox());
+
+    expect(vueltas()).toBe(2);
+    expect(decision).toMatchObject({ kind: 'finish' });
+    expect((decision as { summary: string }).summary).toContain('Ubuntu 24.04');
+  });
+
+  it('y si en la vuelta siguiente se queda mudo, se publica lo que dijo antes', async () => {
+    /*
+     * Éste es el encadenado que encontró jarvis-76: dos guardas correctas compartiendo bandera
+     * cerraban el turno con «no llegó a proponer ningún paso», tirando la respuesta original. Mala,
+     * pero respuesta — y esa frase además era falsa.
+     */
+    const { model } = conModelo([
+      'Mostrado el contenido de /etc/os-release: PRETTY_NAME, NAME, VERSION_ID.',
+      '',
+    ]);
+    const decision = await model.decide(contexto(), toolbox());
+
+    expect((decision as { summary: string }).summary).toContain('/etc/os-release');
+    expect((decision as { summary: string }).summary).not.toContain('no llegó a proponer');
+  });
+
+  it('una acción de otro no se desmiente: es mejor dejar pasar una mentira que negar una verdad', async () => {
+    // «el agente ha generado tres ficheros» es una respuesta legítima. Desmentirla gasta el turno y
+    // reescribe algo que estaba bien.
+    const { model, vueltas } = conModelo(['El agente ha generado tres ficheros en el workspace.']);
+    const decision = await model.decide(contexto(), toolbox());
+
+    expect(vueltas()).toBe(1);
+    expect((decision as { summary: string }).summary).toContain('tres ficheros');
+  });
+});
