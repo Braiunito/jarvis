@@ -9,15 +9,28 @@
  * cuelga hasta que la mata el tiempo límite del propio test.
  */
 import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { createConnection } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildGateway } from '../src/app.js';
-import { config } from '../src/config.js';
-import { session, SESSION_COOKIE } from '../src/lib/session.js';
-import { users, type User } from '../src/lib/store.js';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import type { User } from '../src/lib/store.js';
 
-const app = buildGateway();
-const core = new URL(config.coreUrl);
+/*
+ * El core falso escucha en un puerto **efímero**, y el gateway se entera después.
+ *
+ * Antes ataba el puerto declarado en `JARVIS_CORE_URL` —8770 por defecto—, así que dos corridas
+ * de la suite a la vez chocaban con `EADDRINUSE`, el `beforeAll` reventaba y se llevaba el fichero
+ * entero por delante. No fallaba un test: no arrancaba ninguno, y la corrida acababa con dos
+ * saltados y un total distinto, que es de las formas más confusas de romperse.
+ *
+ * El orden importa y por eso todo se importa dentro del `beforeAll`: el gateway lee la URL del
+ * core **al importarse**, así que primero se ata el puerto, luego se dice dónde está, y sólo
+ * entonces se carga el módulo.
+ */
+let app: FastifyInstance;
+let session: typeof import('../src/lib/session.js')['session'];
+let SESSION_COOKIE: string;
+let config: typeof import('../src/config.js')['config'];
 
 /** Un core que acepta y no contesta nunca. Es el fallo que no se veía. */
 let mudo: Server;
@@ -31,9 +44,21 @@ let user: User;
 let port = 0;
 
 beforeAll(async () => {
-  user = users.list()[0] ?? users.create({ username: 'braian', displayName: 'Braian' });
+  // 1 · El core falso coge el puerto que haya libre.
   mudo = createServer(() => { /* acepta, guarda silencio */ });
-  await new Promise<void>((resolve) => mudo.listen(Number(core.port), core.hostname, resolve));
+  await new Promise<void>((resolve) => mudo.listen(0, '127.0.0.1', () => resolve()));
+  const suyo = mudo.address() as AddressInfo;
+  process.env['JARVIS_CORE_URL'] = `http://127.0.0.1:${suyo.port}`;
+
+  // 2 · Y el gateway se importa ya sabiendo dónde está.
+  vi.resetModules();
+  ({ config } = await import('../src/config.js'));
+  ({ session, SESSION_COOKIE } = await import('../src/lib/session.js'));
+  const { users } = await import('../src/lib/store.js');
+  const { buildGateway } = await import('../src/app.js');
+
+  user = users.list()[0] ?? users.create({ username: 'braian', displayName: 'Braian' });
+  app = buildGateway();
   await app.listen({ port: 0, host: '127.0.0.1' });
   const address = app.server.address();
   port = typeof address === 'object' && address ? address.port : 0;
