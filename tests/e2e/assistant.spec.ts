@@ -85,6 +85,74 @@ test('el hilo no se puede arrastrar de lado', async ({ page }) => {
   expect(desborde).toBeLessThanOrEqual(1);
 });
 
+test('una tabla ancha se desplaza por dentro y no arrastra el hilo', async ({ page }) => {
+  await login(page);
+  await page.goto('/assistant');
+  await preguntar(page, 'enséñame la sonda @@artifact');
+  const tabla = page.locator('.artifact .md-table').first();
+  await expect(tabla).toBeVisible({ timeout: 40_000 });
+
+  /*
+   * La tabla del guion tiene tres columnas y con tres no cabe el fallo.
+   *
+   * Producción produjo una de **diez** —«Disco raíz - Tamaño», «Memoria usada (aprox)», «Swap
+   * usado»…— y esa es la que no se ha podido probar nunca: con tres columnas cualquier cadena de
+   * padres pasa, así que la prueba salía verde sin tocar lo que se quiere sujetar.
+   *
+   * Se ensancha **la tabla real**, clonando sus propias celdas, y no un marcado escrito a mano
+   * aquí: lo que se está probando es la cadena de padres de verdad —el `min-width: auto` de un
+   * hijo de flex es lo que rompía esto— y una copia del marcado dejaría de probarla en cuanto el
+   * componente cambiara sin que nadie se enterara.
+   */
+  await tabla.evaluate((elemento) => {
+    const anchas = [
+      'Disco raíz - Tamaño', 'Disco raíz - Usado', 'Disco raíz - Disponible', 'Disco raíz - Uso %',
+      'Memoria total', 'Memoria usada (aprox)', 'Memoria disponible',
+    ];
+    for (const fila of Array.from((elemento as HTMLTableElement).rows)) {
+      let siguiente = 0;
+      while (fila.cells.length < 10) {
+        const ultima = fila.cells[fila.cells.length - 1];
+        if (!ultima) break;
+        const copia = ultima.cloneNode(true) as HTMLTableCellElement;
+        copia.textContent = anchas[siguiente % anchas.length] ?? 'columna';
+        siguiente += 1;
+        fila.appendChild(copia);
+      }
+    }
+  });
+
+  const medidas = await page.evaluate(() => {
+    const tabla = document.querySelector('.artifact .md-table');
+    const hilo = document.querySelector('.chat-messages');
+    const raiz = document.documentElement;
+    return {
+      /*
+       * Cuánto mide la tabla y cuánto la pantalla.
+       *
+       * Se mide **la tabla** y no lo que su envoltura se guarda dentro, y la diferencia importa:
+       * lo segundo depende de que la envoltura sea la que desborda, así que al quitar las reglas
+       * que sujetan esto —para comprobar que la prueba sabe ponerse roja— caía por «no estoy
+       * midiendo nada» en vez de por el arrastre. El ancho de la tabla no depende de ninguna de
+       * ellas: o es más ancha que el hilo, o este caso no prueba lo que dice probar.
+       *
+       * Y se compara con el hilo, no con la ventana: en escritorio el hilo mide unos 900 px dentro
+       * de una ventana de 1440, así que una tabla de 1255 desborda lo que tiene que desbordar y no
+       * la pantalla. Comparando con la ventana, el caso se saltaba en escritorio sin decirlo.
+       */
+      tabla: tabla ? tabla.scrollWidth : 0,
+      anchoHilo: hilo ? hilo.clientWidth : 0,
+      hilo: hilo ? hilo.scrollWidth - hilo.clientWidth : 0,
+      pagina: raiz.scrollWidth - raiz.clientWidth,
+    };
+  });
+
+  expect(medidas.tabla, 'la tabla tiene que ser más ancha que el hilo o no se mide nada')
+    .toBeGreaterThan(medidas.anchoHilo);
+  expect(medidas.hilo, 'el hilo no puede arrastrarse de lado').toBeLessThanOrEqual(1);
+  expect(medidas.pagina, 'la página tampoco').toBeLessThanOrEqual(1);
+});
+
 test('el estado dice si esto va a funcionar, y con qué', async ({ page }) => {
   await login(page);
   await page.goto('/assistant');
