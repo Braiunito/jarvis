@@ -75,19 +75,15 @@ const TITLE_CHARS = 60;
 export interface WorkflowEngine {
   /** Crea el plan en `draft`, con sus pasos estimativos y el sobre propuesto. No lo arranca. */
   /**
-   * `workspaceId` no admite nulo **todavía**.
+   * Un plan puede no tener sesión: «compara el disco de las tres máquinas» es trabajo de la casa.
    *
-   * Un workflow de la casa —«compara el disco de las tres máquinas»— no tiene sesión de agente, y
-   * debería poder existir. Lo que lo impide es que `plans.workspace_id` es `NOT NULL` desde la
-   * primera migración, y relajarlo en SQLite obliga a reconstruir la tabla que guarda el historial
-   * de planes y aprobaciones. Eso es trabajo de F6 y va con su prueba de supervivencia.
-   *
-   * Hasta entonces la conversación lo dice en vez de fallar: es la misma regla que ya rige para
-   * lanzar un trabajo sin sesión.
+   * Lo que un plan así **no** puede es lanzar trabajo, porque un run necesita un workspace donde
+   * vivir. El motor lo corta cuando el modelo lo pide y no al crear el plan: mirar la casa es
+   * legítimo, y lo que no vale es acabar lanzando algo sin sitio donde ponerlo.
    */
   createWorkflow(input: {
     conversationId: string;
-    workspaceId: string;
+    workspaceId: string | null;
     objective: string;
     steps: ReadonlyArray<{ title: string; intent: string; expects: string; unknowns: string[]; writes: boolean }>;
     envelope: WorkflowEnvelope;
@@ -106,6 +102,10 @@ export interface WorkflowEngine {
   }): { ok: true } | { ok: false; message: string };
   /** Para contarlo en el hilo y para el contexto de la casa. */
   describe(planId: string): { objective: string; steps: number; status: string } | null;
+  /** Los que están en marcha ahora mismo, para que el asistente no proponga otro igual. */
+  live(limit: number): ReadonlyArray<{
+    planId: string; status: string; objective: string; step: number; steps: number;
+  }>;
 }
 
 export interface ChatServiceDeps {
@@ -722,16 +722,6 @@ export class ChatService {
         this.#repository.setStatus(id, 'idle', 'local');
         return;
       }
-      if (!conversation.workspaceId) {
-        this.#say(id, {
-          role: 'event',
-          text: 'El asistente propuso un plan de varios pasos, pero esta conversación no está atada '
-            + 'a ninguna sesión y todavía no se pueden planificar trabajos de la casa.',
-          refs,
-        });
-        this.#repository.setStatus(id, 'idle', 'local');
-        return;
-      }
       const sobre = buildEnvelope({
         objective: decision.objective,
         steps: decision.steps,
@@ -1326,7 +1316,22 @@ export class ChatService {
       // Un trabajo no tiene título: lo que tiene es lo que se le pidió. Recortado, porque un prompt
       // entero por cada trabajo vivo convierte cien palabras de contexto en mil.
       .map((run) => ({ runId: run.id, status: run.status, title: clipText(run.promptPreview ?? '', 80) || null }));
-    return workspaces.length || runs.length ? { workspaces, runs } : null;
+    /*
+     * Y los planes de varios pasos que están corriendo.
+     *
+     * Sin esto, a «¿cómo va aquello?» el asistente propone otro plan en vez de mirar el que ya
+     * está en marcha: no es que se equivoque, es que no tiene forma de saber que existe.
+     */
+    const workflows = (this.#deps.plans?.live(4) ?? []).map((plan) => ({
+      planId: plan.planId,
+      status: plan.status,
+      objective: clipText(plan.objective, 80),
+      step: plan.step,
+      steps: plan.steps,
+    }));
+    return workspaces.length || runs.length || workflows.length
+      ? { workspaces, runs, workflows }
+      : null;
   }
 
   #toApproval(row: Record<string, unknown>): Approval {

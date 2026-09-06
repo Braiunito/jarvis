@@ -249,6 +249,34 @@ export class PlanService {
       .all(workspaceId, limit) as PlanRow[]).map(toPlan);
   }
 
+  /**
+   * Los planes que están en marcha, para el contexto de la casa.
+   *
+   * Va aquí y no en una herramienta porque cuesta una consulta a SQLite y cero de red, igual que
+   * los trabajos vivos. Y hay un motivo propio: sin esto, a «¿cómo va aquello?» el asistente
+   * **propone otro plan** en vez de mirar el que ya está corriendo — no se equivoca, es que no
+   * tiene forma de saber que existe.
+   *
+   * `draft` no cuenta: un borrador sin firmar no está en marcha, está esperando a que alguien lo
+   * lea. Enseñarlo aquí haría que el asistente hablara de un plan que nadie aprobó como si fuera.
+   */
+  live(limit = 4): Array<{ planId: string; status: string; objective: string; step: number; steps: number }> {
+    const rows = this.#deps.db.prepare(
+      `SELECT p.id, p.status, p.objective, p.current_step,
+              (SELECT count(*) FROM plan_steps s WHERE s.plan_id = p.id) AS steps
+       FROM plans p
+       WHERE p.status NOT IN ('completed','failed','cancelled','draft')
+       ORDER BY p.updated_at DESC LIMIT ?`,
+    ).all(limit) as Array<{ id: string; status: string; objective: string; current_step: number; steps: number }>;
+    return rows.map((row) => ({
+      planId: row.id,
+      status: row.status,
+      objective: row.objective,
+      step: row.current_step,
+      steps: row.steps,
+    }));
+  }
+
   listActive(): Plan[] {
     return (this.#deps.db.prepare(
       "SELECT * FROM plans WHERE status NOT IN ('completed','failed','cancelled') ORDER BY updated_at",

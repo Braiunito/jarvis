@@ -609,7 +609,7 @@ export const WORKFLOW_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
     + 'dentro de él podrás corregirte sin volver a preguntar. Con `revise` corriges los pasos que '
     + 'aún no han empezado cuando lo que encuentras no cuadra con lo que suponías; si el cambio se '
     + 'sale de lo aprobado, el servidor volverá a pedir permiso, así que dilo claro en `reason`. Con '
-    + '`steer` pausas, reanudas o cancelas uno tuyo. Cierra tu turno.',
+    + '`steer` pausas, reanudas o cancelas uno tuyo. **Un plan sobre la casa —sin sesión de agente— puede mirar, no trabajar**: si vas a necesitar lanzar trabajo, propónlo desde una conversación atada a una sesión, o el plan morirá a mitad. Cierra tu turno.',
   inputSchema: {
     type: 'object',
     properties: {

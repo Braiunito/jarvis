@@ -100,6 +100,15 @@ export interface PlanContext {
   house?: {
     workspaces: Array<{ id: string; title: string | null; host: string; provider: Provider }>;
     runs: Array<{ runId: string; status: string; title: string | null }>;
+    /**
+     * Los planes de varios pasos que están en marcha ahora mismo.
+     *
+     * Van aquí y no en una herramienta por lo mismo que los trabajos: cuestan dos consultas a
+     * SQLite y cero de red, y saberlo quita la razón más común para gastar una vuelta. Y hay una
+     * razón propia: sin esto, a «¿cómo va aquello?» el asistente **propone otro plan** en vez de
+     * mirar el que ya está corriendo.
+     */
+    workflows: Array<{ planId: string; status: string; objective: string; step: number; steps: number }>;
   };
   /**
    * El perímetro que una persona firmó para este workflow, si lo hay.
