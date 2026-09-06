@@ -47,6 +47,18 @@ export const permissionName = (profile: string): string =>
  * se ve que esa decisión existió, y por eso dice también el porqué en su ayuda.
  */
 export const EFFORT: Record<string, { name: string; help: string; tone: 'ok' | 'neutral' | 'warn' }> = {
+  /*
+   * `minimal` no razona: gasta cero tokens de razonamiento y contesta directo.
+   *
+   * Se dice «directo» y no «nada» porque la línea lo lee como «pensando · …», y «pensando · nada»
+   * se contradice a sí mismo. Lo que hace es contestar sin pararse, que es lo que corresponde a un
+   * saludo.
+   */
+  minimal: {
+    name: 'directo',
+    help: 'Contesta sin pararse a razonar. Es lo que le corresponde a un saludo o a algo que ya sabe.',
+    tone: 'ok',
+  },
   low: {
     name: 'poco',
     help: 'Le ha parecido una pregunta directa y no se va a entretener.',

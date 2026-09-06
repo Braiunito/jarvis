@@ -1646,6 +1646,15 @@ a:hover { text-decoration: underline; }
    */
   .kbd { display: none; }
 
+  /*
+   * En un teléfono, de la línea de estado sobra el recuento de capacidades.
+   *
+   * El número entero se lee en Salud; lo que aquí importa es si responden las máquinas y si queda
+   * margen. Con datos de producción la línea pedía 290 px y en un móvil hay 212: escrita de una
+   * pieza, lo que se perdía era el aviso del final.
+   */
+  .chat-status-count { display: none; }
+
   .btn, .btn.small, .btn.icon { min-height: var(--touch); }
   .btn.icon { width: var(--touch); }
   .input, .select, .textarea { min-height: var(--touch); }
@@ -1726,6 +1735,9 @@ a:hover { text-decoration: underline; }
    * sesión por debajo del pliegue. Los desplegables pierden su ancho fijo y se reparten lo que
    * hay, que es lo que un `select` sabe hacer sin que se le note.
    */
+  /* Y en lo más estrecho, también el modelo: cada burbuja del hilo lleva el suyo. */
+  .chat-status-model { display: none; }
+
   .filters-row > label { flex: 1 1 44%; min-width: 0; }
   .filters-row .select { flex: 1 1 auto; width: auto; min-width: 0; }
 
@@ -1910,6 +1922,25 @@ a:hover { text-decoration: underline; }
   color: var(--text-muted);
 }
 .chat-status-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--text-faint); }
+
+/*
+ * Los trozos de la línea, por orden de a qué se renuncia primero.
+ *
+ * Se separan con un punto medio dibujado por CSS para que esconder un trozo se lleve su separador
+ * y no queden dos puntos seguidos.
+ */
+.chat-status-part { min-width: 0; flex: 0 1 auto; }
+.chat-status-part + .chat-status-part::before,
+.chat-status-part + .chat-status-warn::before { content: '·'; margin: 0 5px; color: var(--text-faint); }
+
+/*
+ * El aviso no encoge ni se corta, y va en negrita.
+ *
+ * Es lo único accionable de la línea: dice cuánto margen queda antes de que el catálogo deje de
+ * caber y el modo directo se apague sin avisar. Si algo tiene que desaparecer en una pantalla
+ * estrecha, éste es el último.
+ */
+.chat-status-warn { flex: 0 0 auto; white-space: nowrap; font-weight: 650; }
 .chat-status.ok .chat-status-dot { background: var(--ok); }
 .chat-status.warn .chat-status-dot { background: var(--warn); }
 .chat-status.danger .chat-status-dot { background: var(--danger); }

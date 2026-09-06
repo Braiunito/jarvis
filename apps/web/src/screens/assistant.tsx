@@ -612,32 +612,41 @@ function StatusLine({ hosts, capabilities, thinking, effort }: {
   const tono = !model ? 'danger'
     : responden !== null && total > 0 && responden < total ? 'warn' : 'ok';
 
-  const partes: string[] = [];
-  if (responden !== null && total > 0) {
-    partes.push(responden === total
-      ? `${total} máquina${total === 1 ? '' : 's'}`
-      : `${responden} de ${total} máquinas`);
-  }
-  partes.push(model ? shortModel(model) : 'sin modelo');
-  if (capabilities.capabilityCount) {
-    partes.push(capabilities.capabilityMode === 'router'
-      ? `${capabilityCount(capabilities)} · las busca`
-      : `${capabilityCount(capabilities)}`);
-  }
+  /*
+   * La línea va por trozos y no como una cadena, porque en un teléfono no cabe entera.
+   *
+   * Escrita de una pieza con `truncate`, lo que se perdía era **el final**, y el final es justo lo
+   * único accionable: «quedan 2» avisa de cuánto margen hay antes de que el catálogo no quepa y el
+   * modo directo se apague en silencio. Cortar por donde toca el texto es cortar por donde no toca
+   * la información.
+   *
+   * Así que el aviso no encoge nunca, y lo que se sacrifica en estrecho es lo que se puede leer en
+   * otro sitio: el número de capacidades, y luego el modelo —que además va en cada burbuja del
+   * hilo, con su distintivo—.
+   */
+  const maquinas = responden !== null && total > 0
+    ? (responden === total ? `${total} máquina${total === 1 ? '' : 's'}` : `${responden} de ${total} máquinas`)
+    : null;
+  const aviso = capabilities.capabilityMode === 'router' ? 'las busca'
+    : capabilities.capabilityCount && capabilities.capabilityRoom <= 3
+      ? `quedan ${capabilities.capabilityRoom}` : null;
 
   return (
     <span className={`chat-status ${tono}`}>
       <span className="chat-status-dot" aria-hidden="true" />
-      <span className="truncate">{partes.join(' · ')}</span>
+      {maquinas ? <span className="chat-status-part truncate">{maquinas}</span> : null}
+      <span className="chat-status-part chat-status-model truncate">
+        {model ? shortModel(model) : 'sin modelo'}
+      </span>
+      {capabilities.capabilityCount ? (
+        <span className="chat-status-part chat-status-count truncate">
+          {capabilities.capabilityCount} capacidades
+        </span>
+      ) : null}
+      {aviso ? <strong className="chat-status-warn">{aviso}</strong> : null}
     </span>
   );
 }
-
-/** Las capacidades, con el aviso pegado cuando quedan pocas. */
-const capabilityCount = (capabilities: ChatCapabilities): string =>
-  capabilities.capabilityMode !== 'router' && capabilities.capabilityRoom <= 3
-    ? `${capabilities.capabilityCount} capacidades · quedan ${capabilities.capabilityRoom}`
-    : `${capabilities.capabilityCount} capacidades`;
 
 export function AssistantScreen(): JSX.Element {
   usePageMeta({ title: 'Asistente', subtitle: 'El modelo de casa, con las máquinas delante' });
@@ -849,7 +858,14 @@ export function AssistantScreen(): JSX.Element {
               * hay antes del primer mensaje.
               */}
             <span className="chat-head-id">
-              <h2 className="truncate">
+              {/*
+                * El título recorta a una línea a propósito: es el resumen automático del hilo y
+                * puede tener sesenta caracteres, que empujarían el resto de la cabecera fuera de
+                * la fila. Va con `title` para que se pueda leer entero sin abrir la lista, donde
+                * también está completo.
+                */}
+              <h2 className="truncate" title={active
+                ? (stream.title ?? conversation?.title ?? 'Conversación') : undefined}>
                 {active ? (stream.title ?? conversation?.title ?? 'Conversación') : 'Asistente'}
               </h2>
               <StatusLine
