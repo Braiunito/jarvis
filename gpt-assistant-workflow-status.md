@@ -65,10 +65,10 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 |---|---|---|---|---|---|
 | R-01 | P1 | Aprobación caducada → conversación bloqueada para siempre | `chat/service.ts` | core | [ ] |
 | R-02 | P0 | Un permiso de escalada vale más de un turno en la nube | `chat/service.ts` | core | [x] |
-| R-03 | P0 | El digest de la aprobación nunca se comprueba | `chat/service.ts`, `plans/service.ts` | core | [ ] |
+| R-03 | P0 | El digest de la aprobación nunca se comprueba | `chat/service.ts`, `plans/service.ts` | core | [x] |
 | R-04 | P0 | Un artifact HTML puede salir a la red (iframe anidado, navegación a pelo) | `chat/routes.ts` | core | [x] |
 | R-05 | P1 | En modo directo el catálogo MCP se declara **sin parámetros** | `mcp/service.ts` | core | [x] |
-| R-06 | P1 | El memo de capacidades mezcla servidores y cobra la repetición | `assistant/toolbox.ts` | core | [ ] |
+| R-06 | P1 | El memo de capacidades mezcla servidores y cobra la repetición | `assistant/toolbox.ts` | core | [x] |
 | R-07 | P1 | Salud dice `ok` con el MCP caído | `mcp/service.ts` | core | [x] |
 | R-08 | P1 | Dos envíos seguidos: la primera pregunta no se contesta, la segunda dos veces, y sin job | `chat/service.ts` | core | [ ] |
 | R-09 | P1 | El objetivo del turno se pierde con más de 12 trazas de herramienta | `chat/service.ts` | core | [ ] |
@@ -162,6 +162,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   sea estable.
 - **Prueba**: unidad en `apps/core/test`: mutar `target_json` y resolver → `CONFLICT`, nada ejecutado,
   fila de auditoría. Igual para plan.
+- **Cerrado** · `046b4c0` (chat) y `9706780` (planes). La huella sube a `platform/approvals.ts` con las claves ordenadas en profundidad y se comprueba **antes** de tocar nada. No casar anula la fila y deja `approval.tampered` en la auditoría. La forma vieja se acepta hasta el 2026-09-07: rechazar de golpe las pendientes habría enseñado «alguien manipuló esto» sobre tarjetas legítimas.
 
 ### R-04 · P0 · Un documento HTML del asistente puede salir a la red
 
@@ -223,6 +224,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   (`mcp__zeus__x`): la clave sale del `direct.get(name).name`.
 - **Prueba**: unidad: dos servidores con `read` → dos llamadas; repetir exacta → `repeats === 1`,
   `observations` no sube, `calls` no sube.
+- **Cerrado** · `c196dc1`. Eran dos fallos sumados y el segundo peor: el memo que entendía los alias corría **después** de cobrar el presupuesto, así que para las 108 capacidades —casi todo el catálogo— la regla «una repetición no gasta consulta» estaba escrita y no aplicada. Ahora hay un solo memo, `#memoKeyFor` entiende las tres formas de nombrar una capacidad, y un fallo de validación también se memoriza: repetir un `BAD_INPUT` con los mismos argumentos no puede salir bien nunca.
 
 ### R-07 · P1 · Salud dice `ok` con el MCP caído
 
