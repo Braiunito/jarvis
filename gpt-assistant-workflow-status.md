@@ -58,9 +58,9 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 | R-02 | P0 | Un permiso de escalada vale más de un turno en la nube | `chat/service.ts` | core | [ ] |
 | R-03 | P0 | El digest de la aprobación nunca se comprueba | `chat/service.ts`, `plans/service.ts` | core | [ ] |
 | R-04 | P0 | Un artifact HTML puede salir a la red (iframe anidado, navegación a pelo) | `chat/routes.ts` | core | [x] |
-| R-05 | P1 | En modo directo el catálogo MCP se declara **sin parámetros** | `mcp/service.ts` | core | [ ] |
+| R-05 | P1 | En modo directo el catálogo MCP se declara **sin parámetros** | `mcp/service.ts` | core | [x] |
 | R-06 | P1 | El memo de capacidades mezcla servidores y cobra la repetición | `assistant/toolbox.ts` | core | [ ] |
-| R-07 | P1 | Salud dice `ok` con el MCP caído | `mcp/service.ts` | core | [ ] |
+| R-07 | P1 | Salud dice `ok` con el MCP caído | `mcp/service.ts` | core | [x] |
 | R-08 | P1 | Dos envíos seguidos: la primera pregunta no se contesta, la segunda dos veces, y sin job | `chat/service.ts` | core | [ ] |
 | R-09 | P1 | El objetivo del turno se pierde con más de 12 trazas de herramienta | `chat/service.ts` | core | [ ] |
 | R-10 | P1 | Una conversación larga (>500 filas) pierde su cola al abrirla | `chat/repository.ts`, `routes.ts` | core | [ ] |
@@ -75,8 +75,8 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 | L-02 | P0 | `resolveApproval` no es atómica; un `approved` sin consumir bloquea | `chat/service.ts` | core | [ ] |
 | L-03 | P1 | Cualquier usuario ve, borra y firma las conversaciones de los demás | `chat/service.ts`, rutas | core | [ ] |
 | L-04 | P1 | La conversación no puede parar los trabajos que ella lanzó | `chat/service.ts`, `toolbox.ts` | core | [ ] |
-| L-05 | P1 | Errores de herramienta MCP se venden como «reintenta» → bucles | `mcp/service.ts` | core | [ ] |
-| L-06 | P1 | Los intentos de escritura MCP fallidos no se auditan | `mcp/service.ts` | core | [ ] |
+| L-05 | P1 | Errores de herramienta MCP se venden como «reintenta» → bucles | `mcp/service.ts` | core | [x] |
+| L-06 | P1 | Los intentos de escritura MCP fallidos no se auditan | `mcp/service.ts` | core | [x] |
 | L-07 | P1 | La pantalla miente en «Automático» y nunca ofrece `unrestricted` | `screens/assistant.tsx` | web | [ ] |
 | L-08 | P1 | El distintivo enseña el id del híbrido; el gasto no lleva conversación | `chat/service.ts`, `services.ts` | core | [ ] |
 | L-09 | P2 | El contexto enseña trabajos que el toolbox no deja mirar | `chat/service.ts`, `toolbox.ts` | core | [ ] |
@@ -86,7 +86,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 | L-13 | P2 | Cada mensaje del stream invalida la lista y el gasto | `api/chat-stream.ts`, pantalla | web | [ ] |
 | L-14 | P2 | `EventSource` reconecta para siempre tras borrar / 401 | `api/chat-stream.ts` | web | [ ] |
 | L-15 | P2 | Dos tarjetas de aprobación distintas; la del plan recorta el prompt | `ui/assistant.tsx` | web | [ ] |
-| L-16 | P2 | `readOnly` en el core no impide que el servidor ejecute lo sin etiquetar | `mcp/service.ts` | core | [ ] |
+| L-16 | P2 | `readOnly` en el core no impide que el servidor ejecute lo sin etiquetar | `mcp/service.ts` | core | [x] |
 | L-17 | P3 | Prompt local desactualizado, asimetría Anthropic, tipos en rutas | varios | core | [ ] |
 | L-18 | P2 | No hay e2e del asistente | `tests/e2e` | web | [ ] |
 
