@@ -215,6 +215,18 @@ export const ChatCapabilities = Type.Object({
   /** Cuántas capacidades más caben antes de caer al router. */
   capabilityRoom: Type.Integer({ minimum: 0 }),
   /**
+   * Lo que ocupa el catálogo que se le declara al modelo **en cada vuelta**, en bytes.
+   *
+   * `capabilityCount` y `capabilityRoom` cuentan funciones, que es lo que decide el repliegue al
+   * router porque el tope de la API es de cuenta. Pero desde que cada definición lleva su esquema y
+   * su descripción larga, la presión se ha ido a otro sitio: las mismas 108 capacidades cuestan más
+   * por vuelta y ninguna de las dos cifras lo dice.
+   *
+   * Van bytes y no tokens porque los bytes se miden y los tokens se estiman. Cuatro por token es
+   * una regla razonable para leerlo, y una regla no es un dato.
+   */
+  catalogBytes: Type.Integer({ minimum: 0 }),
+  /**
    * Qué modos de autonomía puede ofrecer la interfaz.
    *
    * No es la lista entera de `AUTONOMY_MODES`: `unrestricted` sólo aparece si el servidor lo

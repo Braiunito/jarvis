@@ -219,8 +219,12 @@ export class McpService {
      * para el nombre y no para lo que hay que pasarle.
      *
      * Y la descripción es la larga, no el resumen: en directo el modelo **nunca busca**, así que
-     * la única ocasión de contarle qué hace la herramienta es ésta. El catálogo pasa de unos 5.300
-     * tokens a unos 9.000, que a las tarifas de este escalón es una milésima de dólar por vuelta.
+     * la única ocasión de contarle qué hace la herramienta es ésta.
+     *
+     * Esto engorda el catálogo, y **cuánto no se puede saber desde aquí**: depende del servidor que
+     * haya enchufado. Por eso no va un número en este comentario —el informe daba una estimación y
+     * copiarla aquí la habría convertido en un dato— sino que se mide al arrancar: `catalogBytes`
+     * en `/api/chat` lleva el tamaño real de lo que se le declara al modelo en cada vuelta.
      */
     return (await this.capabilities({ schema: true })).map((capability) => ({
       capability,
@@ -232,6 +236,17 @@ export class McpService {
         decides: false,
       },
     }));
+  }
+
+  /**
+   * Cuántas se están reteniendo por no decir qué hacen.
+   *
+   * Lee lo cacheado y no sondea: se pregunta al contestar «no existe esa capacidad», que es un
+   * camino de error y no puede costar un viaje. Cero si nunca se ha traído el catálogo, que es lo
+   * honesto: no se sabe, y no se sabe no es cero herramientas retenidas.
+   */
+  retained(): number {
+    return this.#runtimes.reduce((total, runtime) => total + (runtime.catalog?.untagged ?? 0), 0);
   }
 
   /** Cuántas capacidades hay, sin traerlas. Para la interfaz, que sólo quiere el número. */

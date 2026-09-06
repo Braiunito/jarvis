@@ -2033,9 +2033,23 @@ export class CoreAssistantToolbox implements AssistantToolbox {
          * que hay que adivinar es la herramienta.
          */
         const nearby = await mcp.search(bare.replace(/[._]+/g, ' '), 3);
+        /*
+         * «No existe» y «no la servimos» no son lo mismo, y confundirlas hace daño.
+         *
+         * Cuando un servidor publica herramientas sin etiquetar, el core las retiene: no se sabe si
+         * escriben. Pero desaparecen del catálogo, así que a «reinicia las cámaras» el asistente
+         * contestaba que eso no existe — y es falso, existe y la estamos reteniendo nosotros.
+         * «No existe» lleva a rendirse; «hay N que no dicen qué hacen» lleva a etiquetarlas, que es
+         * lo que de verdad lo arregla y lo hace una persona, no el modelo.
+         */
+        const retenidas = mcp.retained();
+        const retencion = retenidas > 0
+          ? ` Hay ${retenidas} que este core no sirve porque el servidor no dice si escriben: si `
+            + 'la que buscas es una de ésas, dilo en tu respuesta para que alguien la etiquete.'
+          : '';
         if (!nearby.length) {
           return toolError('NOT_FOUND', `no existe la capacidad ${name}`,
-            'mira list_capabilities antes de llamar: los nombres son exactos');
+            `mira list_capabilities antes de llamar: los nombres son exactos.${retencion}`);
         }
         return {
           type: 'observation',
@@ -2045,7 +2059,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
               code: 'NOT_FOUND',
               message: `no existe la capacidad ${name}`,
               hint: 'no te la inventes; éstas sí existen y una de ellas es la que buscabas. '
-                + 'Llámala con su nombre exacto.',
+                + `Llámala con su nombre exacto.${retencion}`,
             },
             capabilities: nearby.map((capability) => ({
               name: capability.name,

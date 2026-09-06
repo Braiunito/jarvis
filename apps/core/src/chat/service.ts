@@ -298,6 +298,18 @@ export class ChatService {
     const model = this.#deps.model;
     const count = this.#deps.mcp?.configured ? await this.#deps.mcp.count().catch(() => 0) : 0;
     /*
+     * Lo que de verdad cuesta el catálogo, medido y no estimado.
+     *
+     * Se serializa lo mismo que se le declara al modelo, así que es el número real y no una regla
+     * de tres. Sólo en modo directo: en router lo que viaja son tres herramientas, y el catálogo se
+     * paga por consulta en vez de por vuelta.
+     */
+    const catalogBytes = this.#deps.mcp?.configured && this.#deps.directCapabilities
+      ? await this.#deps.mcp.asToolDefinitions()
+        .then((tools) => JSON.stringify(tools.map((entry) => entry.definition)).length)
+        .catch(() => 0)
+      : 0;
+    /*
      * El cupo del caso peor: con workspace, que es cuando menos sitio queda.
      *
      * La pantalla es una y las conversaciones son muchas; decir el cupo de la más holgada sería
@@ -333,6 +345,7 @@ export class ChatService {
       // tres: sirviendo el cupo entero, el aviso no saltaba nunca y el repliegue seguía siendo
       // silencioso, que es justo lo que este campo venía a arreglar.
       capabilityRoom: Math.max(0, room - count),
+      catalogBytes,
       // La pantalla no debe ofrecer un modo que la ruta va a rechazar.
       autonomyModes: this.autonomyModes(),
     };
