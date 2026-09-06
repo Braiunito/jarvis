@@ -7,8 +7,9 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
-import { config } from './config.js';
+import { config, isPrivateAddress } from './config.js';
 import { audit } from './lib/audit.js';
+import { clientIp } from './lib/ratelimit.js';
 import { parseCookies, session, SESSION_COOKIE } from './lib/session.js';
 import { users } from './lib/store.js';
 import { proxyToCore, proxyUpgradeToCore } from './proxy.js';
@@ -20,20 +21,41 @@ const CORE_PREFIXES = ['/api', '/events'];
 const isCorePath = (pathname: string): boolean =>
   CORE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
+/**
+ * Quién entra cuando el modo de pruebas está puesto: todo el mundo, como la misma cuenta.
+ *
+ * Se resuelve contra una cuenta **de verdad** y no contra una sintética, para que la auditoría
+ * siga diciendo quién hizo qué y para que un `jarvis-users disable` siga apagando la entrada. Un
+ * modo sin autenticación no tiene por qué ser además un modo sin rastro.
+ *
+ * `null` si la cuenta no existe o está deshabilitada: falla **cerrado**, que es lo contrario de lo
+ * que hacía el guardián de los artifacts esta misma noche.
+ */
+function testModeUser(ip: string): SessionUser | null {
+  if (!config.testNoAuth) return null;
+  // Abierto en la LAN es una cosa; abierto a internet es otra. Misma regla que la escotilla.
+  if (config.testNoAuthLanOnly && !isPrivateAddress(ip)) return null;
+  const user = config.testNoAuthUser
+    ? users.findByUsername(config.testNoAuthUser)
+    : users.list().find((candidate) => candidate.enabled) ?? null;
+  if (!user || !user.enabled) return null;
+  return { sub: user.userId, username: user.username };
+}
+
 /** La sesión se resuelve desde las cabeceras, vengan de Fastify o del servidor crudo. */
-export function userFromHeaders(cookieHeader: string | undefined): SessionUser | null {
+export function userFromHeaders(cookieHeader: string | undefined, ip = ''): SessionUser | null {
   const token = parseCookies(cookieHeader)[SESSION_COOKIE];
-  if (!token) return null;
+  if (!token) return testModeUser(ip);
   const claims = session.read(token);
-  if (!claims) return null;
+  if (!claims) return testModeUser(ip);
   // Una sesión sobrevive a un `jarvis-users disable`, así que la cuenta se revisa en cada petición.
   const user = users.findByUserId(claims.sub);
-  if (!user || !user.enabled) return null;
+  if (!user || !user.enabled) return testModeUser(ip);
   return { sub: claims.sub, username: user.username };
 }
 
 export const currentUser = (request: FastifyRequest): SessionUser | null =>
-  userFromHeaders(request.headers.cookie);
+  userFromHeaders(request.headers.cookie, clientIp(request.raw, config.trustProxy));
 
 export function buildGateway(options: { logger?: boolean } = {}): FastifyInstance {
   /**
@@ -57,7 +79,7 @@ export function buildGateway(options: { logger?: boolean } = {}): FastifyInstanc
       return;
     }
     const requestId = `req_${randomUUID()}`;
-    const user = userFromHeaders(req.headers.cookie);
+    const user = userFromHeaders(req.headers.cookie, clientIp(req, config.trustProxy));
     if (!user) {
       const body = JSON.stringify({
         error: { code: 'UNAUTHENTICATED', message: 'authentication required', retryable: false, requestId },

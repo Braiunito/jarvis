@@ -39,6 +39,14 @@ interface Me {
   authenticated: boolean;
   user: { username: string; displayName: string };
   insecureLogin?: boolean;
+  /**
+   * El modo de pruebas: no se pidió nada para entrar.
+   *
+   * Se enseña **mientras se trabaja** y no sólo al entrar, porque con este modo nadie pasa por el
+   * login: un aviso que viviera en la pantalla de acceso no lo vería nunca nadie. Lo peligroso de
+   * este modo no es tenerlo, es olvidarlo puesto.
+   */
+  testNoAuth?: boolean;
 }
 
 /**
@@ -243,7 +251,8 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
         }}>
         Saltar al contenido
       </a>
-      <Rail working={working} attention={attention} insecure={Boolean(me.insecureLogin)}
+      <Rail working={working} attention={attention}
+        insecure={Boolean(me.insecureLogin) || Boolean(me.testNoAuth)}
         terminals={openTerminals} waitingApproval={waitingApproval} />
 
       <div className="workarea">
@@ -281,7 +290,21 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
                 </span>
               </Link>
             ) : null}
-            {me.insecureLogin ? (
+            {/*
+              * Tres estados, y el peor manda.
+              *
+              * Sin autenticación es más grave que sin cifrar: sin cifrar, alguien que ya está en
+              * la red puede leer lo que pasa; sin autenticación, cualquiera que llegue **es** tú.
+              * Por eso va en rojo y lo dice con esas palabras, sin eufemismos.
+              */}
+            {me.testNoAuth ? (
+              <Link to="/health" className="chip danger"
+                title="Modo de pruebas: no se pide autenticación. Cualquiera que llegue a esta red
+                  entra como tú, y detrás está la clave de la flota.">
+                <Glyph icon={ACTION_ICON.insecure} />
+                <span className="chip-text">Sin autenticación</span>
+              </Link>
+            ) : me.insecureLogin ? (
               <Link to="/health" className="chip warn"
                 title="La entrada por contraseña sobre HTTP sigue abierta: todo viaja en claro">
                 <Glyph icon={ACTION_ICON.insecure} />

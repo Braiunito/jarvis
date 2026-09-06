@@ -124,6 +124,26 @@ export const config = {
   insecureLogin: bool(env['JARVIS_INSECURE_LOGIN'], false),
   insecureLoginLanOnly: bool(env['JARVIS_INSECURE_LOGIN_LAN_ONLY'], true),
 
+  /**
+   * MODO DE PRUEBAS — sin autenticación de ninguna clase.
+   *
+   * No es una escotilla como la de arriba. Aquélla sigue pidiendo credenciales, aunque sean
+   * débiles; ésta **no pide nada**: toda petición entra como la cuenta configurada. Quien llegue a
+   * la red actúa como esa persona, con la clave SSH de la flota detrás y con el modo de autonomía
+   * que la casa tenga puesto.
+   *
+   * Existe porque probar el producto de punta a punta con passkeys no se puede guionizar —una
+   * passkey exige un gesto humano por definición— y levantar un stack aparte prueba otro stack.
+   *
+   * Acotado a red local por defecto, por lo mismo que la escotilla: abierta en la LAN es una cosa
+   * y abierta a internet es otra completamente distinta. Y se anuncia en el arranque, en la API y
+   * en la pantalla, porque lo peligroso de un modo así no es tenerlo: es olvidarlo puesto.
+   */
+  testNoAuth: bool(env['JARVIS_TEST_NO_AUTH'], false),
+  testNoAuthLanOnly: bool(env['JARVIS_TEST_NO_AUTH_LAN_ONLY'], true),
+  /** Como quién entra todo el mundo. Vacío = la primera cuenta habilitada que haya. */
+  testNoAuthUser: env['JARVIS_TEST_NO_AUTH_USER'] || '',
+
   challengeTtlSeconds: Number(env['JARVIS_CHALLENGE_TTL'] || 300),
   enrollmentTtlSeconds: Number(env['JARVIS_ENROLLMENT_TTL'] || 15 * 60),
 
@@ -150,6 +170,8 @@ export function describeConfig() {
     secureCookies: !config.insecureCookies,
     insecureLogin: config.insecureLogin,
     insecureLoginLanOnly: config.insecureLoginLanOnly,
+    testNoAuth: config.testNoAuth,
+    testNoAuthLanOnly: config.testNoAuthLanOnly,
     trustProxy: config.trustProxy,
     coreUrl: config.coreUrl,
   };

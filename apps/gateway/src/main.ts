@@ -27,6 +27,21 @@ app.listen({ port: config.port, host: config.bind })
       console.warn('  ***********************************************************************');
       console.warn('');
     }
+    if (settings.testNoAuth) {
+      /*
+       * Más ruidoso todavía que la escotilla, y no por dramatismo: aquélla sigue pidiendo una
+       * contraseña, ésta no pide nada. Lo peligroso de este modo no es tenerlo, es olvidarlo
+       * puesto — así que sale en cada arranque y ocupa sitio.
+       */
+      console.warn('');
+      console.warn('  #######################################################################');
+      console.warn('  #  MODO DE PRUEBAS: NO HAY AUTENTICACIÓN (JARVIS_TEST_NO_AUTH=true)   #');
+      console.warn('  #  Cualquiera que llegue a esta red entra, y entra como el usuario    #');
+      console.warn('  #  configurado. El core tiene la clave SSH de la flota detrás.        #');
+      console.warn(`  #  Restringido a redes privadas: ${String(settings.testNoAuthLanOnly).padEnd(5)}                               #`);
+      console.warn('  #######################################################################');
+      console.warn('');
+    }
     if (settings.rpId === 'localhost' && !process.env['JARVIS_RP_ID']) {
       console.warn('  WARNING: JARVIS_RP_ID is unset. Passkeys enrolled now will not work on your '
         + 'real domain: the relying party id is baked into every credential.');

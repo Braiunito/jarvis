@@ -377,6 +377,12 @@ a:hover { text-decoration: underline; }
 .chip strong { color: var(--text); font-weight: 600; }
 .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
 .chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+/* El rojo se reserva para lo que no es un aviso sino un estado: hoy, entrar sin autenticación. */
+.chip.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
 
 .avatar {
   display: grid;

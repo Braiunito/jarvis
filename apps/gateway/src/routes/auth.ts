@@ -201,6 +201,16 @@ export function registerAuthRoutes(app: FastifyInstance, currentUser: (req: Fast
       userVerification: config.requireUserVerification ? 'required' : 'preferred',
       // La página muestra un aviso permanente mientras esto sea cierto.
       insecureLogin: policy.insecure,
+      /*
+       * Modo de pruebas: no se pide nada y todo el mundo entra como la misma cuenta.
+       *
+       * Se dice aquí porque la pantalla tiene que poder enseñarlo **en todo momento** y no sólo al
+       * entrar: con este modo puesto nadie pasa por el login, así que un aviso que sólo viviera en
+       * la página de acceso no lo vería nunca nadie. Lo peligroso de un modo así no es tenerlo, es
+       * olvidarlo puesto.
+       */
+      testNoAuth: config.testNoAuth
+        && (!config.testNoAuthLanOnly || isPrivateAddress(clientIp(request.raw, config.trustProxy))),
     });
   });
 
@@ -213,6 +223,15 @@ export function registerAuthRoutes(app: FastifyInstance, currentUser: (req: Fast
       authenticated: true,
       user: publicUser(user),
       insecureLogin: config.insecureLogin,
+      /*
+       * Y aquí también, que es donde la pantalla se entera de quién es mientras trabaja.
+       *
+       * Con el modo de pruebas puesto, esta respuesta llega sin que nadie haya presentado nada:
+       * decir «autenticado» sin decir cómo sería la clase de media verdad que llevamos toda la
+       * noche quitando.
+       */
+      testNoAuth: config.testNoAuth
+        && (!config.testNoAuthLanOnly || isPrivateAddress(clientIp(request.raw, config.trustProxy))),
     });
   });
 
