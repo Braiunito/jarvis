@@ -690,8 +690,10 @@ export class OpenAiCompatibleModel implements AssistantModel {
   readonly #maxOutputTokensParam: string;
   readonly #temperature: number | null;
   readonly #reasoningEffort: string | null;
-  /** El esfuerzo elegido para el turno en curso, cuando se pide `auto`. */
+  /** Con cuánto se pide el turno en curso. Nunca `minimal`: eso no compone una frase. */
   #turnEffort: ReasoningEffort | null = null;
+  /** Lo que dijo el juez, que es otra cosa: `minimal` significa «no hay nada que averiguar». */
+  #turnJudged: ReasoningEffort | null = null;
   readonly #onUsage: ((usage: ModelTurnUsage) => void) | null;
 
   constructor(options: AnthropicModelOptions) {
@@ -719,7 +721,10 @@ export class OpenAiCompatibleModel implements AssistantModel {
      * lo que queda escrito de esa respuesta dirían cosas distintas, y no habría un nivel del que
      * decir «éste costó». Una decisión por turno es la que se puede auditar.
      */
-    this.#turnEffort = this.#reasoningEffort === AUTO_EFFORT ? await this.#judgeEffort(context) : null;
+    this.#turnJudged = this.#reasoningEffort === AUTO_EFFORT ? await this.#judgeEffort(context) : null;
+    // Se compone con `low` como mínimo; lo que el juez dijo se conserva aparte porque decide otra
+    // cosa: si hay algo que averiguar.
+    this.#turnEffort = this.#turnJudged === 'minimal' ? 'low' : this.#turnJudged;
     // Se dice en cuanto se sabe, no al terminar: lo que se quiere ver arriba es el nivel con el
     // que está pensando ahora, y al terminar ya no está pensando.
     if (this.#turnEffort) toolbox.noteEffort?.(this.#turnEffort);
@@ -756,7 +761,22 @@ export class OpenAiCompatibleModel implements AssistantModel {
      */
     const maxRounds = this.#maxToolCalls + MAX_ARTIFACTS_PER_TURN + 1;
     for (let round = 0; round <= maxRounds; round += 1) {
-      const decisionsOnly = spent >= this.#maxToolCalls || toolbox.spent || nudged;
+      /*
+       * Las dos mitades de `minimal`, que son distintas y hay que aplicarlas por separado.
+       *
+       * **Componer** una frase pide un mínimo de deliberación: con el turno en `minimal`, a «hola»
+       * contestaba «¿qué quieres hacer con las workspaces listadas?». Por eso el turno se pide con
+       * `low`.
+       *
+       * **Averiguar** no hace falta, y si se le ofrece el catálogo lo usa: con `low` y las veinte
+       * herramientas delante, «hola» gastó tres consultas y «gracias!», cinco. El turno obliga a
+       * llamar a alguna en cada vuelta, así que la única forma de que no busque es no tener qué
+       * buscar.
+       *
+       * Juntas: se piensa lo justo para contestar y no hay con qué irse por las ramas.
+       */
+      const decisionsOnly = this.#turnJudged === 'minimal'
+        || spent >= this.#maxToolCalls || toolbox.spent || nudged;
       const tools = toolbox.definitions({ decisionsOnly });
       const free = new Set(tools.filter((tool) => tool.free).map((tool) => tool.name));
       const message = await this.#ask(messages, tools);
@@ -902,22 +922,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
         if (!response.ok) return 'medium';
         const body = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
         const said = (body.choices?.[0]?.message?.content ?? '').toLowerCase();
-        const elegido = REASONING_EFFORTS.find((level) => said.includes(level)) ?? 'medium';
-        /*
-         * `minimal` sirve para juzgar y no para contestar.
-         *
-         * Medido en producción con el nivel ya puesto: sin lecturas que ofrecerle, un saludo dejó
-         * de gastar consultas —de cuatro a cero— pero **la respuesta seguía siendo un disparate**:
-         * a «hola» contestó «¿qué quieres hacer con las workspaces listadas?» y a «gracias!»,
-         * «inicia revisión de espacios de trabajo». Sin deliberar nada se agarra a lo primero que
-         * ve en el contexto en vez de componer una frase.
-         *
-         * Son dos tareas distintas y hay que decirlo así: clasificar contra una lista corta es
-         * reconocer, y ahí `minimal` gana; contestar es componer, y ahí hace falta un mínimo. El
-         * juez sigue eligiendo entre cuatro —su respuesta se guarda tal cual y es la que se
-         * enseña— pero el turno nunca baja de `low`.
-         */
-        return elegido === 'minimal' ? 'low' : elegido;
+        return REASONING_EFFORTS.find((level) => said.includes(level)) ?? 'medium';
       } finally {
         clearTimeout(timer);
       }

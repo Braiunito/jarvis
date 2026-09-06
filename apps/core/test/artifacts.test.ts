@@ -539,6 +539,9 @@ describe('ESFUERZO · `minimal` sirve para juzgar, no para contestar', () => {
      * componer una frase. Clasificar es reconocer; contestar es componer.
      */
     expect(enviados[0]?.['reasoning_effort']).toBe('minimal');
+    // Se compone con `low`…
     expect(enviados[1]?.['reasoning_effort']).toBe('low');
+    // …y sin nada con lo que irse por las ramas: un saludo no gasta ni una consulta.
+    expect(toolbox.calls).toEqual(['finish']);
   });
 });
