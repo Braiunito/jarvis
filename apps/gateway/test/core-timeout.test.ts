@@ -18,7 +18,8 @@ import type { User } from '../src/lib/store.js';
 /*
  * El core falso escucha en un puerto **efímero**, y el gateway se entera después.
  *
- * Antes ataba el puerto declarado en `JARVIS_CORE_URL` —8770 por defecto—, así que dos corridas
+ * Antes ataba el puerto declarado en `JARVIS_CORE_URL`, que en pruebas es el **8794** que fija
+ * `tests/setup/env.ts` —no el 8770 de `config.ts`, que es el de producción—, así que dos corridas
  * de la suite a la vez chocaban con `EADDRINUSE`, el `beforeAll` reventaba y se llevaba el fichero
  * entero por delante. No fallaba un test: no arrancaba ninguno, y la corrida acababa con dos
  * saltados y un total distinto, que es de las formas más confusas de romperse.
