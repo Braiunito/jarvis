@@ -53,6 +53,9 @@ interface FakeServerOptions {
   expireSessions?: number;
   callResult?: unknown;
   callIsError?: boolean;
+  /** Un error de la herramienta a nivel de protocolo. Distinto de `callIsError`, que es un
+   *  resultado con `isError`: aquél vuelve como `ok: false` y éste como excepción. */
+  callRpcError?: string;
 }
 
 interface FakeServer {
@@ -124,6 +127,12 @@ function fakeMcpServer(options: FakeServerOptions = {}): FakeServer {
       }
 
       if (message.method === 'tools/call') {
+        if (options.callRpcError) {
+          return sse({
+            jsonrpc: '2.0', id: message.id,
+            error: { code: -32602, message: options.callRpcError },
+          });
+        }
         return sse({
           jsonrpc: '2.0', id: message.id,
           result: {
@@ -138,6 +147,23 @@ function fakeMcpServer(options: FakeServerOptions = {}): FakeServer {
     },
   };
   return server;
+}
+
+/** El servicio con su base al lado, para poder leer lo que dejó escrito en la auditoría. */
+function buildServiceWithAudit(
+  server: FakeServer,
+  overrides: Partial<Parameters<typeof parseMcpServers>[0]> = {},
+): { service: McpService; db: ReturnType<typeof openDatabase> } {
+  const db = openDatabase({ path: ':memory:' });
+  migrate(db);
+  const clock = fixedClock(NOW);
+  const service = new McpService({
+    servers: parseMcpServers({ servers: 'zeus=http://zeus.test/mcp', ...overrides }),
+    clock,
+    audit: new AuditLog(db, clock),
+    fetchImpl: server.fetch,
+  });
+  return { service, db };
 }
 
 function buildService(server: FakeServer, overrides: Partial<Parameters<typeof parseMcpServers>[0]> = {}): McpService {
@@ -540,5 +566,156 @@ describe('el turno tiene un tope de tiempo, no sólo de consultas', () => {
       maxObservations: 0,
     });
     expect(toolbox.spent).toBe(true);
+  });
+});
+
+/**
+ * Las cinco del informe de codex sobre esta frontera.
+ *
+ * Se escriben **después** de los arreglos y lo digo aquí porque importa: cerré esas cinco filas
+ * leyendo el código, sin una sola prueba, y son justo las que tocan permisos y escritura. El
+ * inventario lo pidió jarvis-artifact-rendering antes del despliegue y salió peor de lo que yo
+ * creía. Verlas fallar contra el código viejo ya no es posible; lo que sí queda es que a partir de
+ * ahora nadie pueda quitarlas sin enterarse.
+ */
+describe('MCP · lo que el informe encontró en esta frontera', () => {
+  /** Un servidor que deja de contestar a partir de la llamada N. */
+  const queSeCae = (server: FakeServer, desde: number): FakeServer['fetch'] => {
+    let n = 0;
+    return async (url, init) => {
+      n += 1;
+      if (n > desde) throw new Error('connect ECONNREFUSED');
+      return server.fetch(url, init);
+    };
+  };
+
+  it('R-05 · el catálogo directo lleva los parámetros, no una lista de nombres', async () => {
+    /*
+     * Se declaraba con `properties: {}` para todo, así que el modelo veía las 108 capacidades «sin
+     * parámetros», llamaba sin argumentos y el servidor rechazaba. En directo no hay una segunda
+     * oportunidad: no existe `search_capabilities` por el que preguntar.
+     */
+    const server = fakeMcpServer({
+      tools: [{
+        name: 'docker_restart',
+        title: 'docker_restart',
+        description: 'Reinicia un contenedor permitido.\n\nSólo los de la allowlist del servidor.',
+        inputSchema: {
+          type: 'object',
+          properties: { container: { type: 'string', description: 'El nombre exacto' } },
+          required: ['container'],
+        },
+        _meta: { fastmcp: { tags: ['docker', 'write'] } },
+      }],
+    });
+    const [declarada] = await buildService(server, { writeServers: 'zeus' }).asToolDefinitions();
+
+    expect(declarada?.definition.inputSchema.required).toEqual(['container']);
+    expect(declarada?.definition.inputSchema.properties).toHaveProperty('container');
+    // Y la descripción larga, no el resumen de 120 caracteres: es la única ocasión de contársela.
+    expect(declarada?.definition.description).toContain('allowlist del servidor');
+  });
+
+  it('R-07 · con el servidor caído, el estado dice `stale` y conserva el error', async () => {
+    // Servir el catálogo viejo está bien; decir que todo va bien, no. Entraba por la rama de éxito
+    // con `lastError: null`, así que Salud pintaba verde mientras las llamadas empezaban a fallar.
+    const server = fakeMcpServer();
+    const db = openDatabase({ path: ':memory:' });
+    migrate(db);
+    // El reloj avanza para que el catálogo caduque: con la caché fresca no se intenta refrescar, y
+    // decir `ok` sin haberlo intentado es correcto. Lo que se prueba es el caso en que sí se
+    // intentó y no contestó.
+    let ahora = Date.parse(NOW);
+    const clock = { nowMs: () => ahora, nowIso: () => new Date(ahora).toISOString() };
+    const service = new McpService({
+      servers: parseMcpServers({ servers: 'zeus=http://zeus.test/mcp' }),
+      clock,
+      audit: new AuditLog(db, clock),
+      fetchImpl: queSeCae(server, 3),
+    });
+    await service.capabilities();
+    ahora += 60 * 60 * 1000;
+
+    // El catálogo cacheado sigue sirviéndose…
+    expect((await service.capabilities()).length).toBeGreaterThan(0);
+    const [estado] = await service.states();
+    // …y el estado lo dice.
+    expect(estado?.status).toBe('stale');
+    expect(estado?.lastError).toContain('ECONNREFUSED');
+  });
+
+  it('L-05 · un argumento que la herramienta rechaza no se vende como reintentable', async () => {
+    /*
+     * Todo fallo salía como `UPSTREAM_UNAVAILABLE` reintentable y el toolbox añadía «puede
+     * funcionar si se reintenta», así que el modelo insistía con lo mismo hasta agotar el turno.
+     * «Reintenta» es una promesa y no se hace sobre algo que no depende del momento.
+     */
+    const server = fakeMcpServer({ callRpcError: 'ruta fuera de MCP_READ_ROOTS' });
+    const service = buildService(server);
+    await expect(service.call('zeus.docker_logs', {}, { actor: 'braian' }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST', retryable: false });
+  });
+
+  it('L-05 · pero un servidor caído sí se reintenta, que ahí sí depende del momento', async () => {
+    const server = fakeMcpServer();
+    const service = buildService({ ...server, fetch: queSeCae(server, 3) });
+    await service.capabilities();
+    await expect(service.call('zeus.docker_logs', {}, { actor: 'braian' }))
+      .rejects.toMatchObject({ code: 'UPSTREAM_UNAVAILABLE', retryable: true });
+  });
+
+  it('L-06 · una escritura que falla deja escrito que se intentó', async () => {
+    // La auditoría iba después del `try`, así que un `docker_restart` rechazado por el servidor no
+    // dejaba rastro. Lo que investiga alguien no es sólo lo que pasó: es lo que se intentó.
+    const server = fakeMcpServer({ callRpcError: 'contenedor no permitido' });
+    const { service, db } = buildServiceWithAudit(server, { writeServers: 'zeus' });
+    await service.call('zeus.docker_restart', { container: 'x' }, { actor: 'braian', allowWrites: true })
+      .catch(() => undefined);
+
+    const tipos = (db.prepare('SELECT event_type FROM audit_events ORDER BY id').all() as Array<{ event_type: string }>)
+      .map((fila) => fila.event_type);
+    expect(tipos).toContain('mcp.write.requested');
+    expect(tipos).toContain('mcp.write.failed');
+  });
+
+  it('L-16 · en un servidor de sólo lectura, lo que no dice qué hace no se sirve', async () => {
+    const server = fakeMcpServer({
+      tools: [tool('memory_info', ['system', 'safe']), tool('cosa_rara', ['system'])],
+    });
+    const nombres = (await buildService(server).capabilities()).map((c) => c.name);
+
+    expect(nombres).toContain('zeus.memory_info');
+    expect(nombres).not.toContain('zeus.cosa_rara');
+    expect((await buildService(server).states())[0]?.untagged).toBe(1);
+  });
+
+  it('L-16 · y se recupera declarando que se responde por ese servidor', async () => {
+    const server = fakeMcpServer({ tools: [tool('cosa_rara', ['system'])] });
+    const service = buildService(server, { trustUntagged: 'zeus' });
+    expect((await service.capabilities()).map((c) => c.name)).toContain('zeus.cosa_rara');
+  });
+
+  it('la protección latente: con escrituras abiertas, lo sin etiquetar sigue pidiendo tarjeta', async () => {
+    /*
+     * Esto es lo que pidió jarvis-artifact-rendering antes de desplegar, y tiene razón en el motivo:
+     * con el catálogo de esta casa —112 de 112 etiquetadas— esta regla no se ve funcionar nunca, y
+     * lo que no se ve se quita dentro de un año porque «no hace nada». Existe para el día que se
+     * enchufe un servidor que no etiquete, que es el día en que nadie estará mirando.
+     */
+    const server = fakeMcpServer({ tools: [tool('cosa_rara', ['system'])] });
+    const service = buildService(server, { writeServers: 'zeus' });
+
+    // Se sirve —el servidor escribe, así que no se retiene— pero se trata como si tuviera efectos.
+    const [capacidad] = await service.capabilities();
+    expect(capacidad?.writes).toBe(true);
+    expect(capacidad?.effectsDeclared).toBe(false);
+    await expect(service.call('zeus.cosa_rara', {}, { actor: 'braian' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('y una etiquetada con efecto tampoco se ejecuta sin permiso', async () => {
+    const service = buildService(fakeMcpServer(), { writeServers: 'zeus' });
+    await expect(service.call('zeus.docker_restart', {}, { actor: 'braian' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });
