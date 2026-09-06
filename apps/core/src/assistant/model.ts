@@ -536,11 +536,28 @@ export class AnthropicModel implements AssistantModel {
      * con `maxToolCalls * 2` un modelo que se atasca cuesta el doble de viajes contra la API sin
      * poder hacer nada más con ellos.
      */
-    const maxRounds = this.#maxToolCalls + MAX_ARTIFACTS_PER_TURN + 1;
+    /*
+     * El presupuesto es el del turno, no el de la instancia.
+     *
+     * Un mismo modelo lo comparten la conversación y el motor de planes, y cada uno tiene su tope
+     * —`JARVIS_CHAT_MAX_TOOL_CALLS` y `JARVIS_ASSISTANT_MAX_TOOL_CALLS`—, pero se construye con el
+     * segundo. Así que en el chat había **tres cuentas del mismo turno**: el prompt le prometía las
+     * del chat, el toolbox le dejaba las del chat, y el bucle le paraba con las del asistente. La
+     * más baja mandaba sin decirlo, y lo que la persona leía era «me quedé sin margen» con la mitad
+     * del presupuesto sin gastar.
+     *
+     * `context.limits.maxToolCalls` es el número que declaró el llamante y el único que además se
+     * le dice al modelo, así que es el que vale. La instancia queda de respaldo por si viniera a
+     * cero: quedarse sin ninguna vuelta es peor que usar un tope viejo.
+     */
+    const presupuesto = context.limits.maxToolCalls > 0
+      ? context.limits.maxToolCalls
+      : this.#maxToolCalls;
+    const maxRounds = presupuesto + MAX_ARTIFACTS_PER_TURN + 1;
     for (let round = 0; round <= maxRounds; round += 1) {
       // Sólo quedan las que cierran cuando se acabó el margen **o cuando el core ya dijo que no
       // queda presupuesto**: ofrecerle lecturas que van a ser rechazadas gasta una vuelta entera.
-      const decisionsOnly = spent >= this.#maxToolCalls || toolbox.spent;
+      const decisionsOnly = spent >= presupuesto || toolbox.spent;
       const tools = toolbox.definitions({ decisionsOnly });
       const free = new Set(tools.filter((tool) => tool.free).map((tool) => tool.name));
       const body = await this.#ask(messages, tools);
@@ -583,7 +600,7 @@ export class AnthropicModel implements AssistantModel {
       if (consulted) spent += 1;
       // Pasado el presupuesto se sale: en la vuelta anterior ya se le ofrecieron sólo las que
       // deciden, así que si ha vuelto a consultar es que no va a decidir por su cuenta.
-      if (spent > this.#maxToolCalls) break;
+      if (spent > presupuesto) break;
     }
 
     // Inalcanzable con el bucle de arriba, pero un plan nunca se queda sin salida por un `for`.
@@ -784,7 +801,24 @@ export class OpenAiCompatibleModel implements AssistantModel {
      * con `maxToolCalls * 2` un modelo que se atasca cuesta el doble de viajes contra la API sin
      * poder hacer nada más con ellos.
      */
-    const maxRounds = this.#maxToolCalls + MAX_ARTIFACTS_PER_TURN + 1;
+    /*
+     * El presupuesto es el del turno, no el de la instancia.
+     *
+     * Un mismo modelo lo comparten la conversación y el motor de planes, y cada uno tiene su tope
+     * —`JARVIS_CHAT_MAX_TOOL_CALLS` y `JARVIS_ASSISTANT_MAX_TOOL_CALLS`—, pero se construye con el
+     * segundo. Así que en el chat había **tres cuentas del mismo turno**: el prompt le prometía las
+     * del chat, el toolbox le dejaba las del chat, y el bucle le paraba con las del asistente. La
+     * más baja mandaba sin decirlo, y lo que la persona leía era «me quedé sin margen» con la mitad
+     * del presupuesto sin gastar.
+     *
+     * `context.limits.maxToolCalls` es el número que declaró el llamante y el único que además se
+     * le dice al modelo, así que es el que vale. La instancia queda de respaldo por si viniera a
+     * cero: quedarse sin ninguna vuelta es peor que usar un tope viejo.
+     */
+    const presupuesto = context.limits.maxToolCalls > 0
+      ? context.limits.maxToolCalls
+      : this.#maxToolCalls;
+    const maxRounds = presupuesto + MAX_ARTIFACTS_PER_TURN + 1;
     for (let round = 0; round <= maxRounds; round += 1) {
       /*
        * Las dos mitades de `minimal`, que son distintas y hay que aplicarlas por separado.
@@ -801,7 +835,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
        * Juntas: se piensa lo justo para contestar y no hay con qué irse por las ramas.
        */
       const decisionsOnly = this.#turnJudged === 'minimal'
-        || spent >= this.#maxToolCalls || toolbox.spent || nudged;
+        || spent >= presupuesto || toolbox.spent || nudged;
       const tools = toolbox.definitions({ decisionsOnly });
       const free = new Set(tools.filter((tool) => tool.free).map((tool) => tool.name));
       const message = await this.#ask(messages, tools);
@@ -895,7 +929,7 @@ export class OpenAiCompatibleModel implements AssistantModel {
       if (consulted) spent += 1;
       // Pasado el presupuesto se sale: en la vuelta anterior ya se le ofrecieron sólo las que
       // deciden, así que si ha vuelto a consultar es que no va a decidir por su cuenta.
-      if (spent > this.#maxToolCalls) break;
+      if (spent > presupuesto) break;
     }
 
     return { kind: 'finish', summary: OUT_OF_BUDGET };

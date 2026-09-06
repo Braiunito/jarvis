@@ -416,6 +416,33 @@ describe('TURNO · el presupuesto cuenta lo que consulta, no lo que enseña', ()
     expect(summary).not.toContain('presupuesto');
     expect(summary).toContain('vuelve a preguntarme');
   });
+
+  /*
+   * Quien manda es el turno, no la instancia.
+   *
+   * El mismo modelo lo comparten la conversación y el motor de planes, que tienen topes distintos,
+   * y se construye con el del motor. Sin esto el chat tenía **tres cuentas del mismo turno** —el
+   * prompt prometía las suyas, el toolbox dejaba las suyas y el bucle paraba con las del motor— y
+   * la más baja mandaba en silencio: se leía «me quedé sin margen» con el margen a medias.
+   *
+   * Los números imitan el caso real: instancia 1 (como `JARVIS_ASSISTANT_MAX_TOOL_CALLS`), turno 6
+   * (como `JARVIS_CHAT_MAX_TOOL_CALLS`). Con el fallo, la cuarta consulta no llegaba a hacerse.
+   */
+  it('el tope que para el turno es el que se le prometió, no el de la instancia', async () => {
+    const toolbox = new ContadorToolbox();
+    const model = new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'https://api.test', model: 'm', maxToolCalls: 1,
+      fetchImpl: fetchQue(['get_health', 'get_health', 'get_health', 'get_health', 'finish']),
+    });
+
+    const decision = await model.decide(
+      { ...contexto, limits: { ...contexto.limits, maxToolCalls: 6 } },
+      toolbox,
+    );
+
+    expect(decision).toEqual({ kind: 'finish', summary: 'aquí tienes' });
+    expect(toolbox.calls).toHaveLength(5);
+  });
 });
 
 /**
