@@ -510,3 +510,29 @@ describe('ESFUERZO · el stack de desarrollo también puede enseñarlo', () => {
     expect(notas).toEqual(['medium']);
   });
 });
+
+describe('ESFUERZO · `minimal` significa que no hay nada que averiguar', () => {
+  it('con ese nivel sólo se le ofrecen las que cierran, así que un saludo es una llamada', async () => {
+    const toolbox = new ContadorToolbox();
+    let primera = true;
+    const fetchImpl = (async () => {
+      const message = primera
+        ? { content: 'minimal' }
+        : { tool_calls: [{ id: 'c1', type: 'function', function: { name: 'finish', arguments: '{}' } }] };
+      primera = false;
+      const payload = { choices: [{ message }] };
+      return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
+    }) as unknown as FetchLike;
+    const model = new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'https://api.test', model: 'm', reasoningEffort: 'auto', fetchImpl,
+    });
+
+    await model.decide({ ...contexto, objective: 'gracias!' }, toolbox);
+
+    /*
+     * Medido en producción antes de esto: «gracias!» gastó cinco consultas y «Hola» cuatro, porque
+     * el turno obliga a llamar a alguna herramienta y sin deliberar no elige la que cierra.
+     */
+    expect(toolbox.calls).toEqual(['finish']);
+  });
+});

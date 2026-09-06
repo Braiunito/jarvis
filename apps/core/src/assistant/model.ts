@@ -756,7 +756,20 @@ export class OpenAiCompatibleModel implements AssistantModel {
      */
     const maxRounds = this.#maxToolCalls + MAX_ARTIFACTS_PER_TURN + 1;
     for (let round = 0; round <= maxRounds; round += 1) {
-      const decisionsOnly = spent >= this.#maxToolCalls || toolbox.spent || nudged;
+      /*
+       * Con `minimal` no se le ofrecen lecturas, y esto no es una optimización: es lo que hace que
+       * el nivel signifique lo que dice.
+       *
+       * `minimal` es «no hay nada que averiguar». Pero el turno obliga a llamar a **alguna**
+       * herramienta en cada vuelta, y sin deliberar el modelo no elige la que cierra: elige una
+       * cualquiera. Medido en producción: «gracias!» gastó cinco consultas —búsqueda de sesiones,
+       * abrir un workspace, leer contexto— y «Hola», cuatro. Peor que antes de existir el nivel.
+       *
+       * Ofreciéndole sólo las que deciden, un saludo es una llamada. Y si de verdad hiciera falta
+       * mirar algo, el juez no habría dicho `minimal`.
+       */
+      const decisionsOnly = this.#turnEffort === 'minimal'
+        || spent >= this.#maxToolCalls || toolbox.spent || nudged;
       const tools = toolbox.definitions({ decisionsOnly });
       const free = new Set(tools.filter((tool) => tool.free).map((tool) => tool.name));
       const message = await this.#ask(messages, tools);
