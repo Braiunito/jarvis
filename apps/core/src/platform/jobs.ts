@@ -225,6 +225,23 @@ export class JobRepository {
     return counts;
   }
 
+  /**
+   * Cuántos han fallado **desde** un momento dado.
+   *
+   * La salud mira esto y no el total, y el motivo se vio en producción: un despliegue deja dos
+   * turnos perdidos, `counts().failed` los cuenta para siempre y la casa se queda «degradada»
+   * eternamente por algo que ya no se puede arreglar. Una alarma que no se apaga sola es una
+   * alarma que se aprende a ignorar, y entonces no avisa del día que sí importa.
+   *
+   * No se borran ni se marcan como vistos: siguen en la tabla, que es el historial de lo que
+   * pasó. Lo que cambia es qué se considera **noticia**.
+   */
+  failedSince(since: string): number {
+    const row = this.#db.prepare("SELECT COUNT(*) n FROM jobs WHERE status = 'failed' AND updated_at >= ?")
+      .get(since) as { n: number };
+    return row.n;
+  }
+
   find(id: string): Job | null {
     const row = this.#db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as JobRow | undefined;
     return row ? toJob(row) : null;

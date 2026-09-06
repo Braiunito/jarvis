@@ -28,6 +28,9 @@ export interface HealthServiceDeps {
   version: string;
 }
 
+/** Cuánto hacia atrás mira el aviso de turnos sin contestar. Un día: lo que aún es accionable. */
+const JOBS_ALERT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /** Cuándo arrancó este proceso: es lo que convierte «uptime» en un dato y no en una sensación. */
 const STARTED_AT = new Date();
 
@@ -124,8 +127,18 @@ export class HealthService {
      */
     if (this.#deps.jobs) {
       const counts = this.#deps.jobs.counts();
-      checks['chatJobs'] = counts.failed
-        ? { status: 'degraded', code: 'JOBS_FAILED', message: `${counts.failed} turno(s) quedaron sin contestar`, detail: { ...counts } }
+      /*
+       * Lo que se vigila son los fallos **recientes**, no el histórico.
+       *
+       * Contando el total, un despliegue que pierde dos turnos deja la casa en `degraded` para
+       * siempre: nadie puede contestar ya esas preguntas, así que el aviso no lleva a ninguna
+       * acción y se aprende a ignorarlo. Con ventana, avisa mientras se puede hacer algo y se
+       * calla después. El total sigue en el detalle, que es donde se mira el historial.
+       */
+      const desde = new Date(this.#deps.clock.nowMs() - JOBS_ALERT_WINDOW_MS).toISOString();
+      const recientes = this.#deps.jobs.failedSince(desde);
+      checks['chatJobs'] = recientes
+        ? { status: 'degraded', code: 'JOBS_FAILED', message: `${recientes} turno(s) quedaron sin contestar en las últimas 24 h`, detail: { ...counts, recientes } }
         : { status: 'ok', detail: { ...counts } };
     }
 

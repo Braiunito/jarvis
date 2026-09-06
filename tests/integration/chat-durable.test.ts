@@ -264,6 +264,30 @@ describe('DURABLE · la salud cuenta lo que quedó sin contestar', () => {
     expect(rota.checks['chatJobs']?.status).toBe('degraded');
     expect(rota.checks['chatJobs']?.message).toContain('sin contestar');
   });
+
+  it('pero un turno perdido hace una semana ya no es noticia', async () => {
+    /*
+     * Visto en producción: un despliegue perdió dos turnos, y la casa se quedó en `degraded`
+     * indefinidamente. Nadie puede contestar ya esas preguntas, así que el aviso no lleva a
+     * ninguna acción — y un aviso que no se puede atender se aprende a ignorar, que es como se
+     * pierde el día que sí importa.
+     *
+     * El historial no se toca: los fallidos siguen en la tabla y en el detalle. Lo que cambia es
+     * qué se considera noticia.
+     */
+    const { services, jobs } = harness(new ScriptedBrain([]));
+    const conversation = services.chat.create({ user });
+    const job = jobs.enqueue({
+      kind: 'chat.turn', resourceType: 'conversation', resourceId: conversation.id,
+      watermarkSeq: 0, at: '2020-01-01T00:00:00.000Z',
+    });
+    jobs.abandon(job.id, 'se perdió en un despliegue viejo', '2020-01-01T00:00:00.000Z');
+
+    const salud = await services.health.snapshot({ probeHosts: false });
+    expect(salud.checks['chatJobs']?.status).toBe('ok');
+    // Y sigue contado donde se mira el historial, no borrado.
+    expect((salud.checks['chatJobs']?.detail as { failed: number }).failed).toBe(1);
+  });
 });
 
 describe('DURABLE · el trabajo que ya se está haciendo no se hace otra vez', () => {
