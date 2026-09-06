@@ -132,7 +132,9 @@ describe('ARTIFACT · confundir los dos campos no cuesta el turno', () => {
   it('y el cuerpo decide el tipo: una tabla se reconoce por sus columnas', () => {
     expect(resolveKind('panel', table([{ host: 'zeus' }]))).toBe('table');
     expect(resolveKind('modal', JSON.stringify({ shape: 'meter', value: 1, max: 2 }))).toBe('chart');
-    expect(resolveKind('inline', '<p>hola</p>')).toBe('html');
+    // `html` NO se infiere: es la única rama donde adivinar mal concede en vez de degradar, y
+    // se dispararía con un carácter. Un cuerpo con etiquetas sale como texto, que es inerte.
+    expect(resolveKind('inline', '<p>hola</p>')).toBe('markdown');
     expect(resolveKind('panel', 'texto normal')).toBe('markdown');
     expect(resolveKind('markdown', 'texto normal')).toBe('markdown');
   });

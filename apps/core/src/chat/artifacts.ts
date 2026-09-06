@@ -269,8 +269,18 @@ export function resolveKind(kind: string, body: string): ArtifactKind | null {
   // presentación es otra cosa, y adivinarla sería inventar.
   if (!(ARTIFACT_PRESENTATIONS as readonly string[]).includes(kind)) return null;
 
-  const trimmed = body.trimStart();
-  if (trimmed.startsWith('<')) return 'html';
+  /*
+   * `html` no se infiere nunca, y es la única excepción de esta función.
+   *
+   * Las demás inferencias son inertes: acertar mal en `table`, `chart`, `json` o `markdown` pinta
+   * algo raro y se acabó. `html` **ejecuta JavaScript**, así que es la única donde adivinar mal
+   * concede en vez de degradar — y se dispararía con un carácter: un markdown que empiece por una
+   * etiqueta, un fragmento de XML, una respuesta que arranque con `<`.
+   *
+   * Si el modelo quiere un documento que ejecuta, que escriba la palabra: `html` es inequívoca, no
+   * se confunde con ninguna presentación, y así no se llega a ella por accidente. Un cuerpo con
+   * etiquetas que llegue por este camino se pinta como texto, que es la respuesta inerte.
+   */
   try {
     const parsed: unknown = JSON.parse(body);
     if (isRecord(parsed)) {
