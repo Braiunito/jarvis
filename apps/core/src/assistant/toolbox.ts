@@ -19,7 +19,7 @@ import type {
   AutonomyMode, Health, McpArea, PermissionProfile, Plan, Provider, Run, RunEvent, UserIdentity,
   Workspace,
 } from '@jarvis/contracts';
-import { JarvisError, MCP_AREAS } from '@jarvis/contracts';
+import { autonomyOf, JarvisError, MCP_AREAS } from '@jarvis/contracts';
 import type { ArtifactPresentation, ChatRef, McpCapability } from '@jarvis/contracts';
 import { ARTIFACT_KINDS, ARTIFACT_PRESENTATIONS } from '@jarvis/contracts';
 import {
@@ -2114,9 +2114,18 @@ export class CoreAssistantToolbox implements AssistantToolbox {
      * escribir**, que es lo que el contrato prometía desde el principio y el código no cumplía.
      * `unrestricted` los deja ir los dos; `yolo` no entra por aquí en ningún modo, se corta arriba.
      */
-    const preguntar = this.#deps.autonomy === 'manual'
-      || (this.#deps.autonomy === 'auto' && profile !== 'safe');
-    if (preguntar) {
+    /*
+     * Se enumera lo que va **suelto**, no lo que pregunta.
+     *
+     * Estaba al revés —«pregunta si es manual, o si es auto y no es seguro»— y con eso cualquier
+     * valor que no fuera exactamente uno de los dos caía en «no preguntes»: una `M` mayúscula en
+     * el `.env` lanzaba trabajo con permiso de escritura sin tarjeta. Un condicional que enumera
+     * los casos permisivos falla cerrado por construcción, porque lo desconocido no está en la
+     * lista; el mismo escrito al revés falla abierto y parece igual de correcto al leerlo.
+     */
+    const autonomy = autonomyOf(this.#deps.autonomy);
+    const suelto = autonomy === 'unrestricted' || (autonomy === 'auto' && profile === 'safe');
+    if (!suelto) {
       return {
         type: 'decision',
         decision: {

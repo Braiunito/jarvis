@@ -13,7 +13,7 @@ import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
 import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
 import {
-  ArtifactRepository, MAX_ARTIFACT_BYTES, previewOf, resolveKind, samePresentation,
+  ArtifactRepository, MAX_ARTIFACT_BYTES, previewOf, resolveKind, samePresentation, validateBody,
 } from '../src/chat/artifacts.js';
 import type {
   AssistantToolbox, PlanContext, ToolDefinition, ToolOutcome,
@@ -545,3 +545,45 @@ describe('ESFUERZO · `minimal` sirve para juzgar, no para contestar', () => {
     expect(toolbox.calls).toEqual(['finish']);
   });
 });
+
+describe('R-16 · lo que no se puede pintar no llega a pintarse', () => {
+  const tabla = (cuerpo: unknown): ReturnType<typeof validateBody> =>
+    validateBody('table', JSON.stringify(cuerpo));
+
+  it('un `label` que no es texto se rechaza aquí, no en el navegador', () => {
+    // El mensaje ya prometía comprobar `label` y sólo miraba `key`. React no sabe pintar un objeto:
+    // llegaba hasta la pantalla y se la llevaba entera.
+    const fallo = tabla({
+      columns: [{ key: 'host', label: { es: 'Máquina' } }],
+      rows: [{ host: 'zeus' }],
+    });
+    expect(fallo?.code).toBe('BAD_INPUT');
+    expect(fallo?.message).toContain('las dos de texto');
+  });
+
+  it('una celda con un objeto dentro dice qué celda y qué hacer', () => {
+    /*
+     * Es lo que hace el modelo cuando una capacidad devuelve `{used, total}`: mete el objeto en la
+     * celda en vez de elegir un número. Lo que cierra el bucle no es el rechazo, es que el mensaje
+     * diga qué fila, qué columna y cuál es la salida.
+     */
+    const fallo = tabla({
+      columns: [{ key: 'host', label: 'Máquina' }, { key: 'disco', label: 'Disco' }],
+      rows: [{ host: 'zeus', disco: { used: 40, total: 100 } }],
+    });
+    expect(fallo?.code).toBe('BAD_INPUT');
+    expect(fallo?.message).toContain('`disco`');
+    expect(fallo?.message).toContain('fila 1');
+    expect(fallo?.hint).toContain('elige el campo');
+  });
+
+  it('lo que sí se puede escribir sigue pasando', () => {
+    // La otra mitad: un validador que rechazara de más rompería las tablas buenas, y `null` es un
+    // valor legítimo —«no se sabe»— que no se puede confundir con un objeto.
+    expect(tabla({
+      columns: [{ key: 'host', label: 'Máquina' }, { key: 'libre', label: 'Libre' }],
+      rows: [{ host: 'zeus', libre: 40 }, { host: 'goro2', libre: null }, { host: 'x', libre: true }],
+    })).toBeNull();
+  });
+});
+

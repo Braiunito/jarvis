@@ -1,3 +1,4 @@
+import { autonomyOf } from '@jarvis/contracts';
 /** Configuración del core. Todo lo que el core puede tocar se declara aquí. */
 const env = process.env;
 const bool = (value: string | undefined, fallback: boolean): boolean =>
@@ -307,7 +308,14 @@ export const config = {
   chatMaxTools: Number(env['JARVIS_CHAT_MAX_TOOLS'] || 128),
   chatHistoryMessages: Number(env['JARVIS_CHAT_HISTORY_MESSAGES'] || 12),
   /** Con qué autonomía nace una conversación. La persona la cambia desde la interfaz. */
-  chatDefaultAutonomy: (env['JARVIS_CHAT_DEFAULT_AUTONOMY'] || 'manual') as 'manual' | 'auto',
+  /**
+   * Con qué autonomía nacen las conversaciones.
+   *
+   * Se sanea, y no es celo: el valor se guardaba tal cual y una errata —`Manual`, `automatico`—
+   * llegaba hasta el gate del toolbox, que la leía como «ninguno de los dos» y dejaba pasar. Una
+   * variable de entorno mal escrita no puede ser una forma de conceder permisos.
+   */
+  chatDefaultAutonomy: autonomyOf(env['JARVIS_CHAT_DEFAULT_AUTONOMY']),
   chatRetentionDays: Number(env['JARVIS_CHAT_RETENTION_DAYS'] || 90),
 
   /**

@@ -12,7 +12,7 @@ import type {
   Approval, AutonomyMode, Plan, PlanStep, PlanStatus, Run, UserIdentity, Workspace,
   WorkflowEnvelope,
 } from '@jarvis/contracts';
-import { AUTONOMY_MODES, isTerminalStatus, JarvisError } from '@jarvis/contracts';
+import { autonomyOf, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId, newPlanId, newStepId } from '../platform/ids.js';
 import {
@@ -57,15 +57,6 @@ interface ApprovalRow {
   action_digest: string; summary: string; requested_by: string; requested_at: string; expires_at: string;
   status: string; resolved_by: string | null; resolved_at: string | null; consumed_at: string | null;
 }
-
-/**
- * La autonomía de la fila, o `manual` si es un valor que no reconocemos.
- *
- * Cae hacia el modo que más pregunta, no hacia el que más deja pasar. Una columna con basura no
- * puede ser una forma de conceder permisos.
- */
-const autonomyOf = (value: string): AutonomyMode =>
-  ((AUTONOMY_MODES as readonly string[]).includes(value) ? value : 'manual') as AutonomyMode;
 
 const toPlan = (row: PlanRow): Plan => ({
   id: row.id,

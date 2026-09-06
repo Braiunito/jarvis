@@ -175,10 +175,19 @@ function validateTable(parsed: unknown): ArtifactRejection | null {
   }
   const keys: string[] = [];
   for (const column of columns) {
-    if (!isRecord(column) || typeof column['key'] !== 'string' || !column['key']) {
+    /*
+     * El mensaje decía «cada columna necesita `key` y `label`» y sólo se comprobaba `key`.
+     *
+     * Un `label` que no fuera texto —un objeto, una lista— pasaba la validación y llegaba a
+     * pintarse, y React no sabe pintar un objeto: se lleva por delante la pantalla entera. El anillo
+     * de la interfaz evita el desastre; validar aquí evita el fallo. Hacen falta los dos, y éste es
+     * el que además le dice al modelo qué escribió mal.
+     */
+    if (!isRecord(column) || typeof column['key'] !== 'string' || !column['key']
+      || typeof column['label'] !== 'string' || !column['label']) {
       return {
         code: 'BAD_INPUT',
-        message: 'cada columna necesita `key` y `label`',
+        message: 'cada columna necesita `key` y `label`, las dos de texto',
         hint: '{"key":"host","label":"Máquina"}',
       };
     }
@@ -196,6 +205,25 @@ function validateTable(parsed: unknown): ArtifactRejection | null {
         code: 'BAD_INPUT',
         message: `falta la columna \`${missing}\` en la fila ${index + 1}`,
         hint: `las columnas declaradas son ${keys.join(', ')}`,
+      };
+    }
+    /*
+     * Y una celda tiene que ser algo que se pueda escribir.
+     *
+     * Estaba comprobado que la columna existe y no qué hay dentro, así que un objeto o una lista en
+     * una celda pasaban igual y rompían al pintar. El modelo lo hace: cuando una capacidad devuelve
+     * `{used, total}` para una máquina, mete el objeto en la celda en vez de elegir un número.
+     */
+    const complejo = keys.find((key) => {
+      const valor = row[key];
+      return valor !== null && typeof valor === 'object';
+    });
+    if (complejo) {
+      return {
+        code: 'BAD_INPUT',
+        message: `la celda \`${complejo}\` de la fila ${index + 1} no es un valor que se pueda escribir`,
+        hint: 'en una celda va texto, un número o un booleano; si el dato es un objeto, elige el '
+          + 'campo que quieres enseñar o reparte en varias columnas',
       };
     }
   }

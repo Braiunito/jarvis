@@ -41,6 +41,18 @@ export const AUTONOMY_MODES = ['manual', 'auto', 'unrestricted'] as const;
 export type AutonomyMode = (typeof AUTONOMY_MODES)[number];
 export const AutonomyModeSchema = Type.Union(AUTONOMY_MODES.map((mode) => Type.Literal(mode)));
 
+/**
+ * La autonomía de un valor cualquiera, cayendo al modo que **más pregunta**.
+ *
+ * Vive aquí y no en cada sitio que la necesita porque hay tres —la configuración, la fila de una
+ * conversación y la de un plan— y con tres copias basta con que una se olvide de validar para que
+ * una errata conceda permisos. `'Manual'` con mayúscula, `'automatico'` o un valor viejo de una
+ * migración no son «manual» para un `===`, y el gate estaba escrito en positivo: lo que no era
+ * exactamente `manual` ni `auto` **no preguntaba**.
+ */
+export const autonomyOf = (value: unknown): AutonomyMode =>
+  ((AUTONOMY_MODES as readonly string[]).includes(String(value)) ? value : 'manual') as AutonomyMode;
+
 /** De qué cerebro salió cada cosa. Se guarda por mensaje: una conversación puede mezclar. */
 export const MODEL_SOURCES = ['local', 'cloud'] as const;
 export type ModelSource = (typeof MODEL_SOURCES)[number];
