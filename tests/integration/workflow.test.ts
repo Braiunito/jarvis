@@ -340,3 +340,59 @@ describe('WF · gobernar el plan desde fuera', () => {
       .toMatchObject({ ok: false, message: expect.stringContaining('ya terminó') });
   });
 });
+
+describe('WF · un workflow de la casa, sin sesión detrás', () => {
+  /*
+   * Desde la v18 un plan puede no tener workspace: «compara el disco de las tres máquinas» no
+   * pertenece a ninguna sesión de agente. Lo que gana es poder existir; lo que no gana es poder
+   * lanzar trabajo, porque un run necesita un workspace donde vivir.
+   */
+  const deLaCasa = (services: CoreServices) => {
+    const plan = services.plans.createWorkflow({
+      workspaceId: null,
+      objective: 'comparar el disco de las tres máquinas',
+      envelope: sobre({ capabilities: ['zeus.disk_usage'] }),
+      autonomy: 'auto',
+      steps: [{ title: 'Mirar el disco', intent: 'ver cuánto queda en cada máquina', expects: 'tres cifras' }],
+      user,
+    });
+    services.plans.activate(plan.id, user);
+    return plan;
+  };
+
+  it('se puede proponer y firmar sin ninguna sesión', () => {
+    const services = harness(new PlanBrain([]));
+    const plan = deLaCasa(services);
+
+    expect(services.plans.require(plan.id).workspaceId).toBeNull();
+    expect(services.plans.require(plan.id).status).toBe('ready');
+  });
+
+  it('el contexto dice que no hay sesión, en vez de inventarse una vacía', async () => {
+    const model = new PlanBrain([() => ({ kind: 'finish', summary: 'los tres discos van bien' })]);
+    const services = harness(model);
+    const plan = deLaCasa(services);
+    await services.plans.advance(plan.id, user);
+
+    /*
+     * Un workspace con todos los campos en nulo se lee como «hay una sesión y no sé nada de
+     * ella», y entonces el modelo habla de una sesión que no existe. Ausente es más honesto.
+     */
+    expect(model.lastContext?.workspace).toBeUndefined();
+  });
+
+  it('y si pide lanzar trabajo, se le dice por qué no puede', async () => {
+    const model = new PlanBrain([
+      () => ({ kind: 'run', title: 'Mirar', prompt: 'df -h', permissionProfile: 'safe', rationale: 'hace falta' }),
+    ]);
+    const services = harness(model);
+    const plan = deLaCasa(services);
+    await services.plans.advance(plan.id, user);
+
+    // Se corta al pedirlo y no al crear el plan: un workflow de la casa es legítimo mientras se
+    // limite a mirar, y lo que no puede es acabar lanzando un trabajo.
+    const final = services.plans.require(plan.id);
+    expect(final.status).toBe('failed');
+    expect(final.summary).toContain('no está atado a ninguna sesión');
+  });
+});

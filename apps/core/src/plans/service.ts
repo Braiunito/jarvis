@@ -313,7 +313,14 @@ export class PlanService {
    * con qué se hará. Atarlos es trabajo del turno que llegue a cada uno.
    */
   createWorkflow(input: {
-    workspaceId: string;
+    /**
+     * Sobre qué sesión trabaja, si trabaja sobre alguna.
+     *
+     * `null` es un workflow **de la casa** —«compara el disco de las tres máquinas»— que no
+     * pertenece a ninguna sesión de agente. No puede lanzar trabajo: un run necesita un workspace
+     * donde vivir, y eso se dice al llegar en vez de descubrirse a mitad.
+     */
+    workspaceId: string | null;
     objective: string;
     envelope: WorkflowEnvelope;
     steps: ReadonlyArray<DraftStep>;
@@ -322,7 +329,7 @@ export class PlanService {
     user: UserIdentity;
   }): Plan {
     const user = input.user;
-    this.#deps.workspaces.require(input.workspaceId);
+    if (input.workspaceId) this.#deps.workspaces.require(input.workspaceId);
     if (!input.objective.trim()) throw new JarvisError('BAD_REQUEST', 'el objetivo no puede estar vacío');
     if (input.steps.length === 0) throw new JarvisError('BAD_REQUEST', 'un workflow sin pasos no es un plan');
 
@@ -334,7 +341,7 @@ export class PlanService {
         (id, workspace_id, created_by, objective, status, current_step, created_at, updated_at,
          autonomy, conversation_id, envelope_json)
         VALUES (?, ?, ?, ?, 'draft', 0, ?, ?, ?, ?, ?)`)
-        .run(planId, input.workspaceId, user.username, input.objective, at, at,
+        .run(planId, input.workspaceId ?? null, user.username, input.objective, at, at,
           autonomy, input.conversationId ?? null, JSON.stringify(input.envelope));
 
       input.steps.forEach((step, ordinal) => {
@@ -707,14 +714,22 @@ export class PlanService {
 
     const plan = this.require(planId);
     const row = db.prepare('SELECT autonomy FROM plans WHERE id = ?').get(planId) as { autonomy: string };
-    const workspace = this.#deps.workspaces.require(plan.workspaceId);
+    /*
+     * Un plan de la casa no tiene sesión, y eso ya no es un fallo.
+     *
+     * Desde la v18 `plans.workspace_id` admite nulo, así que hay planes que no trabajan sobre
+     * ninguna sesión de agente. Lo que no pueden es lanzar trabajo —un run necesita un workspace
+     * donde vivir— y eso se dice cuando el modelo lo pide, no aquí.
+     */
+    const workspace = plan.workspaceId ? this.#deps.workspaces.require(plan.workspaceId) : null;
     const steps = this.steps(planId);
     const context = this.#contextFor(plan, workspace, steps);
 
     // Las herramientas se construyen por turno y atadas a este plan: ninguna alcanza el trabajo de
     // otro workspace ni actúa como otra persona.
     const toolbox = new CoreAssistantToolbox({
-      plan, workspace, sessions, health, runs, audit, user,
+      plan, sessions, health, runs, audit, user,
+      ...(workspace ? { workspace } : {}),
       /*
        * La autonomía del plan, leída de su fila.
        *
@@ -745,6 +760,17 @@ export class PlanService {
     }
 
     /*
+     * Un plan de la casa no lanza trabajo, y se dice al pedirlo.
+     *
+     * Un run vive en un workspace: sin sesión no hay dónde ponerlo. Se corta aquí —cuando el
+     * modelo lo pide— y no al crear el plan, porque un workflow de la casa es perfectamente
+     * legítimo mientras se limite a mirar; lo que no puede es acabar lanzando un trabajo.
+     */
+    const sinSesion = 'este plan no está atado a ninguna sesión, así que no puede lanzar trabajo: '
+      + 'lo que necesite una máquina concreta hay que pedirlo desde un workspace';
+    if (decision.kind === 'run' && !workspace) return this.#finish(planId, 'failed', sinSesion);
+
+    /*
      * Lo que se sale del sobre no falla ni obedece: se convierte en una tarjeta.
      *
      * Se transforma la decisión **antes** de que llegue a su rama, así que pasa por la misma
@@ -759,7 +785,7 @@ export class PlanService {
     if (decision.kind === 'run' && plan.envelope) {
       const fuera = outsideEnvelope(
         plan.envelope,
-        { kind: 'run', host: workspace.ref.host, permissionProfile: decision.permissionProfile },
+        { kind: 'run', host: workspace?.ref.host ?? null, permissionProfile: decision.permissionProfile },
         { steps: steps.length, runs: steps.filter((step) => step.runId).length },
       );
       if (fuera) {
@@ -831,6 +857,10 @@ export class PlanService {
     }
 
     if (decision.kind === 'approval') {
+      // La comprobación va aquí y no arriba porque así es el propio flujo el que garantiza que hay
+      // sesión, en vez de un `!` que dice «confía en mí» sobre una guarda que está treinta líneas
+      // más arriba y que alguien puede mover.
+      if (!workspace) return this.#finish(planId, 'failed', sinSesion);
       const approvalId = newApprovalId();
       const target = {
         workspaceId: plan.workspaceId,
@@ -953,7 +983,7 @@ export class PlanService {
    * cuando le hace falta. Reenviar buffers «por si acaso» es cómo un plan de cuatro pasos acaba
    * costando lo que uno de cuarenta.
    */
-  #contextFor(plan: Plan, workspace: Workspace, steps: PlanStep[]): PlanContext {
+  #contextFor(plan: Plan, workspace: Workspace | null, steps: PlanStep[]): PlanContext {
     /*
      * Con qué cerebro se piensa este paso.
      *
@@ -1001,14 +1031,22 @@ export class PlanService {
 
     return {
       objective: plan.objective,
-      workspace: {
-        id: workspace.id,
-        host: workspace.ref.host,
-        provider: workspace.ref.provider,
-        sessionId: workspace.ref.sessionId,
-        cwd: workspace.cwd,
-        title: workspace.title,
-      },
+      /*
+       * Sin sesión, el contexto **lo dice** en vez de inventarse un workspace vacío.
+       *
+       * Un objeto con todos los campos en nulo se lee como «hay una sesión y no sé nada de ella»,
+       * que es peor que no tenerla: el modelo se pone a hablar de una sesión que no existe.
+       */
+      ...(workspace ? {
+        workspace: {
+          id: workspace.id,
+          host: workspace.ref.host,
+          provider: workspace.ref.provider,
+          sessionId: workspace.ref.sessionId,
+          cwd: workspace.cwd,
+          title: workspace.title,
+        },
+      } : {}),
       history,
       pendingInput,
       pendingApprovals,
