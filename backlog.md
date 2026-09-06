@@ -1313,6 +1313,27 @@ Emparenta con TEC-12.
 
 ## Hallazgos
 
+> **El clasificador de esfuerzo acierta más con `minimal` que con `low`** (2026-09-06). Medido
+> contra la API de producción con `gpt-5-nano`, siete preguntas y tres rondas por nivel:
+>
+> ```
+> minimal   6/7   6/7   6/7
+> low       5/7   4/7   3/7
+> ```
+>
+> Va escrito con el número porque sin él parece tacañería. Alguien que vea dentro de seis meses que
+> la pasada previa corre con el esfuerzo más bajo posible va a pensar que se puso así para ahorrar y
+> lo va a subir «para que acierte más». Subirlo lo empeora, y además lo vuelve inestable: `low` no
+> sólo acierta menos, sino que da un número distinto en cada ronda.
+>
+> La explicación que le encontramos: **clasificar contra una lista corta es un reconocimiento, no un
+> razonamiento**. Dejarle deliberar un poco le da margen para dudar de una respuesta que ya tenía.
+> Que además `minimal` gaste cero tokens de razonamiento es una casualidad afortunada, no el motivo,
+> y conviene no confundirlas al releer esto.
+>
+> La primera corrida dio 7/7 contra 4/7 y no se dio por buena: una corrida no es una tasa.
+
+
 > **Nota de la parte de interfaz de HZ-27** (2026-09-02). Se eligió ofrecer lo único que funciona
 > en vez de avisar de lo que va a fallar: en una sesión sin un solo turno, el compositor se
 > sustituye por «empezar una conversación aquí», con la máquina y la carpeta ya puestas, y la vista
