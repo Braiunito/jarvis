@@ -89,6 +89,35 @@ La fila del perfil `auto` en modo `auto` es el arreglo: es lo que el contrato ya
 - **La frontera del gateway (ADR-001).** Un modo guardado en la base del core no puede tocar lo que
   aplica quien firma la identidad.
 
+### 3-bis. Lo que se lleva por delante la supervisión, tampoco — y esto está sin resolver
+
+Una tarjeta existe para que alguien vea qué se va a ejecutar. Una acción que destruye **el
+mecanismo que enseña el resultado** deja la tarjeta sin efecto hacia atrás: da igual haber firmado
+si nadie va a poder leer qué pasó. Así que un modo más suelto no debería poder abrir una acción que
+apaga aquello con lo que se le vigila.
+
+El caso concreto, comprobado en el servidor MCP de esta casa el 2026-09-06: `MCP_SERVICE_ALLOWLIST`
+incluye `jarvis`, así que **`stop_service` y `restart_service` alcanzan al servicio que sostiene
+todo esto**. En `unrestricted`, «para el servicio jarvis» se ejecutaría sin tarjeta y tumbaría el
+stack entero. No es una hipótesis sobre el modelo: es lo que la configuración permite.
+
+Otras dos que se miraron y **no** aplican, porque el dato las descarta: `docker_stop` no alcanza a
+los contenedores de Jarvis —la allowlist es `{go2rtc, jarvis}` y la comprobación es pertenencia
+exacta, no subcadena—, y `write_text_file` sólo escribe bajo `MCP_WRITE_ROOTS`
+(`/opt/jarvis`, `/srv/jarvis`), donde el despliegue no vive. Las dos lo decían en su propio resumen
+y nadie lo había leído.
+
+**Queda sin resolver a propósito**, y el motivo es que la herramienta que hay no sirve:
+`JARVIS_MCP_DENY` no distingue modos, así que denegar `stop_service` lo bloquearía también **con
+tarjeta**, que es una operación legítima. Lo que haría falta es una lista distinta —«esto nunca va
+sin firma, aunque el modo lo permita»— y el problema real es que la unidad sobre la que sabemos
+razonar es la **herramienta** y el peligro está en el **argumento**: `restart_service nginx` es
+rutina y `restart_service jarvis` es apagarse a uno mismo. Mientras el sobre no nombre capacidades
+con sus argumentos, cualquier gate aquí es más grueso que el problema.
+
+Se deja escrito en vez de resuelto porque quitarle a alguien una capacidad que acaba de conceder es
+una decisión suya, no del que la implementa.
+
 ### 4. La capacidad sin etiquetar sigue pidiendo tarjeta, y es protección latente
 
 `effectsOf` es fail-closed: una capacidad sin etiquetas en un servidor con escrituras se trata como
