@@ -1765,3 +1765,27 @@ El test comprobaba el banner del agente falso, que sólo aparece la primera vez:
 tmux redibuja la pantalla actual, no el historial. En escritorio pasaba y en móvil fallaba porque
 la sesión ya existía. Ahora se comprueba el eco de lo que se teclea, que es lo que de verdad
 demuestra que hay un TTY al otro lado.
+
+### [x] TEC-13 · Dos commits llevan un mensaje que no describe lo que contienen
+
+Quien audite la historia del 2026-09-06 va a encontrar dos commits cruzados. No falta código —todo
+está en `master`— pero el porqué quedó separado del qué, y eso es lo caro.
+
+**`55323ab`** contiene `assistant/model.ts` y `test/artifacts.test.ts`: el arreglo de que un turno
+se construyera con un tope de consultas y se le prometiera otro en el prompt. Su mensaje, en
+cambio, habla de la prueba que caza que la herramienta de workflow no llegue al modelo. La causa
+fue mía: enmendé un commit dando por hecho que `HEAD` seguía siendo el mío, y para entonces otra
+sesión ya había comiteado encima. `--amend` no enmienda «lo último que hice yo», enmienda `HEAD`, y
+en un árbol con cuatro sesiones eso no es lo mismo.
+
+**`1808f9b`** contiene el arreglo de que `ChatService` no le pasaba el motor de planes al toolbox
+—sin el cual la herramienta de workflow no se ofrecía nunca—, dentro de un commit cuyo mensaje
+habla de artifacts. Ahí el orden fue el inverso: el arreglo se quedó sin comitear en el árbol
+compartido y se lo llevó por delante quien comiteó ese fichero por ruta.
+
+No se corrige reescribiendo: `master` está compartido, hay commits encima y cambiar la historia por
+un mensaje sale más caro que la nota. Queda esto como puente.
+
+La regla que sale de las dos: **en un árbol compartido, un fichero sin comitear es de todos, y
+`HEAD` no es tuyo**. Comitear pronto y por rutas evita la primera; comprobar `git log -1` antes de
+enmendar evita la segunda.
