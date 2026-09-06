@@ -57,7 +57,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 | R-01 | P1 | Aprobación caducada → conversación bloqueada para siempre | `chat/service.ts` | core | [ ] |
 | R-02 | P0 | Un permiso de escalada vale más de un turno en la nube | `chat/service.ts` | core | [ ] |
 | R-03 | P0 | El digest de la aprobación nunca se comprueba | `chat/service.ts`, `plans/service.ts` | core | [ ] |
-| R-04 | P0 | Un artifact HTML puede salir a la red (iframe anidado, navegación a pelo) | `chat/routes.ts` | core | [ ] |
+| R-04 | P0 | Un artifact HTML puede salir a la red (iframe anidado, navegación a pelo) | `chat/routes.ts` | core | [x] |
 | R-05 | P1 | En modo directo el catálogo MCP se declara **sin parámetros** | `mcp/service.ts` | core | [ ] |
 | R-06 | P1 | El memo de capacidades mezcla servidores y cobra la repetición | `assistant/toolbox.ts` | core | [ ] |
 | R-07 | P1 | Salud dice `ok` con el MCP caído | `mcp/service.ts` | core | [ ] |
