@@ -29,10 +29,13 @@ hacerla —con el motivo escrito—, que también es liquidarla.
 **Estado**: `[ ]` pendiente · `[-]` en curso · `[x]` cerrada (con el commit o el motivo en la
 sección del ítem).
 
-**Quién**: `core` = seguridad, chat, MCP y toolbox · `web` = `apps/web` y e2e · `flujo` =
-durabilidad, jobs, planes, concurrencia, gasto y features del motor.
+**Quién**: `core` = todo lo que vive en `apps/core` y `packages/contracts` —seguridad, chat, MCP,
+toolbox, planes, jobs, gasto— · `web` = `apps/web` y las pruebas de extremo a extremo.
 
-**Cómo se escribe sin pisarse.** Somos cuatro sesiones sobre el mismo árbol, así que:
+**Dos sesiones lo liquidan**, no cuatro: las otras dos están en workflows y persistencia, que es
+otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
+
+**Cómo se escribe sin pisarse.** Compartimos árbol, así que:
 
 1. **Cada sesión edita sólo sus propias filas.** Una fila lleva dueño; cambiar la de otro es
    pisarle el estado.
@@ -58,16 +61,16 @@ durabilidad, jobs, planes, concurrencia, gasto y features del motor.
 | R-05 | P1 | En modo directo el catálogo MCP se declara **sin parámetros** | `mcp/service.ts` | core | [ ] |
 | R-06 | P1 | El memo de capacidades mezcla servidores y cobra la repetición | `assistant/toolbox.ts` | core | [ ] |
 | R-07 | P1 | Salud dice `ok` con el MCP caído | `mcp/service.ts` | core | [ ] |
-| R-08 | P1 | Dos envíos seguidos: la primera pregunta no se contesta, la segunda dos veces, y sin job | `chat/service.ts` | flujo | [ ] |
+| R-08 | P1 | Dos envíos seguidos: la primera pregunta no se contesta, la segunda dos veces, y sin job | `chat/service.ts` | core | [ ] |
 | R-09 | P1 | El objetivo del turno se pierde con más de 12 trazas de herramienta | `chat/service.ts` | core | [ ] |
-| R-10 | P1 | Una conversación larga (>500 filas) pierde su cola al abrirla | `chat/repository.ts`, `routes.ts` | flujo | [ ] |
-| R-11 | P1 | Borrar una conversación deja aprobaciones pendientes y jobs huérfanos | `chat/service.ts` | flujo | [ ] |
-| R-12 | P1 | El esfuerzo de un turno contamina a otra conversación | `assistant/model.ts` | flujo | [ ] |
-| R-13 | P2 | La pasada del juez de esfuerzo no cuenta en el gasto | `assistant/model.ts` | flujo | [ ] |
-| R-14 | P1 | Cancelar un plan mientras piensa lo resucita (y lanza el run) | `plans/service.ts` | flujo | [ ] |
-| R-15 | P1 | Un paso `run` sin `runId` no es checkpoint: se salta | `plans/service.ts` | flujo | [ ] |
+| R-10 | P1 | Una conversación larga (>500 filas) pierde su cola al abrirla | `chat/repository.ts`, `routes.ts` | core | [ ] |
+| R-11 | P1 | Borrar una conversación deja aprobaciones pendientes y jobs huérfanos | `chat/service.ts` | core | [ ] |
+| R-12 | P1 | El esfuerzo de un turno contamina a otra conversación | `assistant/model.ts` | core | [ ] |
+| R-13 | P2 | La pasada del juez de esfuerzo no cuenta en el gasto | `assistant/model.ts` | core | [ ] |
+| R-14 | P1 | Cancelar un plan mientras piensa lo resucita (y lanza el run) | `plans/service.ts` | core | [ ] |
+| R-15 | P1 | Un paso `run` sin `runId` no es checkpoint: se salta | `plans/service.ts` | core | [ ] |
 | R-16 | P1 | Una tabla con `label` no textual tumba la pantalla (sin ErrorBoundary) | `chat/artifacts.ts`, `ui/artifact.tsx` | web | [ ] |
-| R-17 | P2 | Un artifact estructurado grande se recorta a bytes y deja de ser JSON | `chat/artifacts.ts` | flujo | [ ] |
+| R-17 | P2 | Un artifact estructurado grande se recorta a bytes y deja de ser JSON | `chat/artifacts.ts` | core | [ ] |
 | L-01 | P0 | `JARVIS_CHAT_DEFAULT_AUTONOMY` mal escrito abre la puerta (fail-open) | `config.ts`, `toolbox.ts` | core | [ ] |
 | L-02 | P0 | `resolveApproval` no es atómica; un `approved` sin consumir bloquea | `chat/service.ts` | core | [ ] |
 | L-03 | P1 | Cualquier usuario ve, borra y firma las conversaciones de los demás | `chat/service.ts`, rutas | core | [ ] |
@@ -75,7 +78,7 @@ durabilidad, jobs, planes, concurrencia, gasto y features del motor.
 | L-05 | P1 | Errores de herramienta MCP se venden como «reintenta» → bucles | `mcp/service.ts` | core | [ ] |
 | L-06 | P1 | Los intentos de escritura MCP fallidos no se auditan | `mcp/service.ts` | core | [ ] |
 | L-07 | P1 | La pantalla miente en «Automático» y nunca ofrece `unrestricted` | `screens/assistant.tsx` | web | [ ] |
-| L-08 | P1 | El distintivo enseña el id del híbrido; el gasto no lleva conversación | `chat/service.ts`, `services.ts` | flujo | [ ] |
+| L-08 | P1 | El distintivo enseña el id del híbrido; el gasto no lleva conversación | `chat/service.ts`, `services.ts` | core | [ ] |
 | L-09 | P2 | El contexto enseña trabajos que el toolbox no deja mirar | `chat/service.ts`, `toolbox.ts` | core | [ ] |
 | L-10 | P2 | La traza de `present` duplica el artifact en hilo y contexto | `chat/service.ts` | core | [ ] |
 | L-11 | P2 | Un envío que falla borra lo escrito sin decirlo | `screens/assistant.tsx` | web | [ ] |
@@ -560,22 +563,22 @@ durabilidad, jobs, planes, concurrencia, gasto y features del motor.
 
 | Id | Feature | Cómo hacerlo sin fallo | Quién | Estado |
 |---|---|---|---|---|
-| F-01 | **Parar el turno** | `AbortController` por conversación guardado junto a `#turns`; `POST /api/chat/:id/stop`; los modelos aceptan `signal` en `#ask`; evento «parado por ti», `status idle`, job `finish`. Botón en el composer mientras `thinking`. | flujo | [ ] |
-| F-02 | **Reintentar / regenerar / editar el último mensaje** | `POST /api/chat/:id/retry` rehace el turno con la historia recortada hasta el último `user`; editar = borrar desde ese `seq` (nuevo `event` «editado») y reenviar. | flujo | [ ] |
-| F-03 | **Bandeja global de aprobaciones** | `GET /api/approvals?status=pending` que junte planes y conversaciones (`plans.pendingApprovals()` ya existe); contador en la navegación; tarjeta con enlace de vuelta al hilo. | flujo | [ ] |
-| F-04 | **Avisos** | `waiting_approval` y `idle` tras pensar → `announce()`, título de pestaña «(1) Jarvis» y `Notification` si hay permiso. | flujo | [ ] |
-| F-05 | **Gasto por conversación y por respuesta** | con L-08: `SELECT … WHERE conversation_id`; pastilla «0,4 ¢» por burbuja; `JARVIS_CHAT_MAX_USD` que rechaza escalar cuando se supera. | flujo | [ ] |
-| F-06 | **Streaming de la respuesta final** | sólo para `finish`: `stream:true` en la última vuelta (cuando `decisionsOnly`), evento `chat.partial` no persistido; la fila se escribe al terminar. | flujo | [ ] |
-| F-07 | **Adjuntos en el chat** | `Composer` ya admite `onFiles`; con workspace, subir a `attachments` y que `list_evidence` lo vea; sin workspace, guardar como artifact `code/markdown` de la persona y pasarlo como `CONTENT_IS_DATA`. | flujo | [ ] |
-| F-08 | **Exportar y auditar** | `GET /api/chat/:id/export.md` (con trazas) y enlace desde cada `ToolTrace` a la fila de auditoría (`GET /api/audit?requestId=chat:<id>`). | flujo | [ ] |
-| F-09 | **Atar/desatar workspace a una conversación existente** | `POST /api/chat/:id/workspace`; cuando el asistente abre un workspace en un hilo sin workspace, ofrecer «¿trabajo sobre éste?» (chip) que lo ata. | flujo | [ ] |
+| F-01 | **Parar el turno** | `AbortController` por conversación guardado junto a `#turns`; `POST /api/chat/:id/stop`; los modelos aceptan `signal` en `#ask`; evento «parado por ti», `status idle`, job `finish`. Botón en el composer mientras `thinking`. | core | [ ] |
+| F-02 | **Reintentar / regenerar / editar el último mensaje** | `POST /api/chat/:id/retry` rehace el turno con la historia recortada hasta el último `user`; editar = borrar desde ese `seq` (nuevo `event` «editado») y reenviar. | core | [ ] |
+| F-03 | **Bandeja global de aprobaciones** | `GET /api/approvals?status=pending` que junte planes y conversaciones (`plans.pendingApprovals()` ya existe); contador en la navegación; tarjeta con enlace de vuelta al hilo. | core | [ ] |
+| F-04 | **Avisos** | `waiting_approval` y `idle` tras pensar → `announce()`, título de pestaña «(1) Jarvis» y `Notification` si hay permiso. | core | [ ] |
+| F-05 | **Gasto por conversación y por respuesta** | con L-08: `SELECT … WHERE conversation_id`; pastilla «0,4 ¢» por burbuja; `JARVIS_CHAT_MAX_USD` que rechaza escalar cuando se supera. | core | [ ] |
+| F-06 | **Streaming de la respuesta final** | sólo para `finish`: `stream:true` en la última vuelta (cuando `decisionsOnly`), evento `chat.partial` no persistido; la fila se escribe al terminar. | core | [ ] |
+| F-07 | **Adjuntos en el chat** | `Composer` ya admite `onFiles`; con workspace, subir a `attachments` y que `list_evidence` lo vea; sin workspace, guardar como artifact `code/markdown` de la persona y pasarlo como `CONTENT_IS_DATA`. | core | [ ] |
+| F-08 | **Exportar y auditar** | `GET /api/chat/:id/export.md` (con trazas) y enlace desde cada `ToolTrace` a la fila de auditoría (`GET /api/audit?requestId=chat:<id>`). | core | [ ] |
+| F-09 | **Atar/desatar workspace a una conversación existente** | `POST /api/chat/:id/workspace`; cuando el asistente abre un workspace en un hilo sin workspace, ofrecer «¿trabajo sobre éste?» (chip) que lo ata. | core | [ ] |
 | F-10 | **Siguiente paso pulsable y prefill** | chips bajo la respuesta a partir de `refs` («Léeme el transcript», «Lánzale un trabajo», «Ábreme la terminal»); `/assistant?q=` para preguntas desde otras pantallas; comandos rápidos `/salud`, `/trabajos`. | web | [ ] |
-| F-11 | **Esfuerzo elegible por conversación** | columna `effort` (`auto|low|medium|high`); override del juez; ver el coste del juez (R-13). | flujo | [ ] |
-| F-12 | **Lista «siempre con tarjeta» para `unrestricted`** | lo que ADR-010 §3-bis deja abierto: `JARVIS_MCP_ALWAYS_CARD=stop_service:jarvis,restart_service:jarvis,stop_service` con match por argumento; se comprueba en `#applyDecision` antes de la vía sin tarjeta. | flujo | [ ] |
+| F-11 | **Esfuerzo elegible por conversación** | columna `effort` (`auto|low|medium|high`); override del juez; ver el coste del juez (R-13). | core | [ ] |
+| F-12 | **Lista «siempre con tarjeta» para `unrestricted`** | lo que ADR-010 §3-bis deja abierto: `JARVIS_MCP_ALWAYS_CARD=stop_service:jarvis,restart_service:jarvis,stop_service` con match por argumento; se comprueba en `#applyDecision` antes de la vía sin tarjeta. | core | [ ] |
 | F-13 | **«Pregúntale» desde Explorador y Portada** | hoy sólo Salud, Trabajos y Workspace usan `AskAssistantButton`; en el explorador con `workspaceId` de la sesión. | web | [ ] |
-| F-14 | **Descripción larga en directo y búsqueda bilingüe** | R-05; `search_capabilities` con sinónimos (memoria→memory, disco→disk, red→network) para el router. | flujo | [ ] |
-| F-15 | **Reanudar de verdad un turno tras reinicio** | persistir el memo (`alreadyAsked`, `observations`) en un `payload` del job por cada consulta; `reconcile()` puede entonces rehacer turnos que ya escribieron sin duplicar. | flujo | [ ] |
-| F-16 | **Compactar hilos largos** | cuando el hilo supera N mensajes, un `event` de resumen escrito por el modelo (como `history` en planes) y `#contextFor` lo usa en vez de los 12 últimos. | flujo | [ ] |
+| F-14 | **Descripción larga en directo y búsqueda bilingüe** | R-05; `search_capabilities` con sinónimos (memoria→memory, disco→disk, red→network) para el router. | core | [ ] |
+| F-15 | **Reanudar de verdad un turno tras reinicio** | persistir el memo (`alreadyAsked`, `observations`) en un `payload` del job por cada consulta; `reconcile()` puede entonces rehacer turnos que ya escribieron sin duplicar. | core | [ ] |
+| F-16 | **Compactar hilos largos** | cuando el hilo supera N mensajes, un `event` de resumen escrito por el modelo (como `history` en planes) y `#contextFor` lo usa en vez de los 12 últimos. | core | [ ] |
 | F-17 | **Compartir/descargar artifacts** | `csv` para `table`, `json` para `chart/json`, URL estable con permisos (L-03). | web | [ ] |
 | F-18 | **Renombrar, fijar y archivar conversaciones** | `PATCH /api/chat/:id {title, pinned, archived}`; el carril filtra archivadas. | web | [ ] |
 
