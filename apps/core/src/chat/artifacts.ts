@@ -142,6 +142,7 @@ function shapeOf(kind: ArtifactKind, body: string): string | null {
  * coma.
  */
 export function validateBody(kind: ArtifactKind, body: string): ArtifactRejection | null {
+  if (kind === 'markdown') return markdownQueEsDatos(body);
   if (kind !== 'table' && kind !== 'chart') return null;
 
   let parsed: unknown;
@@ -384,17 +385,65 @@ export function resolveKind(kind: string, body: string): ArtifactKind | null {
   }
 }
 
+/**
+ * Cómo llama el modelo a la lista de columnas.
+ *
+ * `headers` no es un caso raro: es **el** caso. Con filas posicionales, es como se escribe una
+ * tabla cuando no tienes el esquema delante. Se arregló `columns` porque se vio, y esto estaba a un
+ * sinónimo de distancia — la lista se queda corta a propósito, porque adivinar sin límite acaba
+ * interpretando cualquier objeto como una tabla; lo que cierra la familia entera no es esta lista,
+ * es la comprobación de abajo.
+ */
+const COLUMN_KEYS = ['columns', 'headers'] as const;
+
+/** La lista de columnas del cuerpo, se llame como se llame, y con qué nombre venía. */
+function columnsOf(parsed: Record<string, unknown>): { key: string; value: unknown[] } | null {
+  for (const key of COLUMN_KEYS) {
+    const value = parsed[key];
+    if (Array.isArray(value)) return { key, value };
+  }
+  return null;
+}
+
 /** Si el cuerpo declara por sí solo qué forma tiene. `null` si no lo dice. */
 function shapeOfBody(body: string): ArtifactKind | null {
   try {
     const parsed: unknown = JSON.parse(body);
     if (!isRecord(parsed)) return null;
-    if (Array.isArray(parsed['columns']) && Array.isArray(parsed['rows'])) return 'table';
+    if (columnsOf(parsed) && Array.isArray(parsed['rows'])) return 'table';
     if (typeof parsed['shape'] === 'string') return 'chart';
   } catch {
     return null;
   }
   return null;
+}
+
+/**
+ * Un markdown que es un objeto JSON no es un markdown.
+ *
+ * Esto es lo que cierra la familia, y la lista de sinónimos sólo el caso conocido. `columns` se
+ * arregló al verlo y `headers` estaba a un sinónimo; `cols`, `fields` o `data` están a otro. Sin
+ * esto, cada llave nueva vuelve a guardar el JSON crudo y a pintarlo como párrafo —con `ok: true`—
+ * hasta que alguien lo ve en una captura.
+ *
+ * Markdown es texto que se lee. Un objeto JSON serializado nunca lo es: si el modelo quería enseñar
+ * JSON, el tipo es `json`, y si quería una tabla, se le dice qué forma tiene una. Un fragmento
+ * dentro de un markdown va en una valla y no parsea, así que esto no se lleva por delante lo bueno.
+ */
+function markdownQueEsDatos(body: string): ArtifactRejection | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed) && !Array.isArray(parsed)) return null;
+  return {
+    code: 'BAD_INPUT',
+    message: 'el cuerpo es JSON y lo declaraste como `markdown`, que es texto para leer',
+    hint: 'si son datos con forma, usa `kind: "table"` con `{"columns":[{"key":"host",'
+      + '"label":"Máquina"}],"rows":[{"host":"zeus"}]}`, o `kind: "json"` para enseñarlos tal cual',
+  };
 }
 
 /**
@@ -414,10 +463,11 @@ export function normalizeTable(body: string): string {
   } catch {
     return body;
   }
-  if (!isRecord(parsed) || !Array.isArray(parsed['columns']) || !Array.isArray(parsed['rows'])) {
+  const declaradas = isRecord(parsed) ? columnsOf(parsed) : null;
+  if (!declaradas || !isRecord(parsed) || !Array.isArray(parsed['rows'])) {
     return body;
   }
-  const columns = (parsed['columns'] as unknown[]).map((column) => (
+  const columns = declaradas.value.map((column) => (
     typeof column === 'string' ? { key: column, label: column } : column
   ));
   const keys = columns.map((column) => (isRecord(column) ? String(column['key'] ?? '') : ''));
@@ -436,7 +486,10 @@ export function normalizeTable(body: string): string {
     // Una fila-lista se empareja por posición con las columnas, que es lo que significa.
     return Object.fromEntries(keys.map((key, index) => [key, row[index] ?? null]));
   });
-  return JSON.stringify({ ...parsed, columns, rows });
+  // Dentro queda siempre `columns`, venga como venga: la pantalla no tiene que saber los sinónimos.
+  const resto = { ...parsed };
+  delete resto[declaradas.key];
+  return JSON.stringify({ ...resto, columns, rows });
 }
 
 /**

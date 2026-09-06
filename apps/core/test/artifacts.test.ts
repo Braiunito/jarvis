@@ -670,3 +670,46 @@ describe('la tolerancia no puede traer un silencio nuevo', () => {
     expect(validateBody('table', larga)?.message).toContain('3 celdas');
   });
 });
+
+describe('la llave que no vimos, y la puerta por la que volvía', () => {
+  it('`headers` es la lista de columnas, y se guarda como `columns`', () => {
+    // Visto en producción, artifact `tf31jtvjt6r8zotyn`: `headers` con filas posicionales. No es un
+    // caso raro, es **el** caso: así se escribe una tabla cuando no tienes el esquema delante.
+    const natural = JSON.stringify({
+      headers: ['Máquina', 'Disco'],
+      rows: [['zeus', '900G'], ['goro2', '120G']],
+    });
+    expect(resolveKind('markdown', natural)).toBe('table');
+
+    const canonica = JSON.parse(normalizeTable(natural)) as Record<string, unknown>;
+    expect(canonica['columns']).toEqual([
+      { key: 'Máquina', label: 'Máquina' }, { key: 'Disco', label: 'Disco' },
+    ]);
+    // Y no se queda la llave original al lado, que dejaría dos fuentes para lo mismo.
+    expect(canonica['headers']).toBeUndefined();
+    expect(validateBody('table', normalizeTable(natural))).toBeNull();
+  });
+
+  it('un markdown que es JSON se rechaza, se llame como se llame la llave', () => {
+    /*
+     * Esto es lo que cierra la familia y no la lista de sinónimos. `columns` se arregló al verlo y
+     * `headers` estaba a un sinónimo; `cols`, `fields` o `data` están a otro. Sin esta comprobación,
+     * cada llave nueva volvía a guardar el JSON crudo y a pintarlo como párrafo, con `ok: true`.
+     */
+    for (const llave of ['cols', 'fields', 'data', 'columnas']) {
+      const cuerpo = JSON.stringify({ [llave]: ['a'], rows: [['x']] });
+      const fallo = validateBody('markdown', cuerpo);
+      expect(fallo?.code, `con la llave \`${llave}\``).toBe('BAD_INPUT');
+      expect(fallo?.hint).toContain('kind: "table"');
+    }
+  });
+
+  it('pero un markdown de verdad no se toca, ni con JSON dentro de una valla', () => {
+    // Un fragmento dentro de markdown va en una valla y no parsea, así que esto no se lleva por
+    // delante lo bueno.
+    expect(validateBody('markdown', '# Disco\n\n```json\n{"a":1}\n```')).toBeNull();
+    expect(validateBody('markdown', 'zeus tiene 40G libres.')).toBeNull();
+    // Un número o una cadena sueltos parsean como JSON y siguen siendo texto: no se rechazan.
+    expect(validateBody('markdown', '42')).toBeNull();
+  });
+});
