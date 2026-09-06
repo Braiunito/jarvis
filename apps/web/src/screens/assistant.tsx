@@ -520,8 +520,11 @@ function AutonomyChip({ value, modes, onChange, pending }: {
  * porque cuatro caracteres por token es una regla del pulgar y una regla no es una medida. La cifra
  * en tokens está porque es la que se compara con lo que cuesta el turno, que es la decisión real.
  */
-const catalogWeight = (bytes: number): string =>
-  `${Math.round(bytes / 1024)} KB, unos ${Math.round(bytes / 4 / 100) * 100} tokens`;
+const catalogWeight = (bytes: number): string => {
+  // Con separador de millares: «7400» se lee dos veces y «7.400» una.
+  const tokens = (Math.round(bytes / 4 / 100) * 100).toLocaleString('es-ES');
+  return `${Math.round(bytes / 1024)} KB, unos ${tokens} tokens`;
+};
 
 /**
  * Una línea que dice si esto va a funcionar, y con qué.
