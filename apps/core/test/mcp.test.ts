@@ -719,3 +719,58 @@ describe('MCP · lo que el informe encontró en esta frontera', () => {
       .rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });
+
+describe('R-06 · una capacidad cuesta un hueco, se llame como se llame', () => {
+  const cajaCon = (service: McpService): CoreAssistantToolbox => new CoreAssistantToolbox({
+    sessions: {} as never, health: {} as never, runs: {} as never, audit: {} as never,
+    user: { userId: 'u1', username: 'braian' },
+    mcp: service,
+    capabilityWrites: true,
+    autonomy: 'manual',
+    maxObservations: 10,
+  });
+
+  const contenido = (outcome: Awaited<ReturnType<CoreAssistantToolbox['invoke']>>): Record<string, unknown> => {
+    expect(outcome.type).toBe('observation');
+    return (outcome as { content: Record<string, unknown> }).content;
+  };
+
+  it('llamarla por sus dos nombres no cobra dos veces', async () => {
+    /*
+     * Medido en producción: once llamadas para una tabla de disco, dos de ellas la misma capacidad
+     * —`zeus.docker_logs` y su alias aplanado— y la respuesta fue «me quedé sin margen» con siete
+     * consultas buenas hechas y tiradas.
+     *
+     * Eran dos fallos sumados: el memo que entendía los alias vivía **dentro** de `#useCapability`,
+     * que corre después de cobrar el presupuesto, y la clave del memo genérico no normalizaba el
+     * nombre. Así que para las 108 capacidades —casi todo el catálogo— la regla «una repetición no
+     * gasta consulta» no se cumplía.
+     */
+    const caja = cajaCon(buildService(fakeMcpServer()));
+    const primera = contenido(await caja.invoke('use_capability', { name: 'zeus.docker_logs', args: {} }));
+    const gastadas = caja.observations;
+    const segunda = contenido(await caja.invoke('use_capability', { name: 'docker_logs', args: {} }));
+
+    expect(primera['ok']).toBe(true);
+    expect((segunda['error'] as Record<string, string> | undefined)?.['code']).toBe('ALREADY_ASKED');
+    // Y lo que importa: no cobró. La comprobación va antes del presupuesto.
+    expect(caja.observations).toBe(gastadas);
+    expect(caja.repeats).toBe(1);
+  });
+
+  it('un fallo de validación se memoriza: repetirlo no puede salir bien nunca', async () => {
+    /*
+     * «Reintentar es legítimo» vale para la red, no para unos argumentos mal escritos. En la misma
+     * conversación mandó dos `request_capability` idénticas y las dos gastaron un hueco.
+     */
+    const caja = cajaCon(buildService(fakeMcpServer()));
+    const primera = contenido(await caja.invoke('request_capability', { name: 'zeus.docker_restart' }));
+    const gastadas = caja.observations;
+    const segunda = contenido(await caja.invoke('request_capability', { name: 'zeus.docker_restart' }));
+
+    // Y de paso dice **cuál** falta, que es lo que hace que el segundo intento pueda ser distinto.
+    expect((primera['error'] as Record<string, string>)['message']).toBe('falta summary');
+    expect((segunda['error'] as Record<string, string>)['code']).toBe('ALREADY_ASKED');
+    expect(caja.observations).toBe(gastadas);
+  });
+});

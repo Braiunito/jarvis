@@ -1017,6 +1017,34 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       this.#freeCalls.set(name, spent + 1);
       return this.#guarded(name, input);
     }
+    /*
+     * Un fallo de validación se corta aunque la herramienta decida.
+     *
+     * `request_capability` decide, así que quedaba fuera del memo entero — y en producción se llamó
+     * dos veces idénticas, las dos con el mismo `BAD_INPUT`, gastando dos huecos del turno. Pero
+     * una llamada que no pasa la validación **no ha decidido nada**: devuelve una observación como
+     * cualquier otra, y repetirla con los mismos argumentos no puede salir bien nunca.
+     */
+    if (definition.decides) {
+      const previo = this.#alreadyAsked.get(this.#memoKeyFor(name, input));
+      if (previo !== undefined) {
+        this.#repeats += 1;
+        // La misma forma que en el otro camino: se le dice que ya lo intentó **y** qué se le
+        // contestó. Devolver sólo el error otra vez le deja creer que es la primera.
+        return {
+          type: 'observation',
+          content: {
+            ok: false,
+            error: {
+              code: 'ALREADY_ASKED',
+              message: `ya llamaste a ${name} con esos mismos argumentos en este turno`,
+              hint: 'lo de abajo es lo que te contesté; arréglalo o haz otra cosa, pero no lo repitas',
+            },
+            previousResult: previo,
+          },
+        };
+      }
+    }
     if (!definition.decides) {
       /*
        * Repetir una lectura no cuesta presupuesto: cuesta una respuesta que dice que ya la tiene.
@@ -1099,7 +1127,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
        * el dato viejo diciendo que es viejo— así que tampoco es una respuesta que valga por dos.
        * Memorizarla convertiría un tropiezo de red en «ya lo preguntaste» durante el resto del turno.
        */
-      if (!definition.decides && outcome.type === 'observation') {
+      if (outcome.type === 'observation') {
         const served = outcome.content as
           { ok?: unknown; stale?: unknown; error?: { code?: unknown } } | null;
         /*
@@ -1113,7 +1141,10 @@ export class CoreAssistantToolbox implements AssistantToolbox {
          */
         const codigo = String(served?.error?.code ?? '');
         const validacion = codigo === 'BAD_INPUT' || codigo === 'BAD_REQUEST';
-        const util = validacion || (served?.ok !== false && served?.stale !== true);
+        // De una que decide sólo se guarda el fallo: su éxito no es una observación que repetir,
+        // es un checkpoint, y ése no llega hasta aquí.
+        const util = validacion
+          || (!definition.decides && served?.ok !== false && served?.stale !== true);
         if (util) this.#alreadyAsked.set(this.#memoKeyFor(name, input), outcome.content);
       }
       return outcome;
