@@ -2306,21 +2306,70 @@ a:hover { text-decoration: underline; }
   color: var(--text-muted);
 }
 
-.chat-composer {
+/*
+ * La barra de escribir, la misma en el hilo y en el borrador de un workspace.
+ *
+ * El clip, el campo y el botón viven **dentro** de un mismo recuadro y no sueltos en una fila: es
+ * lo que hace que se lea como un sitio donde escribir y no como tres controles que coinciden. En
+ * el workspace el envío estaba a diez centímetros del campo y el clip era otro botón más abajo.
+ */
+.composer { display: grid; gap: 8px; }
+
+.composer-bar {
   display: flex;
-  gap: 8px;
   align-items: flex-end;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 6px 6px 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+.composer-bar:focus-within { border-color: var(--border-accent); }
+
+.composer-field {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--touch);
+  padding: 8px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+.composer-field:focus { outline: none; }
+.composer-field::placeholder { color: var(--text-faint); }
+
+/* El clip es una etiqueta con su input dentro: pulsable, con teclado, y del tamaño del dedo. */
+.composer-clip {
+  display: grid;
+  place-items: center;
+  width: var(--touch);
+  height: var(--touch);
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.composer-clip:hover { background: var(--bg-elevated); color: var(--text); }
+.composer-clip:focus-within { outline: 2px solid var(--border-accent); outline-offset: -2px; }
+
+.composer-send { flex: 0 0 auto; min-height: var(--touch); }
+
+/*
+ * El hilo pega su barra al borde de abajo y le pone su franja.
+ *
+ * Con menos relleno que el borrador de un workspace: aquí la barra ya trae su propio recuadro y
+ * el alto que se ahorre va al hilo, que es de lo que iba todo esto. El campo arranca en una línea
+ * y crece con lo que se escriba; su alto mínimo sigue siendo el del dedo.
+ */
+.chat-composer {
+  padding: 8px 10px;
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
 }
-
-.chat-composer textarea {
-  flex: 1;
-  min-height: var(--touch);
-  resize: vertical;
-  font: inherit;
-}
+.chat-composer .composer-field { padding: 6px 4px; }
 
 @media (max-width: 900px) {
   /*
@@ -2391,8 +2440,11 @@ a:hover { text-decoration: underline; }
 
   /* El compositor manda: es a lo que se ha venido, y no se persigue al llegar una respuesta. */
   .chat-composer { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
-  .chat-composer textarea { font-size: 16px; }
-  .chat-send { min-width: var(--touch); min-height: var(--touch); justify-content: center; }
+  /* 16 px o el navegador hace zoom al enfocar, y el hilo se descoloca entero. */
+  .composer-field { font-size: 16px; }
+  /* En estrecho el botón es sólo el icono: la palabra no cabe sin robarle sitio al campo. */
+  .composer-word { display: none; }
+  .composer-send { min-width: var(--touch); justify-content: center; padding: 0; }
 }
 
 /* En ancho no hay hoja ni velo: la lista es la columna de siempre. */

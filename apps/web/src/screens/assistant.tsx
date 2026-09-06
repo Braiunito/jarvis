@@ -36,6 +36,7 @@ import {
 import { PERMISSION, permissionName } from '../ui/labels.js';
 import { useAskAssistant } from '../ui/ask-assistant.jsx';
 import { ArtifactChip, InlineArtifact } from '../ui/artifact.jsx';
+import { Composer } from '../ui/composer.jsx';
 import { Markdown } from '../ui/markdown.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { DataRow } from '../ui/primitives.jsx';
@@ -698,8 +699,7 @@ export function AssistantScreen(): JSX.Element {
     route.navigate(id ? `/assistant/${id}` : '/assistant');
   }
 
-  function submit(event: React.FormEvent): void {
-    event.preventDefault();
+  function submit(): void {
     const text = draft.trim();
     if (!text) return;
     setDraft('');
@@ -896,31 +896,18 @@ export function AssistantScreen(): JSX.Element {
           <div ref={bottom} />
         </div>
 
-        <form className="chat-composer" onSubmit={submit}>
-          <textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={active ? 'Escribe…' : '¿Cómo va el servidor?'}
-            rows={2}
-            aria-label="Mensaje para el asistente"
-            onKeyDown={(event) => {
-              // Enter envía; Shift+Enter hace párrafo. Es lo que espera quien viene de cualquier chat.
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submit(event);
-              }
-            }}
-          />
-          <button
-            type="submit"
-            className="btn primary chat-send"
-            disabled={!draft.trim() || send.isPending || ask.pending}
-            aria-label="Enviar"
-          >
-            <Glyph icon={ACTION_ICON.send} />
-            <span className="chat-head-word">Enviar</span>
-          </button>
-        </form>
+        <Composer
+          className="chat-composer"
+          value={draft}
+          onChange={setDraft}
+          onSubmit={submit}
+          submitOnEnter
+          placeholder={active ? 'Escribe…' : '¿Cómo va el servidor?'}
+          label="Mensaje para el asistente"
+          submitLabel="Enviar"
+          submitting={send.isPending || ask.pending}
+          {...{ rows: 1 }}
+        />
       </section>
     </div>
   );

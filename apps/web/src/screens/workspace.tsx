@@ -26,6 +26,7 @@ import {
 import { useAnnounceOnChange } from '../ui/announce.jsx';
 import { AssistantPanel } from '../ui/assistant.jsx';
 import { AskAssistantButton } from '../ui/ask-assistant.jsx';
+import { Composer } from '../ui/composer.jsx';
 import { PERMISSION, PROVENANCE, RUN_STATUS, isRunLive, runTitle } from '../ui/labels.js';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVENANCE_ICON, PROVIDER_ICON, STATUS_ICON,
@@ -644,56 +645,71 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
               </div>
               <ErrorNote error={target.error} />
 
-              <label className="stack" style={{ gap: 6 }}>
-                <span className="small muted">
-                  Qué quieres que haga
-                  {dirty ? ' · guardando borrador…' : version ? ' · borrador guardado' : ''}
-                </span>
-                <textarea
-                  ref={textarea}
-                  className="textarea"
-                  value={body}
-                  onChange={(event) => onChangeBody(event.target.value)}
-                  placeholder="Describe la tarea. Se manda a la máquina de arriba con el permiso que elijas."
-                  aria-label="Qué quieres que haga el agente"
-                />
-              </label>
-
               {/*
-                * Adjuntar.
+                * La misma barra que el hilo del asistente: textarea, clip y envío juntos.
                 *
-                * La pestaña de contexto llevaba meses diciendo «los ficheros que le subiste» sin
-                * que hubiera forma de subir ninguno. Va aquí y no allí porque adjuntar es parte de
-                * escribir la tarea: se elige el fichero mientras se piensa qué pedir.
+                * Lo que **no** se comparte es la forma de conversación. Aquí no hay burbujas y no
+                * las va a haber: esto es un borrador que se guarda con versión y que al enviarse
+                * lanza trabajo en una máquina con un permiso. Parecer un chat prometería un ida y
+                * vuelta que no existe, y sobre todo empujaría el perfil de permiso fuera de la
+                * vista, que es lo último que puede pasar en esta pantalla.
+                *
+                * Enter **no** envía aquí, y es la única diferencia de comportamiento: se escriben
+                * tareas de varias líneas, y un Enter de más lanzaría trabajo en un servidor.
                 */}
-              <div className="row" style={{ gap: 8 }}>
-                <label className="btn small" style={{ cursor: 'pointer' }}>
-                  <Glyph icon={ACTION_ICON.attach} />
-                  {upload.isPending ? 'Subiendo…' : 'Adjuntar ficheros'}
-                  <input
-                    type="file"
-                    multiple
-                    className="visually-hidden"
-                    disabled={upload.isPending}
-                    onChange={(event) => {
-                      const chosen = [...(event.target.files ?? [])];
-                      event.target.value = '';
-                      // De uno en uno: el core reserva cuota por fichero y así un rechazo dice
-                      // cuál falló, en vez de dejar media subida a medias sin saber de quién es.
-                      void chosen.reduce(
-                        (chain, file) => chain.then(() => upload.mutateAsync(file).then(() => undefined)),
-                        Promise.resolve(),
-                      ).catch(() => undefined);
-                    }}
-                  />
-                </label>
-                {staged.length ? (
-                  <span className="tiny faint">
-                    {attached.length} de {staged.length} irán con este envío
-                  </span>
-                ) : null}
-              </div>
-
+              <Composer
+                value={body}
+                onChange={onChangeBody}
+                onSubmit={() => void send()}
+                placeholder="Describe la tarea. Se manda a la máquina de arriba con el permiso que elijas."
+                label="Qué quieres que haga el agente"
+                submitLabel="Enviar"
+                submitting={createRun.isPending}
+                disabled={upload.isPending}
+                rows={4}
+                uploading={upload.isPending}
+                onFiles={(chosen) => {
+                  // De uno en uno: el core reserva cuota por fichero y así un rechazo dice cuál
+                  // falló, en vez de dejar media subida a medias sin saber de quién es.
+                  void chosen.reduce(
+                    (chain, file) => chain.then(() => upload.mutateAsync(file).then(() => undefined)),
+                    Promise.resolve(),
+                  ).catch(() => undefined);
+                }}
+                before={
+                  <>
+                    <div className="spread" style={{ flexWrap: 'wrap', gap: 8 }}>
+                      <span className="small muted">
+                        Qué quieres que haga
+                        {dirty ? ' · guardando borrador…' : version ? ' · borrador guardado' : ''}
+                      </span>
+                      {staged.length ? (
+                        <span className="tiny faint">
+                          {attached.length} de {staged.length} irán con este envío
+                        </span>
+                      ) : null}
+                    </div>
+              {/*
+                * El permiso se queda donde estaba y **entero**.
+                *
+                * Es lo único de esta pantalla que no se compacta: es lo que decide qué puede tocar
+                * el agente en una máquina de verdad, y su explicación va debajo sin plegar. El
+                * botón de envío se fue a la barra, pero esto no se va con él.
+                */}
+              <Segmented
+                label="Qué puede hacer el agente"
+                options={PROFILES}
+                value={profile}
+                onChange={setProfile}
+              />
+                    <p className="small muted permission-help" style={{ margin: 0 }}>
+                      <Glyph icon={PERMISSION_ICON[profile]} />
+                      <span>{PERMISSION[profile].help}</span>
+                    </p>
+                  </>
+                }
+                after={
+                  <>
               {staged.length ? (
                 <div className="facts">
                   {staged.map((file) => {
@@ -728,25 +744,10 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
                   </button>
                 ))}
               </div>
+                  </>
+                }
+              />
 
-              <div className="spread" style={{ flexWrap: 'wrap' }}>
-                <Segmented
-                  label="Qué puede hacer el agente"
-                  options={PROFILES}
-                  value={profile}
-                  onChange={setProfile}
-                />
-                <button type="button" className="btn primary" disabled={createRun.isPending || !body.trim()}
-                  onClick={() => void send()}>
-                  <Glyph icon={ACTION_ICON.send} />
-                  {createRun.isPending ? 'Enviando…' : 'Enviar'}
-                </button>
-              </div>
-
-              <p className="small muted permission-help" style={{ margin: 0 }}>
-                <Glyph icon={PERMISSION_ICON[profile]} />
-                <span>{PERMISSION[profile].help}</span>
-              </p>
               <ErrorNote error={createRun.error} />
             </Card>
           ) : null}
