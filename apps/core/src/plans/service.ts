@@ -17,7 +17,7 @@ import type { Clock } from '../platform/clock.js';
 import { newApprovalId, newPlanId, newStepId } from '../platform/ids.js';
 import {
   applyRevision, digestOf, type DraftStep, MAX_STEP_OUTPUT_CHARS, outsideEnvelope,
-  type RevisionChange, revisionOutsideEnvelope,
+  revisionOutsideEnvelope,
 } from './workflow.js';
 import type { AuditLog } from '../platform/audit.js';
 import type { AttachmentService } from '../attachments/service.js';
