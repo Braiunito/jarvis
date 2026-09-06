@@ -64,7 +64,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 | Id | P | Qué | Dónde | Quién | Estado |
 |---|---|---|---|---|---|
 | R-01 | P1 | Aprobación caducada → conversación bloqueada para siempre | `chat/service.ts` | core | [ ] |
-| R-02 | P0 | Un permiso de escalada vale más de un turno en la nube | `chat/service.ts` | core | [ ] |
+| R-02 | P0 | Un permiso de escalada vale más de un turno en la nube | `chat/service.ts` | core | [x] |
 | R-03 | P0 | El digest de la aprobación nunca se comprueba | `chat/service.ts`, `plans/service.ts` | core | [ ] |
 | R-04 | P0 | Un artifact HTML puede salir a la red (iframe anidado, navegación a pelo) | `chat/routes.ts` | core | [x] |
 | R-05 | P1 | En modo directo el catálogo MCP se declara **sin parámetros** | `mcp/service.ts` | core | [x] |
@@ -144,6 +144,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   Anotar en ADR-009 §2 que «un turno» = una llamada a `decide`.
 - **Prueba**: `chat.test.ts` «la nube pide una capacidad; aprobarla no vuelve a llamar a la nube»
   (`cloud.calls === 1`) y «tras un run aprobado en la nube, el siguiente mensaje lo piensa el local».
+- **Cerrado** · `986fd96`. La puerta se cierra al terminar `decide`, que es el único sitio por el que pasan todas las decisiones, y no al terminar la respuesta. «Un turno» es una llamada al modelo. `setSource` va aparte de `setStatus` porque una conversación que espera una aprobación sigue en `waiting_approval`: lo que caduca es la autorización, no la espera.
 
 ### R-03 · P0 · El digest de una aprobación se guarda y nunca se comprueba
 
