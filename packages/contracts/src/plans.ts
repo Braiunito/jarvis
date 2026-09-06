@@ -12,6 +12,15 @@ export const PLAN_STATUSES = [
    */
   'draft',
   'ready', 'running', 'waiting_run', 'waiting_approval', 'waiting_input',
+  /**
+   * Parado por una persona, y esperando a que ella diga cuándo sigue.
+   *
+   * Es un estado de verdad y no un `ready` con una nota al margen. Recordar «está listo pero no
+   * debe avanzar» en otro sitio son dos ideas de en qué estado está un plan, y la que manda acaba
+   * siendo la que el supervisor mire primero. Un workflow puede durar media hora: poder pararlo sin
+   * cancelarlo —sin perder lo hecho— es la mitad de para qué sirve gobernarlo.
+   */
+  'paused',
   'completed', 'failed', 'cancelled',
 ] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];

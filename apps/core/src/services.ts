@@ -364,7 +364,11 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
    * aprobación firmada detrás.
    */
   const chat = new ChatService({
-    db, clock, runs, workspaces, sessions, health, audit, jobs,
+    db, clock, runs, workspaces, sessions, health, audit,
+    // El motor de planes, para los workflows. Con él, la conversación puede proponer un plan de
+    // varios pasos; sin él la herramienta no se ofrece y no se promete lo que no hay.
+    plans,
+    hosts: config.hosts, jobs,
     model: options.model !== undefined
       ? (options.model instanceof HybridModel ? options.model : null)
       : hybrid,

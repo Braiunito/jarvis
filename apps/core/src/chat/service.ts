@@ -74,9 +74,20 @@ const TITLE_CHARS = 60;
  */
 export interface WorkflowEngine {
   /** Crea el plan en `draft`, con sus pasos estimativos y el sobre propuesto. No lo arranca. */
+  /**
+   * `workspaceId` no admite nulo **todavía**.
+   *
+   * Un workflow de la casa —«compara el disco de las tres máquinas»— no tiene sesión de agente, y
+   * debería poder existir. Lo que lo impide es que `plans.workspace_id` es `NOT NULL` desde la
+   * primera migración, y relajarlo en SQLite obliga a reconstruir la tabla que guarda el historial
+   * de planes y aprobaciones. Eso es trabajo de F6 y va con su prueba de supervivencia.
+   *
+   * Hasta entonces la conversación lo dice en vez de fallar: es la misma regla que ya rige para
+   * lanzar un trabajo sin sesión.
+   */
   createWorkflow(input: {
     conversationId: string;
-    workspaceId: string | null;
+    workspaceId: string;
     objective: string;
     steps: ReadonlyArray<{ title: string; intent: string; expects: string; unknowns: string[]; writes: boolean }>;
     envelope: WorkflowEnvelope;
@@ -706,6 +717,16 @@ export class ChatService {
         this.#say(id, {
           role: 'event',
           text: 'El asistente propuso un plan de varios pasos, pero este servidor no tiene motor de planes.',
+          refs,
+        });
+        this.#repository.setStatus(id, 'idle', 'local');
+        return;
+      }
+      if (!conversation.workspaceId) {
+        this.#say(id, {
+          role: 'event',
+          text: 'El asistente propuso un plan de varios pasos, pero esta conversación no está atada '
+            + 'a ninguna sesión y todavía no se pueden planificar trabajos de la casa.',
           refs,
         });
         this.#repository.setStatus(id, 'idle', 'local');
