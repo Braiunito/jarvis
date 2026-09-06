@@ -152,7 +152,10 @@ const TERMINALES = new Set(['completed', 'failed', 'cancelled']);
  * resto: sin esto sabría lo que ya pasó y lo que se le pide ahora, pero no hacia dónde va, que es
  * justo lo que hace que un paso encaje con el siguiente en vez de repetirlo.
  */
-function plannedFrom(steps: PlanStep[], currentStep: number): NonNullable<PlanContext['plannedSteps']> {
+function plannedFrom(steps: PlanStep[]): NonNullable<PlanContext['plannedSteps']> {
+  // El que toca es el primero sin atar. Derivarlo de los propios pasos evita tener un contador
+  // aparte que pueda decir otra cosa que ellos.
+  const actual = steps.find((step) => step.kind === 'estimate' && step.status === 'draft')?.ordinal;
   return steps
     .filter((step) => step.kind === 'estimate')
     .map((step) => {
@@ -164,8 +167,8 @@ function plannedFrom(steps: PlanStep[], currentStep: number): NonNullable<PlanCo
         expects: input.expects ?? '',
         unknowns: input.unknowns ?? [],
         writes: input.writes ?? false,
-        state: step.status === 'completed' ? 'done' as const
-          : step.ordinal === currentStep ? 'current' as const
+        state: step.status !== 'draft' ? 'done' as const
+          : step.ordinal === actual ? 'current' as const
             : 'pending' as const,
       };
     });
@@ -489,23 +492,23 @@ export class PlanService {
       return { ok: false, message: `este plan ya terminó: está ${plan.status}` };
     }
 
-    /*
-     * Pausar todavía no tiene dónde guardarse.
-     *
-     * `PLAN_STATUSES` no tiene `paused`, así que pausar exigiría inventarse un estado por el
-     * camino —dejarlo en `ready` y recordar aparte que no debe avanzar— y eso es justo como se
-     * acaba con dos ideas de en qué estado está un plan. Se dice que no se puede en vez de
-     * fingirlo: cancelar sí funciona, y es lo que de verdad hace falta para parar algo.
-     */
-    if (input.op !== 'cancel') {
-      return {
-        ok: false,
-        message: 'todavía no se puede pausar ni reanudar un plan: por ahora sólo cancelarlo, '
-          + 'y cancelar no deshace lo que ya corrió',
-      };
+    if (input.op === 'resume' && plan.status !== 'paused') {
+      return { ok: false, message: `este plan no está pausado: está ${plan.status}` };
+    }
+    if (input.op === 'pause' && plan.status === 'paused') {
+      return { ok: false, message: 'este plan ya estaba pausado' };
     }
 
-    this.#setPlanStatus(input.planId, 'cancelled');
+    /*
+     * Reanudar devuelve a `ready`, que es «le toca pensar».
+     *
+     * No se recupera el estado exacto que tenía al pausarse —si esperaba un run o una aprobación,
+     * eso sigue esperando por su cuenta y el motor lo verá al mirar sus pasos—. Guardar «estaba
+     * en waiting_run» para restaurarlo sería una segunda idea de en qué punto está el plan, que
+     * es lo mismo que evitamos al no fingir la pausa.
+     */
+    const destino = input.op === 'cancel' ? 'cancelled' : input.op === 'pause' ? 'paused' : 'ready';
+    this.#setPlanStatus(input.planId, destino);
     this.#deps.audit.record({
       actorUser: input.user.username,
       eventType: `workflow.${input.op}d`,
@@ -570,7 +573,17 @@ export class PlanService {
     if (['completed', 'failed', 'cancelled'].includes(plan.status)) return plan;
 
     const steps = this.steps(planId);
-    const current = steps.find((step) => !['completed', 'failed', 'cancelled'].includes(step.status));
+    /*
+     * Cuál es el paso en curso, y por qué un estimativo sin atar no lo es.
+     *
+     * Un paso `estimate` en `draft` no está esperando nada del mundo —ni un run, ni una firma, ni
+     * una respuesta—: está esperando a que alguien decida con qué se hace, y eso es precisamente
+     * lo que va a hacer `#proposeNext`. Si se cuenta como paso en curso, `#resolveStep` no sabe
+     * qué resolver, contesta «sigue esperando», y el workflow se queda quieto para siempre con
+     * todos sus pasos escritos y ninguno hecho.
+     */
+    const current = steps.find((step) => !['completed', 'failed', 'cancelled'].includes(step.status)
+      && !(step.kind === 'estimate' && step.status === 'draft'));
 
     if (current) {
       const resolved = await this.#resolveStep(plan, current, user);
@@ -777,17 +790,33 @@ export class PlanService {
       }
     }
 
-    const ordinal = steps.length;
+    /*
+     * A qué paso pertenece lo que el modelo acaba de decidir.
+     *
+     * En un plan normal cada decisión añade un paso al final, porque el plan se va escribiendo
+     * según se piensa. En un workflow los pasos **ya están escritos** —son estimativos— y lo que
+     * hace el turno es **atar** el que toca: la decisión ocupa su sitio en vez de añadirse detrás.
+     * Sin esto, un workflow de dos pasos acabaría con dos estimativos sin tocar y dos pasos reales
+     * al final, y el plan que se firmó no sería el que se ejecutó.
+     *
+     * Lo que el paso estimativo declaraba —la intención, lo que esperaba, lo que no sabía— se
+     * conserva dentro del paso atado: es lo que permite leer después si aquello se cumplió.
+     */
+    const atar = steps.find((step) => step.kind === 'estimate' && step.status === 'draft');
+    const ordinal = atar ? atar.ordinal : steps.length;
     const at = clock.nowIso();
     const stepId = newStepId();
+    if (atar) db.prepare('DELETE FROM plan_steps WHERE id = ?').run(atar.id);
     // La clave se deriva del plan y del ordinal: repetir este paso tras un reinicio no puede
     // producir un segundo run.
     const idempotencyKey = `plan:${planId}:${ordinal}`;
     // Lo que el modelo dejó ofrecido viaja con el paso. Ofrecer no es hacer: la terminal la abre
     // la persona desde la interfaz, y si no la abre no ha pasado nada.
     const offer = toolbox.terminalOffer;
-    const withOffer = (payload: Record<string, unknown>): Record<string, unknown> =>
-      (offer ? { ...payload, terminalOffer: offer } : payload);
+    const withOffer = (payload: Record<string, unknown>): Record<string, unknown> => {
+      const conOferta = offer ? { ...payload, terminalOffer: offer } : payload;
+      return atar ? { ...conOferta, estimate: atar.input } : conOferta;
+    };
 
     if (decision.kind === 'finish') {
       // La síntesis enlaza a la evidencia por id; el contenido sigue donde estaba (M4-11).
@@ -999,7 +1028,7 @@ export class PlanService {
        * Un plan sin sobre no gana nada con esto y sí cambia lo que ve su modelo, así que se deja
        * exactamente como estaba: lo que decide es tener sobre, no ser un plan.
        */
-      ...(plan.envelope ? { envelope: plan.envelope, plannedSteps: plannedFrom(steps, plan.currentStep) } : {}),
+      ...(plan.envelope ? { envelope: plan.envelope, plannedSteps: plannedFrom(steps) } : {}),
       limits: {
         stepsUsed: steps.length,
         maxSteps: this.#maxSteps,

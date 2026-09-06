@@ -92,6 +92,21 @@ function draftWorkflow(services: CoreServices, envelope = sobre(), autonomy: Aut
   return { workspace, plan };
 }
 
+/**
+ * Da por terminado el trabajo del último paso, como haría el supervisor.
+ *
+ * Sin esto el plan se queda esperando —correctamente— y el paso siguiente no se ata nunca. Lo que
+ * se prueba aquí es el motor de pasos, no el ciclo de vida de un run.
+ */
+function terminaElTrabajo(services: CoreServices, planId: string): void {
+  const step = services.plans.steps(planId).find((candidate) => candidate.runId);
+  if (!step?.runId) throw new Error('no hay ningún paso con trabajo que terminar');
+  services.runRepository.appendBatch(step.runId, [], {
+    status: 'completed', finishedAt: '2030-01-01T00:00:00.000Z',
+    resultOk: true, resultSummary: 'salió bien',
+  });
+}
+
 describe('WF · un borrador es un plan escrito que todavía no corre', () => {
   it('nace en draft, con sus pasos estimativos y su sobre', () => {
     const services = harness(new PlanBrain([]));
@@ -156,7 +171,7 @@ describe('WF · lo que se sale del sobre se convierte en tarjeta', () => {
     const { services, plan } = enMarcha(new PlanBrain([() => unRun('safe')]));
     await services.plans.advance(plan.id, user);
 
-    const paso = services.plans.steps(plan.id).at(-1);
+    const paso = services.plans.steps(plan.id)[0];
     expect(paso?.kind).toBe('run');
     expect(paso?.approvalId).toBeNull();
   });
@@ -165,7 +180,7 @@ describe('WF · lo que se sale del sobre se convierte en tarjeta', () => {
     const { services, plan } = enMarcha(new PlanBrain([() => unRun('auto')]));
     await services.plans.advance(plan.id, user);
 
-    const paso = services.plans.steps(plan.id).at(-1);
+    const paso = services.plans.steps(plan.id)[0];
     expect(paso?.kind).toBe('approval');
     const approval = services.plans.approval(paso!.approvalId!);
     /*
@@ -212,12 +227,116 @@ describe('WF · los topes se gastan a lo largo del plan, no dentro de un turno',
     services.plans.activate(plan.id, user, digest);
 
     await services.plans.advance(plan.id, user);
-    expect(services.plans.steps(plan.id).at(-1)?.kind).toBe('run');
+    expect(services.plans.steps(plan.id)[0]?.kind).toBe('run');
 
-    // Segundo paso: el sobre ya no da para otro trabajo.
+    // Segundo paso: el sobre ya no da para otro trabajo. El primero tiene que haber terminado,
+    // que es lo que hace que el plan pase de esperar a pensar.
+    terminaElTrabajo(services, plan.id);
     await services.plans.advance(plan.id, user);
-    const segundo = services.plans.steps(plan.id).at(-1);
+    const segundo = services.plans.steps(plan.id)[1];
     expect(segundo?.kind).toBe('approval');
     expect(services.plans.approval(segundo!.approvalId!)?.summary).toContain('el trabajo 2');
+  });
+});
+
+describe('WF · atar: el paso estimativo se convierte en el que se hace', () => {
+  const enMarcha = (model: PlanBrain, envelope = sobre()) => {
+    const services = harness(model);
+    const { plan } = draftWorkflow(services, envelope);
+    const digest = digestOf({ planId: plan.id, objective: plan.objective, envelope: plan.envelope! });
+    services.plans.activate(plan.id, user, digest);
+    return { services, plan };
+  };
+
+  it('el trabajo ocupa el sitio del paso que lo planificó, no se añade detrás', async () => {
+    /*
+     * Lo que esto descarta es que el plan firmado y el ejecutado sean dos.
+     *
+     * Sin atar, un workflow de dos pasos acabaría con los dos estimativos intactos y los pasos
+     * reales al final: se leería como cuatro, y lo que se enseñó para firmar no sería lo que
+     * corrió. Es la clase de divergencia que no da error nunca.
+     */
+    const { services, plan } = enMarcha(new PlanBrain([
+      () => ({ kind: 'run', title: 'Leer el log', prompt: 'lee el log', permissionProfile: 'safe', rationale: 'hace falta' }),
+    ]));
+    await services.plans.advance(plan.id, user);
+
+    const steps = services.plans.steps(plan.id);
+    // Siguen siendo dos pasos: el primero atado, el segundo todavía por atar.
+    expect(steps).toHaveLength(2);
+    expect(steps[0]?.kind).toBe('run');
+    expect(steps[0]?.ordinal).toBe(0);
+    expect(steps[1]?.kind).toBe('estimate');
+
+    // Y lo que el paso prometía sigue ahí dentro: es lo que permite leer después si se cumplió.
+    const input = steps[0]?.input as { estimate?: { intent?: string; expects?: string } };
+    expect(input.estimate?.intent).toContain('log del pool');
+    expect(input.estimate?.expects).toContain('primer fallo');
+  });
+
+  it('el modelo ve el plan entero y en qué paso está', async () => {
+    const model = new PlanBrain([
+      () => ({ kind: 'run', title: 'Uno', prompt: 'mira el log', permissionProfile: 'safe', rationale: 'x' }),
+      () => ({ kind: 'finish', summary: 'ya está' }),
+    ]);
+    const { services, plan } = enMarcha(model);
+
+    await services.plans.advance(plan.id, user);
+    // Primer turno: el paso 0 es el actual y el 1 todavía no.
+    const primero = model.lastContext?.plannedSteps ?? [];
+    expect(primero.map((step) => step.state)).toEqual(['current', 'pending']);
+    // Y lo que el borrador declaraba no saber llega al modelo, que es para lo que se escribió.
+    expect(primero[0]?.unknowns).toEqual(['si hay rotación']);
+
+    terminaElTrabajo(services, plan.id);
+    await services.plans.advance(plan.id, user);
+    // Segundo turno: el primero ya está atado, el actual es el otro.
+    const segundo = model.lastContext?.plannedSteps ?? [];
+    expect(segundo.map((step) => step.state)).toEqual(['current']);
+    // El sobre viaja con él: el modelo tiene que saber dentro de qué está decidiendo.
+    expect(model.lastContext?.envelope).toMatchObject({ maxRuns: 3, writes: false });
+  });
+
+  it('un plan sin sobre no ve nada de esto', async () => {
+    const model = new PlanBrain([() => ({ kind: 'finish', summary: 'nada' })]);
+    const services = harness(model);
+    const workspace = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-1' } }, user,
+    ).workspace;
+    const plan = services.plans.create({ workspaceId: workspace.id, objective: 'mirar', user });
+    await services.plans.advance(plan.id, user);
+
+    // Lo que decide es tener sobre, no ser un plan: los de antes ven exactamente lo que veían.
+    expect(model.lastContext?.envelope).toBeUndefined();
+    expect(model.lastContext?.plannedSteps).toBeUndefined();
+  });
+});
+
+describe('WF · gobernar el plan desde fuera', () => {
+  it('pausar lo detiene y reanudar lo devuelve a pensar', () => {
+    const services = harness(new PlanBrain([]));
+    const { plan } = draftWorkflow(services);
+    services.plans.activate(plan.id, user);
+
+    expect(services.plans.steer({ planId: plan.id, op: 'pause', reason: 'ahora no', user })).toEqual({ ok: true });
+    expect(services.plans.require(plan.id).status).toBe('paused');
+
+    // Pausar dos veces no es un error del sistema, pero se dice.
+    expect(services.plans.steer({ planId: plan.id, op: 'pause', reason: 'otra vez', user }))
+      .toMatchObject({ ok: false });
+
+    expect(services.plans.steer({ planId: plan.id, op: 'resume', reason: 'seguimos', user })).toEqual({ ok: true });
+    expect(services.plans.require(plan.id).status).toBe('ready');
+  });
+
+  it('cancelar no deshace lo hecho, y lo cancelado ya no se gobierna', () => {
+    const services = harness(new PlanBrain([]));
+    const { plan } = draftWorkflow(services);
+    services.plans.activate(plan.id, user);
+    services.plans.steer({ planId: plan.id, op: 'cancel', reason: 'ya no hace falta', user });
+
+    expect(services.plans.require(plan.id).status).toBe('cancelled');
+    expect(services.plans.steer({ planId: plan.id, op: 'resume', reason: 'me arrepentí', user }))
+      .toMatchObject({ ok: false, message: expect.stringContaining('ya terminó') });
   });
 });
