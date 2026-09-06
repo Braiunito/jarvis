@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vitest/config';
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -69,6 +70,30 @@ export default defineConfig({
           name: 'web',
           include: ['apps/web/test/**/*.test.ts'],
           environment: 'node',
+        },
+      },
+      /*
+       * La pantalla, con un DOM de verdad.
+       *
+       * Va aparte de `web` porque aquélla prueba funciones puras en `node` —el parser de markdown— y
+       * eso tiene que seguir siendo barato. Aquí se monta React contra jsdom, que cuesta más y sólo
+       * hace falta para lo que **únicamente se ve montando**: que un artifact con la forma
+       * equivocada no desmonte la conversación entera, que un envío fallido no borre lo escrito, que
+       * el stream deje de reintentar.
+       *
+       * Nada de eso se puede ver desde el core por definición, y nada de eso lo cazó la suite de 571
+       * que estaba en verde mientras los tres fallos existían.
+       *
+       * Va con `include` de `*.dom.test.tsx` para que se distingan de un vistazo y no haya que
+       * abrirlas para saber cuál necesita navegador.
+       */
+      {
+        plugins: [tsSources(), react()],
+        resolve: { alias },
+        test: {
+          name: 'web-dom',
+          include: ['apps/web/test/**/*.dom.test.tsx'],
+          environment: 'jsdom',
         },
       },
       {

@@ -16,6 +16,7 @@ import {
 } from '../api/queries.js';
 import { navigate } from '../router.js';
 import { terminalHref } from '../api/links.js';
+import { AskAssistantButton } from '../ui/ask-assistant.jsx';
 import { Empty, ErrorNote, Link, Loading, RunStatusBadge, StaleNote, relativeTime } from '../ui/bits.jsx';
 import { Donut, Meter, SERIES_COLORS } from '../ui/charts.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, STATUS_ICON } from '../ui/icons.jsx';
@@ -452,6 +453,21 @@ export function ExplorerScreen(): JSX.Element {
                   <Glyph icon={ACTION_ICON.open} />
                   {open.isPending ? 'Abriendo…' : selected.workspaceId ? 'Ir al workspace' : 'Abrir workspace'}
                 </button>
+                {/*
+                  * Preguntar por una sesión desde donde se encuentra.
+                  *
+                  * El acceso existía en Salud, en Trabajos y en el workspace, y faltaba justo en la
+                  * pantalla cuyo trabajo es encontrar sesiones — que es donde más se necesita saber
+                  * de qué iba una antes de abrirla. Con `workspaceId` cuando lo hay, para que la
+                  * conversación alcance ese trabajo y la terminal que ofrezca no abra en el home.
+                  */}
+                <AskAssistantButton
+                  className="btn"
+                  workspaceId={selected.workspaceId}
+                  prompt={'¿De qué va esta sesión y en qué punto está? Léela entera, no te quedes en el título.'}
+                >
+                  Pregúntale por esta sesión
+                </AskAssistantButton>
                 <Link className="btn"
                   to={terminalHref({
                     host: selected.ref.host,

@@ -78,6 +78,41 @@ export const EFFORT: Record<string, { name: string; help: string; tone: 'ok' | '
 
 export const effortName = (effort: string): string => EFFORT[effort]?.name ?? effort;
 
+/**
+ * Cuánta cuerda tiene el asistente sin tu firma.
+ *
+ * Estaba escrito a mano en la pantalla, y por eso se quedó viejo: la pista de «Automático» decía que
+ * el trabajo con permiso de escritura salía sin tarjeta, que era verdad cuando se escribió y dejó de
+ * serlo en cuanto el core cumplió su contrato. Aquí vive una vez, al lado del resto del vocabulario,
+ * y se lee del mismo sitio que lo lee el que lo cambie.
+ *
+ * `unrestricted` se llama **«Sin preguntar»** y no «sin restricciones», que es el nombre del perfil
+ * `yolo`: uno dice qué permiso lleva un trabajo y el otro cuánta firma hace falta. Compartir palabra
+ * entre los dos ejes es enseñar a leer una tarjeta de aprobación por encima.
+ */
+export const AUTONOMY: Record<string, { name: string; help: string; tone: 'neutral' | 'warn' | 'danger' }> = {
+  manual: {
+    name: 'Manual',
+    help: 'Todo lo que tenga efectos te lo pregunta antes, incluido lanzar un trabajo en modo seguro.',
+    tone: 'neutral',
+  },
+  auto: {
+    name: 'Automático',
+    help: 'El trabajo en modo seguro y las lecturas van solos. Escribir en una máquina y las '
+      + 'capacidades con efectos siguen pidiéndote tarjeta, igual que salir a la nube.',
+    tone: 'warn',
+  },
+  unrestricted: {
+    name: 'Sin preguntar',
+    help: 'Además van solos el trabajo que escribe y las capacidades **etiquetadas** con efectos. '
+      + 'Lo desconocido no: una capacidad sin etiquetar sigue pidiendo tarjeta. Y nunca van solos el '
+      + 'perfil sin restricciones, salir a la nube ni parar trabajo que lanzaste tú.',
+    tone: 'danger',
+  },
+};
+
+export const autonomyName = (mode: string): string => AUTONOMY[mode]?.name ?? mode;
+
 export interface StatusLabel {
   name: string;
   tone: 'neutral' | 'running' | 'warn' | 'ok' | 'danger';

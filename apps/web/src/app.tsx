@@ -28,6 +28,7 @@ import { LoginScreen } from './screens/login.jsx';
 import { EnrollScreen } from './screens/enroll.jsx';
 import { HomeScreen } from './screens/home.jsx';
 import { AssistantScreen } from './screens/assistant.jsx';
+import { Boundary } from './ui/boundary.jsx';
 import { ExplorerScreen } from './screens/explorer.jsx';
 import { WorkspaceScreen } from './screens/workspace.jsx';
 import { RunCenterScreen } from './screens/runs.jsx';
@@ -208,14 +209,26 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
   const terminals = metrics.data?.terminals;
   const openTerminals = terminals && terminals.at !== null ? terminals.open : null;
 
+  /*
+   * La última red, por pantalla.
+   *
+   * Los anillos de dentro —cada burbuja, cada artifact— hacen que un dato malo caiga solo. Éste es
+   * para lo que nadie previó: sin él, cualquier excepción de render deja la ventana **en blanco**,
+   * sin navegación y sin forma de irse a otro sitio, que es la peor cara que puede poner una consola.
+   * Va por sección y no en la raíz para que el carril, la cabecera y los demás destinos sobrevivan:
+   * lo que falla es una pantalla, no la aplicación.
+   */
   const content = (() => {
-    if (section === 'assistant') return <AssistantScreen />;
-    if (section === 'sessions') return <ExplorerScreen />;
-    if (section === 'w' && route.segments[1]) return <WorkspaceScreen workspaceId={route.segments[1]} />;
-    if (section === 'runs') return <RunCenterScreen runId={route.segments[1] ?? null} />;
-    if (section === 'terminal') return <TerminalScreen query={route.query} />;
-    if (section === 'health') return <HealthScreen />;
-    return <HomeScreen />;
+    const pantalla = (() => {
+      if (section === 'assistant') return <AssistantScreen />;
+      if (section === 'sessions') return <ExplorerScreen />;
+      if (section === 'w' && route.segments[1]) return <WorkspaceScreen workspaceId={route.segments[1]} />;
+      if (section === 'runs') return <RunCenterScreen runId={route.segments[1] ?? null} />;
+      if (section === 'terminal') return <TerminalScreen query={route.query} />;
+      if (section === 'health') return <HealthScreen />;
+      return <HomeScreen />;
+    })();
+    return <Boundary what={`la pantalla «${meta.title}»`} key={section}>{pantalla}</Boundary>;
   })();
 
   return (

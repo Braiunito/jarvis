@@ -24,6 +24,13 @@ export interface AskAssistantInput {
   prompt: string;
   /** Con workspace la conversación alcanza esa sesión y sabe en qué carpeta vive. */
   workspaceId?: string | null;
+  /**
+   * Se llama cuando el servidor ya tiene la conversación.
+   *
+   * Sirve para no borrar lo escrito antes de tiempo: si la creación falla, el texto sigue donde
+   * estaba y se puede reintentar en vez de haberse perdido.
+   */
+  onSent?: () => void;
 }
 
 export interface AskAssistant {
@@ -36,12 +43,17 @@ export interface AskAssistant {
 export function useAskAssistant(): AskAssistant {
   const create = useCreateConversation();
   return {
-    ask: ({ prompt, workspaceId }) => {
+    ask: ({ prompt, workspaceId, onSent }) => {
       // Doble pulsación no son dos conversaciones: la primera todavía está creándose.
       if (create.isPending) return;
       create.mutate(
         { message: prompt, ...(workspaceId ? { workspaceId } : {}) },
-        { onSuccess: ({ conversation }) => navigate(`/assistant/${conversation.id}`) },
+        {
+          onSuccess: ({ conversation }) => {
+            onSent?.();
+            navigate(`/assistant/${conversation.id}`);
+          },
+        },
       );
     },
     pending: create.isPending,

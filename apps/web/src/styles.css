@@ -1389,6 +1389,25 @@ a:hover { text-decoration: underline; }
   border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
   background: color-mix(in srgb, var(--danger) 9%, transparent);
 }
+/*
+ * Lo que se enseña cuando algo no se pudo pintar.
+ *
+ * Se parece a un aviso y no a un error de sistema porque para quien mira no es un fallo suyo ni una
+ * pérdida: el resto de la conversación sigue ahí, y el contenido que no se supo dibujar va debajo en
+ * crudo. Un rectángulo vacío no habría dicho ninguna de las dos cosas.
+ */
+.boundary {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  min-width: 0;
+}
+.boundary-head { display: flex; align-items: flex-start; gap: 7px; margin: 0; font-size: 12.5px; color: var(--warn); }
+.boundary-head svg { flex: 0 0 auto; margin-top: 1px; }
+
 .error-note strong { color: var(--danger); font-size: 12px; letter-spacing: 0.02em; }
 .error-note p { color: var(--text); }
 
@@ -2419,9 +2438,57 @@ a:hover { text-decoration: underline; }
 .chat-event-block { align-self: stretch; max-width: 46rem; display: grid; gap: 6px; }
 .chat-event-block .chat-event { align-self: center; }
 
+/*
+ * Lo que llegó mientras leías arriba.
+ *
+ * Flota sobre el compositor y no empuja nada: aparece cuando hay algo nuevo y no estabas al final,
+ * y se va al pulsarlo. Es lo que permite releer una respuesta anterior mientras el asistente sigue
+ * trabajando, que antes era imposible porque cada consulta te devolvía abajo.
+ */
+.chat-nuevos {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 84px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border-accent);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+}
+.chat-nuevos:hover { background: var(--bg-elevated); }
+/* El hilo pasa a ser el marco de referencia del aviso, que si no flotaría sobre la ventana. */
+.chat-thread { position: relative; }
+
 .chat-thinking { display: flex; align-items: center; gap: 6px; align-self: flex-start; padding: 4px 2px; }
 
 .chat-approval { align-self: stretch; max-width: 46rem; }
+
+/*
+ * Lo que espera tu firma se queda a la vista.
+ *
+ * Antes iba al final del hilo, así que cada consulta nueva la empujaba más abajo y en un móvil
+ * desaparecía. Una aprobación que hay que buscar es una aprobación que se acaba dando sin leer, y
+ * ésta es la única superficie del producto donde eso cuesta caro. Se pega arriba del área de
+ * mensajes mientras dure, con su sombra para que se lea como algo que está encima y no como una
+ * tarjeta más del hilo.
+ */
+.chat-approval-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  box-shadow: var(--shadow-pop);
+}
+/* Una caducada deja de gritar: ya no hay nada que firmar, sólo que entender. */
+.chat-approval.is-expired { opacity: 0.75; box-shadow: none; }
 .chat-approval-args {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

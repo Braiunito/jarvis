@@ -39,11 +39,18 @@ export interface ChatStreamState {
   autonomy: string | null;
   title: string | null;
   connected: boolean;
+  /**
+   * Se dejó de intentar.
+   *
+   * Distinto de `!connected`, que es lo normal durante una reconexión de un segundo. Esto es «no va
+   * a volver solo», y por eso se enseña con una forma de reintentar.
+   */
+  lost: boolean;
 }
 
 const EMPTY: ChatStreamState = {
   messages: [], artifacts: [], status: null, effort: null, source: null, autonomy: null,
-  title: null, connected: false,
+  title: null, connected: false, lost: false,
 };
 
 export function useChatStream(conversationId: string | null): ChatStreamState {
@@ -57,7 +64,10 @@ export function useChatStream(conversationId: string | null): ChatStreamState {
     if (!conversationId) return undefined;
 
     const source = new EventSource(`/events/chat/${conversationId}`);
-    source.onopen = () => setState((previous) => ({ ...previous, connected: true }));
+    source.onopen = () => {
+      fallos = 0;
+      setState((previous) => ({ ...previous, connected: true, lost: false }));
+    };
 
     source.addEventListener('chat.message', (event) => {
       /*
@@ -91,15 +101,44 @@ export function useChatStream(conversationId: string | null): ChatStreamState {
       const next = JSON.parse((event as MessageEvent<string>).data) as {
         status: string; source: string; autonomy: string; title: string; effort?: string | null;
       };
-      setState((previous) => ({ ...previous, ...next }));
-      // El estado también cambia la lista de la izquierda: el título y quién está pensando.
-      void client.invalidateQueries({ queryKey: ['conversations'] });
+      /*
+       * La lista de la izquierda sólo se refresca cuando cambia algo que ella enseña.
+       *
+       * Este evento llega en **cada** consulta del turno: uno de doce disparaba trece refetch de
+       * `/api/chat`, y esa respuesta cuenta el catálogo MCP entero. La lista enseña el título y si
+       * el hilo espera permiso, así que con que no cambie ninguno de los dos no hay nada que
+       * volver a pedir.
+       */
+      setState((previous) => {
+        const cambiaLista = previous.status !== next.status || previous.title !== next.title;
+        if (cambiaLista) void client.invalidateQueries({ queryKey: ['conversations'] });
+        return { ...previous, ...next };
+      });
     });
 
+    /*
+     * Cuántos fallos seguidos lleva.
+     *
+     * `EventSource` reintenta solo, y eso es lo que se quiere cuando la red va y viene. Lo que no
+     * se quiere es que siga intentándolo para siempre contra una conversación **borrada** o con la
+     * sesión caducada: ahí cada reintento es un 404 o un 401 que no va a mejorar solo.
+     */
+    let fallos = 0;
     source.onerror = () => {
       // Casi siempre es una reconexión en curso, que `EventSource` ya está haciendo con el último
       // id. Pintarlo como fallo asustaría por algo que se arregla solo en un segundo.
-      setState((previous) => ({ ...previous, connected: false }));
+      fallos += 1;
+      /*
+       * Pero a la sexta se deja de intentar.
+       *
+       * `readyState === CLOSED` es que el navegador ya se rindió; seis fallos seguidos es que no va
+       * a mejorar —la conversación se borró, la sesión caducó— y seguir reintentando es ruido en el
+       * servidor y una pantalla que dice «conectando» para siempre. Se cierra y se dice, que es lo
+       * que permite volver a intentarlo a propósito.
+       */
+      const rendido = source.readyState === EventSource.CLOSED || fallos >= 6;
+      if (rendido) source.close();
+      setState((previous) => ({ ...previous, connected: false, ...(rendido ? { lost: true } : {}) }));
     };
 
     return () => source.close();

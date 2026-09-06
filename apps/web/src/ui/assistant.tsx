@@ -7,17 +7,18 @@
  */
 import type { JSX } from 'react';
 import { useState } from 'react';
-import type { Approval, Plan, PlanStep } from '@jarvis/contracts';
+import type { Plan, PlanStep } from '@jarvis/contracts';
 import {
   useAnswerPlan, useCancelPlan, useCreatePlan, usePlan, usePlans, useResolveApproval,
 } from '../api/queries.js';
 import { terminalHref } from '../api/links.js';
+import { ApprovalCard } from './approval-card.jsx';
 import { Empty, ErrorNote, Link, relativeTime } from './bits.jsx';
 import { useAnnounceOnChange } from './announce.jsx';
 
-import { PERMISSION, PLAN_STATUS, PLAN_STEP_KIND, RUN_STATUS } from './labels.js';
+import { PLAN_STATUS, PLAN_STEP_KIND, RUN_STATUS } from './labels.js';
 import {
-  ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PLAN_STATUS_ICON, RUN_STATUS_ICON, STATUS_ICON,
+  ACTION_ICON, Glyph, NAV_ICON, PLAN_STATUS_ICON, RUN_STATUS_ICON, STATUS_ICON,
 } from './icons.jsx';
 import { Card } from './primitives.jsx';
 
@@ -81,48 +82,6 @@ function PlanBadge({ status }: { status: string }): JSX.Element {
       {icon ? <Glyph icon={icon} className={spinning ? 'spin' : undefined} /> : null}
       {label?.name ?? status}
     </span>
-  );
-}
-
-function ApprovalCard({ approval, onDecide, pending }: {
-  approval: Approval;
-  onDecide: (decision: 'approved' | 'rejected') => void;
-  pending: boolean;
-}): JSX.Element {
-  const target = approval.target as { host?: string; permissionProfile?: string; prompt?: string };
-  const expiresIn = Math.max(0, Math.round((Date.parse(approval.expiresAt) - Date.now()) / 60_000));
-  return (
-    <div className="card warn-card">
-      <h3 className="row" style={{ color: 'var(--warn)', gap: 6, margin: '0 0 6px' }}>
-        <Glyph icon={PLAN_STATUS_ICON['waiting_approval'] as never} size={16} />
-        Necesita tu permiso
-      </h3>
-      <p style={{ margin: '0 0 8px' }}>{approval.summary}</p>
-      <div className="row small" style={{ marginBottom: 8 }}>
-        <span className="badge neutral">{approval.actionType}</span>
-        {target.host ? <span className="badge neutral mono">{target.host}</span> : null}
-        <span className={`badge ${PERMISSION[target.permissionProfile as 'auto' | 'yolo']?.tone ?? 'warn'}`}>
-          <Glyph icon={PERMISSION_ICON[target.permissionProfile as 'auto' | 'yolo'] ?? PERMISSION_ICON.auto} />
-          {PERMISSION[target.permissionProfile as 'auto' | 'yolo']?.name ?? target.permissionProfile}
-        </span>
-        <span className="muted">caduca en {expiresIn} min</span>
-      </div>
-      {target.prompt ? (
-        <pre className="small mono" style={{ whiteSpace: 'pre-wrap', margin: '0 0 10px', color: 'var(--text-muted)' }}>
-          {target.prompt.slice(0, 400)}
-        </pre>
-      ) : null}
-      <div className="row">
-        <button type="button" className="btn primary" disabled={pending} onClick={() => onDecide('approved')}>
-          <Glyph icon={ACTION_ICON.approve} />
-          Autorizar
-        </button>
-        <button type="button" className="btn danger" disabled={pending} onClick={() => onDecide('rejected')}>
-          <Glyph icon={ACTION_ICON.reject} />
-          Rechazar
-        </button>
-      </div>
-    </div>
   );
 }
 

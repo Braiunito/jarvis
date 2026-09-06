@@ -19,7 +19,7 @@
 import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type {
-  Approval, AutonomyMode, ChatArtifact, ChatCapabilities, ChatMessage, ChatRef, PermissionProfile,
+  AutonomyMode, ChatArtifact, ChatCapabilities, ChatMessage, ChatRef,
 } from '@jarvis/contracts';
 import type { SpendSummary } from '@jarvis/contracts';
 import {
@@ -31,43 +31,18 @@ import { terminalHref } from '../api/links.js';
 import { navigate, useRoute } from '../router.js';
 import { Empty, ErrorNote, Link, Loading, relativeTime } from '../ui/bits.jsx';
 import {
-  ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, SOURCE_ICON, STATUS_ICON,
+  ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, SOURCE_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
-import { EFFORT, PERMISSION, permissionName } from '../ui/labels.js';
+import { AUTONOMY, autonomyName, EFFORT } from '../ui/labels.js';
 import { useAskAssistant } from '../ui/ask-assistant.jsx';
 import { ArtifactChip, InlineArtifact } from '../ui/artifact.jsx';
+import { ApprovalCard } from '../ui/approval-card.jsx';
+import { Boundary } from '../ui/boundary.jsx';
 import { Composer } from '../ui/composer.jsx';
 import { Markdown } from '../ui/markdown.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
-import { DataRow } from '../ui/primitives.jsx';
+import { ConfirmDialog, DataRow } from '../ui/primitives.jsx';
 
-const AUTONOMY_OPTIONS: Array<{ value: AutonomyMode; label: string; hint: string }> = [
-  {
-    value: 'manual',
-    label: 'Manual',
-    hint: 'Todo lo que tenga efectos te lo pregunta antes, incluido lanzar un trabajo en modo seguro.',
-  },
-  /*
-   * Dice lo que el código hace, no lo que el contrato promete.
-   *
-   * La frase anterior prometía que en automático los permisos de escritura seguían pidiendo
-   * tarjeta. No es cierto: `#createRun` del toolbox sólo convierte a aprobación cuando la
-   * autonomía es `manual`, así que en automático un trabajo con perfil `auto` —que escribe— sale
-   * sin preguntar. Lo que sí sigue pidiendo permiso siempre es tocar una máquina con una
-   * capacidad del sistema y salir a la nube, que son decisiones aparte y no dependen de esto.
-   *
-   * Se corrige la frase y no el motor porque el motor es de otro y ya está en camino. Pero un
-   * texto que promete una tarjeta que no va a aparecer es peor que no decir nada: es una
-   * exposición a un clic de quien se lo crea. Cuando el core cumpla lo que promete el contrato,
-   * esta frase vuelve a la anterior.
-   */
-  {
-    value: 'auto',
-    label: 'Automático',
-    hint: 'Puede lanzar trabajo sin preguntar, incluido con permiso de escritura. Sigue pidiéndote '
-      + 'permiso para tocar una máquina con una capacidad del sistema y para salir a la nube.',
-  },
-];
 
 /** El nombre corto de un modelo: lo que cabe en un distintivo sin dejar de identificarlo. */
 const shortModel = (model: string | null): string => model?.split('/').pop() ?? 'modelo';
@@ -124,85 +99,6 @@ function ToolTrace({ message }: { message: ChatMessage }): JSX.Element {
 }
 
 /**
- * La tarjeta de permiso.
- *
- * Dice **qué** se va a hacer y **dónde**, con el texto entero y sin recortar: lo que se autoriza
- * es exactamente esto. Las tres clases de permiso que puede pedir el asistente se leen distinto
- * porque no se parecen en nada —salir a la nube cuesta dinero, reiniciar un servicio tumba algo
- * durante unos minutos, lanzar un trabajo escribe en un repositorio—.
- */
-function ApprovalCard({ approval, onDecide, pending }: {
-  approval: Approval;
-  onDecide: (decision: 'approved' | 'rejected') => void;
-  pending: boolean;
-}): JSX.Element {
-  const target = approval.target as {
-    reason?: string; capability?: string; args?: Record<string, unknown>;
-    host?: string; permissionProfile?: string; prompt?: string; model?: string;
-  };
-  const expiresIn = Math.max(0, Math.round((Date.parse(approval.expiresAt) - Date.now()) / 60_000));
-
-  const heading = approval.actionType === 'escalate' ? 'Quiere consultar a la nube'
-    : approval.actionType === 'capability' ? 'Quiere tocar una máquina'
-      : 'Quiere lanzar un trabajo';
-
-  return (
-    <div className="card warn-card chat-approval">
-      <h3 className="row" style={{ color: 'var(--warn)', gap: 6, margin: '0 0 6px' }}>
-        <Glyph icon={approval.actionType === 'escalate' ? SOURCE_ICON.cloud : ACTION_ICON.capability} size={16} />
-        {heading}
-      </h3>
-      <p style={{ margin: '0 0 8px' }}>{approval.summary}</p>
-
-      <div className="row small" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
-        {target.capability ? <span className="badge neutral mono">{target.capability}</span> : null}
-        {target.model ? <span className="badge neutral mono">{target.model}</span> : null}
-        {target.host ? <span className="badge neutral mono">{target.host}</span> : null}
-        {/*
-          * El permiso, con su nombre y su tono, no con la palabra de la base.
-          *
-          * Aquí ponía `auto` a secas, que no le dice nada a quien está a punto de autorizar: `auto`
-          * significa «escribe ficheros en el destino, y lo que toque queda tocado», y esa frase ya
-          * estaba escrita en `labels.ts` sin que nadie la enseñara. En la única superficie donde el
-          * producto promete que entre lo que se lee y lo que se ejecuta no cabe un cambio, la
-          * etiqueta tiene que decir lo que se va a poder hacer.
-          *
-          * El tono también sale de ahí: `safe` es verde, `auto` ámbar y `yolo` rojo. Antes los tres
-          * salían en ámbar, así que el más peligroso se leía igual que el intermedio.
-          */}
-        {target.permissionProfile ? (
-          <span
-            className={`badge ${PERMISSION[target.permissionProfile as PermissionProfile]?.tone ?? 'warn'}`}
-            title={PERMISSION[target.permissionProfile as PermissionProfile]?.help}
-          >
-            <Glyph icon={PERMISSION_ICON[target.permissionProfile as PermissionProfile] ?? ACTION_ICON.insecure} />
-            {permissionName(target.permissionProfile)}
-          </span>
-        ) : null}
-        <span className="muted">caduca en {expiresIn} min</span>
-      </div>
-
-      {/* Los argumentos exactos: entre lo que se lee aquí y lo que se ejecuta no cabe un cambio. */}
-      {target.args && Object.keys(target.args).length ? (
-        <pre className="small mono chat-approval-args">{JSON.stringify(target.args, null, 2)}</pre>
-      ) : null}
-      {target.prompt ? <pre className="small mono chat-approval-args">{target.prompt}</pre> : null}
-
-      <div className="row">
-        <button type="button" className="btn primary" disabled={pending} onClick={() => onDecide('approved')}>
-          <Glyph icon={ACTION_ICON.approve} />
-          Autorizar
-        </button>
-        <button type="button" className="btn danger" disabled={pending} onClick={() => onDecide('rejected')}>
-          <Glyph icon={ACTION_ICON.reject} />
-          No
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
  * Lo que llevamos gastado.
  *
  * Dice «gastado», nunca «te queda en la cuenta», y la diferencia no es de estilo: **el proveedor
@@ -210,9 +106,11 @@ function ApprovalCard({ approval, onDecide, pending }: {
  * que este core ha visto pasar, con la tarifa que tiene puesta. Presentarlo como saldo sería
  * inventarse un dato que alguien va a mirar justo antes de que la clave deje de funcionar.
  *
- * El resto en consultas sólo aparece si se declaró cuánto se cargó, y se calcula con la media de
- * las vueltas de verdad. Sin presupuesto declarado se enseña sólo lo gastado, que es lo que se
- * sabe.
+ * El resto se cuenta en **vueltas al modelo**, no en preguntas, y la palabra importa: una pregunta
+ * puede costar una vuelta o doce según lo que haya que mirar, así que llamarlas «consultas» invitaba
+ * a dividir mal y a creerse con más margen del que hay. Sólo aparece si se declaró cuánto se cargó,
+ * y se calcula con la media de las vueltas de verdad; sin presupuesto declarado se enseña lo
+ * gastado, que es lo que se sabe.
  */
 function SpendBadge({ spend }: { spend: SpendSummary }): JSX.Element | null {
   const [open, setOpen] = useState(false);
@@ -234,7 +132,7 @@ function SpendBadge({ spend }: { spend: SpendSummary }): JSX.Element | null {
       >
         <Glyph icon={STATUS_ICON.gauge} />
         {spend.remainingTurns !== null
-          ? `~${spend.remainingTurns.toLocaleString('es-ES')} consultas`
+          ? `~${spend.remainingTurns.toLocaleString('es-ES')} vueltas`
           : dinero(spend.spentUsd)}
       </button>
 
@@ -341,9 +239,21 @@ function TerminalRef({ target }: { target: Extract<ChatRef, { kind: 'terminal' }
             <Glyph icon={NAV_ICON.terminal} />
             Abrir terminal en {target.host}
           </Link>
-          <span className="tiny faint mono ref-label" title={target.cwd ?? target.sessionId}>
-            {target.cwd ?? target.sessionId}
-          </span>
+          {/*
+            * Sin `cwd` la terminal abre en el home, y eso hay que decirlo antes de pulsar.
+            *
+            * Pasa cuando la sesión no tiene workspace: el core no puede resolver la carpeta y el
+            * botón sigue siendo útil —máquina y sesión correctas— pero no aterriza donde está el
+            * trabajo. Enseñar el `sessionId` en su hueco daba a entender que sí.
+            */}
+          {target.cwd ? (
+            <span className="tiny faint mono ref-label" title={target.cwd}>{target.cwd}</span>
+          ) : (
+            <span className="tiny warn ref-label"
+              title="Esta sesión no tiene workspace abierto, así que no se sabe en qué carpeta estaba.">
+              sin directorio conocido: abre en el home
+            </span>
+          )}
         </span>
       </span>
     </div>
@@ -515,48 +425,87 @@ function MessageBubble({ message, conversationId, bodies }: {
  * el ancho completo de la cabecera para enseñar una decisión que se toma una vez y se mira de
  * reojo; el modo actual se lee igual en un chip, y el selector aparece cuando lo pides.
  */
-function AutonomyChip({ value, onChange, pending }: {
+function AutonomyChip({ value, modes, onChange, pending }: {
   value: AutonomyMode;
+  /**
+   * Los modos que este servidor ofrece de verdad.
+   *
+   * Vienen del core y no de una lista escrita aquí: `unrestricted` sólo existe si el operador lo
+   * encendió, y una pantalla que lo ofrece cuando el servidor lo va a rechazar promete una cuerda
+   * que no hay.
+   */
+  modes: readonly AutonomyMode[];
   onChange: (next: AutonomyMode) => void;
   pending: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const current = AUTONOMY_OPTIONS.find((option) => option.value === value) ?? AUTONOMY_OPTIONS[0];
+  const menu = useRef<HTMLDivElement | null>(null);
+  const actual = AUTONOMY[value];
+  /*
+   * El modo de la conversación puede no estar en la lista.
+   *
+   * Pasa si se apagó el flag con un hilo ya en `unrestricted`. Antes eso se pintaba «Manual» —el
+   * `find` caía al primero— y decía justo lo contrario de lo que estaba pasando. Ahora se enseña lo
+   * que hay, con el aviso de que el servidor ya no lo ofrece.
+   */
+  const degradado = !modes.includes(value);
+
+  // El menú toma el foco al abrirse y se cierra con Escape, como cualquier otro diálogo de la casa.
+  useEffect(() => {
+    if (!open) return undefined;
+    menu.current?.querySelector<HTMLButtonElement>('.autonomy-option')?.focus();
+    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   return (
     <div className="autonomy">
       <button
         type="button"
-        className={`badge ${value === 'manual' ? 'neutral' : 'warn'} autonomy-chip`}
+        className={`badge ${degradado ? 'danger' : actual?.tone ?? 'neutral'} autonomy-chip`}
         aria-expanded={open}
-        aria-label={`Autonomía: ${current?.label}. Cambiar`}
-        title={current?.hint}
+        aria-label={`Autonomía: ${autonomyName(value)}. Cambiar`}
+        title={degradado
+          ? `${autonomyName(value)}: este servidor ya no ofrece este modo. Elige otro.`
+          : actual?.help}
         disabled={pending}
         onClick={() => setOpen(!open)}
       >
         <Glyph icon={value === 'manual' ? ACTION_ICON.secure : ACTION_ICON.insecure} />
-        {current?.label}
+        {autonomyName(value)}
         <Glyph icon={open ? ACTION_ICON.collapse : ACTION_ICON.expand} size={12} />
       </button>
       {open ? (
         <>
           <button type="button" className="autonomy-veil" aria-label="Cerrar"
             onClick={() => setOpen(false)} />
-          <div className="autonomy-menu card" role="dialog" aria-label="Cuánta cuerda tiene">
-            {AUTONOMY_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className="autonomy-option"
-                aria-current={option.value === value}
-                onClick={() => { onChange(option.value); setOpen(false); }}
-              >
-                <span className="row tight">
-                  <Glyph icon={option.value === value ? ACTION_ICON.approve : ACTION_ICON.chevron} size={13} />
-                  <strong className="small">{option.label}</strong>
-                </span>
-                <span className="tiny faint">{option.hint}</span>
-              </button>
-            ))}
+          <div className="autonomy-menu card" role="dialog" aria-label="Cuánta cuerda tiene" ref={menu}>
+            {degradado ? (
+              <p className="tiny warn" style={{ margin: '2px 6px 4px' }}>
+                Esta conversación está en «{autonomyName(value)}» y el servidor ya no ofrece ese modo.
+              </p>
+            ) : null}
+            {modes.map((mode) => {
+              const label = AUTONOMY[mode];
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  className="autonomy-option"
+                  aria-current={mode === value}
+                  onClick={() => { onChange(mode); setOpen(false); }}
+                >
+                  <span className="row tight">
+                    <Glyph icon={mode === value ? ACTION_ICON.approve : ACTION_ICON.chevron} size={13} />
+                    <strong className={`small ${label?.tone === 'danger' ? 'danger' : ''}`}>
+                      {label?.name ?? mode}
+                    </strong>
+                  </span>
+                  <span className="tiny faint">{label?.help}</span>
+                </button>
+              );
+            })}
           </div>
         </>
       ) : null}
@@ -575,13 +524,45 @@ function AutonomyChip({ value, onChange, pending }: {
  * el índice y seis hosts en una palabra es un indicador que no se puede comprobar; aquí cada cosa
  * se cuenta con su número, y el que esté mal se lee.
  */
-function StatusLine({ hosts, capabilities, thinking, effort }: {
+function StatusLine({ hosts, capabilities, thinking, effort, failed, lost }: {
   hosts: { reachable: boolean }[] | undefined;
   capabilities: ChatCapabilities | undefined;
   thinking: boolean;
   /** El nivel elegido para este turno, o nulo si no lo decide él. */
   effort: string | null;
+  /** El turno se cayó. Antes esto no se distinguía de «en reposo». */
+  failed: boolean;
+  /** El stream se dio por vencido: no va a volver solo. */
+  lost: boolean;
 }): JSX.Element | null {
+  /*
+   * Un turno que se cayó no puede leerse como uno terminado.
+   *
+   * La línea sólo sabía distinguir «pensando» de «en reposo», así que un fallo dejaba la pantalla
+   * exactamente igual que un éxito y la persona esperaba una respuesta que no iba a llegar.
+   */
+  if (failed) {
+    return (
+      <span className="chat-status danger">
+        <span className="chat-status-dot" aria-hidden="true" />
+        <span className="truncate">el turno falló</span>
+      </span>
+    );
+  }
+
+  /*
+   * Y perder el stream tampoco: sin esto, el hilo se queda callado y parece que nadie contesta.
+   * Sólo cuando se ha dado por vencido —una reconexión de un segundo no es noticia—.
+   */
+  if (lost) {
+    return (
+      <span className="chat-status warn">
+        <span className="chat-status-dot" aria-hidden="true" />
+        <span className="truncate">sin conexión con el hilo</span>
+      </span>
+    );
+  }
+
   /*
    * Mientras piensa, la línea dice con cuánto esfuerzo.
    *
@@ -693,6 +674,14 @@ export function AssistantScreen(): JSX.Element {
    * pide, tapa lo de detrás mientras se usa, y se va.
    */
   const [listOpen, setListOpen] = useState(false);
+  /*
+   * Borrar una conversación no se deshace.
+   *
+   * Era el único sitio de la consola donde una acción irreversible salía de un clic sin preguntar,
+   * y encima el botón está pegado al de cambiar la autonomía. El resto de la casa usa esta misma
+   * tarjeta para lo que no se puede recuperar.
+   */
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
   /*
@@ -720,10 +709,33 @@ export function AssistantScreen(): JSX.Element {
   const approvals = detail.data?.approvals ?? [];
   const capabilities = list.data?.capabilities;
 
-  // Al llegar algo nuevo, abajo. Es una conversación: lo último es lo que se está leyendo.
+  /*
+   * Al llegar algo nuevo, abajo — **salvo que estés leyendo arriba**.
+   *
+   * Bajaba siempre, así que releer una respuesta anterior mientras el asistente sigue trabajando
+   * era imposible: cada consulta te devolvía al final. Ahora sólo arrastra si ya estabas al final,
+   * que es cuando bajar es lo que quieres; si no, aparece un aviso de cuántos han llegado y bajas
+   * tú. El umbral es generoso a propósito: a 120 px del fondo se sigue considerando «estabas
+   * abajo», porque nadie afina el scroll al píxel.
+   */
+  const [pendientes, setPendientes] = useState(0);
+  const vistos = useRef(0);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const caja = document.querySelector('.chat-messages');
+    const abajo = !caja || caja.scrollHeight - caja.scrollTop - caja.clientHeight < 120;
+    if (abajo) {
+      bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      setPendientes(0);
+    } else if (messages.length > vistos.current) {
+      setPendientes((previo) => previo + (messages.length - vistos.current));
+    }
+    vistos.current = messages.length;
   }, [messages.length, status]);
+
+  const irAlFinal = (): void => {
+    bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    setPendientes(0);
+  };
 
   // Cada turno gasta, así que el contador se refresca al terminar uno y no cada pocos segundos.
   useEffect(() => {
@@ -736,18 +748,27 @@ export function AssistantScreen(): JSX.Element {
     route.navigate(id ? `/assistant/${id}` : '/assistant');
   }
 
+  /*
+   * Lo escrito no se borra hasta que el servidor lo tiene.
+   *
+   * Se limpiaba antes de que la mutación resolviera, así que un 500, un 409 o un tiempo agotado se
+   * llevaban el texto sin decir nada: la pantalla quedaba muda y lo escrito, perdido. Ahora se
+   * limpia al confirmar y el error se pinta, que es lo único que permite volver a intentarlo.
+   */
   function submit(): void {
     const text = draft.trim();
     if (!text) return;
-    setDraft('');
     if (active) {
-      send.mutate(text);
+      send.mutate(text, { onSuccess: () => setDraft('') });
       return;
     }
     // Sin conversación abierta, el primer mensaje crea una y navega a ella. Por el mismo camino
     // que los accesos del resto de pantallas, y por eso hereda el workspace del que se viene.
-    ask.ask({ prompt: text, workspaceId: fromWorkspace });
+    ask.ask({ prompt: text, workspaceId: fromWorkspace, onSent: () => setDraft('') });
   }
+
+  /** Volver a mandar lo último que dijo la persona, para cuando el turno se cayó. */
+  const lastUserText = [...messages].reverse().find((message) => message.role === 'user')?.text ?? null;
 
   const thinking = status === 'thinking';
   const noModel = capabilities && !capabilities.localAvailable && !capabilities.cloudAvailable;
@@ -763,6 +784,23 @@ export function AssistantScreen(): JSX.Element {
           onClick={() => setListOpen(false)}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={confirmDelete && Boolean(active)}
+        title="Borrar esta conversación"
+        description={
+          <>
+            Se borra <strong>{stream.title ?? conversation?.title ?? 'la conversación'}</strong> con
+            todo su hilo, sus trazas y lo que enseñó. No se puede deshacer.
+          </>
+        }
+        confirmLabel="Borrar"
+        pending={remove.isPending}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => remove.mutate(active as string, {
+          onSuccess: () => { setConfirmDelete(false); open(null); },
+        })}
+      />
 
       <aside className="chat-rail">
         <div className="row between" style={{ marginBottom: 8 }}>
@@ -875,6 +913,8 @@ export function AssistantScreen(): JSX.Element {
                 capabilities={capabilities}
                 thinking={thinking}
                 effort={stream.effort}
+                failed={status === 'failed'}
+                lost={stream.lost}
               />
             </span>
           </div>
@@ -887,6 +927,7 @@ export function AssistantScreen(): JSX.Element {
             <div className="chat-head-actions">
               <AutonomyChip
                 value={autonomy}
+                modes={capabilities?.autonomyModes ?? ['manual', 'auto']}
                 pending={setAutonomy.isPending}
                 onChange={(next) => setAutonomy.mutate(next)}
               />
@@ -894,7 +935,7 @@ export function AssistantScreen(): JSX.Element {
                 type="button"
                 className="btn small danger"
                 aria-label="Borrar la conversación"
-                onClick={() => remove.mutate(active, { onSuccess: () => open(null) })}
+                onClick={() => setConfirmDelete(true)}
               >
                 <Glyph icon={ACTION_ICON.delete} />
                 <span className="chat-head-word">Borrar</span>
@@ -916,13 +957,29 @@ export function AssistantScreen(): JSX.Element {
           {detail.isLoading ? <Loading rows={4} shape="timeline" /> : null}
           {detail.error ? <ErrorNote error={detail.error} onRetry={() => void detail.refetch()} /> : null}
 
+          {/*
+            * Cada burbuja con su anillo: lo que no se pueda pintar cae sola.
+            *
+            * Sin esto, un mensaje malformado en medio del hilo se lleva por delante todos los de
+            * arriba y el compositor, y quien mira ve una pantalla en blanco sin saber qué pasó.
+            */}
           {messages.map((message) => (
-            <MessageBubble key={message.seq} message={message}
-              conversationId={active} bodies={artifactBodies} />
+            <Boundary key={message.seq} what={`un mensaje (${message.role})`}>
+              <MessageBubble message={message} conversationId={active} bodies={artifactBodies} />
+            </Boundary>
           ))}
 
+          {/*
+            * La tarjeta se ancla arriba mientras espera tu firma.
+            *
+            * Iba al final del hilo, lejos del mensaje que la pidió, y en un móvil se perdía en
+            * cuanto llegaba una consulta más. Lo que espera una firma no puede depender de que
+            * alguien se desplace hasta encontrarlo: es lo único de esta pantalla que **hay que**
+            * leer, y por eso se queda pegada bajo la cabecera hasta que se resuelve.
+            */}
           {approvals.map((approval) => (
             <ApprovalCard
+              className="chat-approval-sticky"
               key={approval.id}
               approval={approval}
               pending={resolve.isPending}
@@ -935,6 +992,34 @@ export function AssistantScreen(): JSX.Element {
           {/* Si crear la conversación falla, el composer se queda quieto y parece que no responde. */}
           <ErrorNote error={ask.error} />
 
+          {/*
+            * Un turno caído deja una salida, no un callejón.
+            *
+            * Antes el hilo se quedaba mudo: la pregunta escrita, ninguna respuesta y nada que
+            * pulsar. Reenviar lo último que dijiste es lo que se puede ofrecer sin tocar el core
+            * —no rehace el turno, manda otra vez la misma pregunta— y es exactamente lo que hacía
+            * la gente a mano, volviendo a escribirla.
+            */}
+          {status === 'failed' && lastUserText && active ? (
+            <div className="note danger">
+              <Glyph icon={ACTION_ICON.error} size={16} />
+              <span>
+                <span className="small">El turno se cayó sin llegar a contestar.</span>
+                <span className="row tight" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="btn small"
+                    disabled={send.isPending}
+                    onClick={() => send.mutate(lastUserText)}
+                  >
+                    <Glyph icon={ACTION_ICON.retry} />
+                    {send.isPending ? 'Enviando…' : 'Volver a intentar'}
+                  </button>
+                </span>
+              </span>
+            </div>
+          ) : null}
+
           {thinking ? (
             <div className="chat-thinking">
               <Glyph icon={STATUS_ICON.activity} size={14} className="spin" />
@@ -944,6 +1029,14 @@ export function AssistantScreen(): JSX.Element {
 
           <div ref={bottom} />
         </div>
+
+        {/* Lo que ha llegado mientras leías arriba, sin moverte de donde estabas. */}
+        {pendientes > 0 ? (
+          <button type="button" className="chat-nuevos" onClick={irAlFinal}>
+            <Glyph icon={ACTION_ICON.scrollEnd} size={14} />
+            {pendientes === 1 ? '1 mensaje nuevo' : `${pendientes} mensajes nuevos`}
+          </button>
+        ) : null}
 
         <Composer
           className="chat-composer"

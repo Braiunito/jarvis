@@ -23,6 +23,7 @@ import type {
 } from '@jarvis/contracts';
 import { useArtifact } from '../api/queries.js';
 import { ErrorNote, Loading } from './bits.jsx';
+import { Boundary } from './boundary.jsx';
 import { Donut, Meter, Sparkbars, SERIES_COLORS } from './charts.jsx';
 import { JSON_STYLES } from './event-log.jsx';
 import { ACTION_ICON, Glyph, STATUS_ICON } from './icons.jsx';
@@ -264,7 +265,19 @@ export function ArtifactView({ conversationId, artifact }: {
   return (
     <div className="artifact">
       <Head artifact={artifact} />
-      <div className="artifact-body"><Body conversationId={conversationId} artifact={artifact} /></div>
+      {/*
+        * El cuerpo va dentro de su propio anillo.
+        *
+        * Lo escribió un modelo y lo valida el core, pero validar cubre lo que se ha previsto. Una
+        * celda con la forma equivocada —un objeto donde iba texto— desmontaría desde aquí hasta la
+        * pantalla entera: sin hilo, sin compositor y sin saber por qué. Cayendo sólo esta caja, la
+        * conversación se sigue leyendo y el cuerpo se enseña en crudo, que es lo que hay.
+        */}
+      <div className="artifact-body">
+        <Boundary what={`el artifact «${artifact.title}»`} raw={artifact.body}>
+          <Body conversationId={conversationId} artifact={artifact} />
+        </Boundary>
+      </div>
     </div>
   );
 }

@@ -59,6 +59,14 @@ test('la pantalla de entrada no tiene fallos de accesibilidad', async ({ page })
 
 for (const screen of [
   { name: 'Inicio', go: (page: Page) => nav(page, 'Inicio').click() },
+  /*
+   * El asistente entró tarde en esta lista y era la pantalla que más había cambiado.
+   *
+   * Aquí viven las piezas más delicadas de la consola: la tarjeta que se firma, un menú que se
+   * abre, un diálogo que borra algo irreversible y contenido escrito por un modelo. Que ninguna de
+   * ellas se auditara con el resto era el hueco más grande de la suite.
+   */
+  { name: 'Asistente', go: (page: Page) => nav(page, /^Asistente/).click() },
   { name: 'Sesiones', go: (page: Page) => nav(page, 'Sesiones').click() },
   { name: 'Trabajo', go: (page: Page) => nav(page, /^Trabajo/).click() },
   { name: 'Terminal', go: (page: Page) => nav(page, 'Terminal').click() },
