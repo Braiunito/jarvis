@@ -18,10 +18,12 @@
  */
 import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import type { Approval, AutonomyMode, ChatArtifact, ChatMessage, ChatRef } from '@jarvis/contracts';
+import type {
+  Approval, AutonomyMode, ChatArtifact, ChatCapabilities, ChatMessage, ChatRef, PermissionProfile,
+} from '@jarvis/contracts';
 import type { SpendSummary } from '@jarvis/contracts';
 import {
-  useCapabilityCatalog, useConversation, useConversations, useDeleteConversation,
+  useCapabilityCatalog, useConversation, useConversations, useDeleteConversation, useHosts,
   useOpenWorkspace, useResolveApproval, useSendMessage, useSetAutonomy, useSpend,
 } from '../api/queries.js';
 import { useChatStream } from '../api/chat-stream.js';
@@ -29,13 +31,14 @@ import { terminalHref } from '../api/links.js';
 import { navigate, useRoute } from '../router.js';
 import { Empty, ErrorNote, Link, Loading, relativeTime } from '../ui/bits.jsx';
 import {
-  ACTION_ICON, Glyph, NAV_ICON, PROVIDER_ICON, SOURCE_ICON, STATUS_ICON,
+  ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, SOURCE_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
+import { PERMISSION, permissionName } from '../ui/labels.js';
 import { useAskAssistant } from '../ui/ask-assistant.jsx';
 import { ArtifactChip, InlineArtifact } from '../ui/artifact.jsx';
 import { Markdown } from '../ui/markdown.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
-import { DataRow, Segmented } from '../ui/primitives.jsx';
+import { DataRow } from '../ui/primitives.jsx';
 
 const AUTONOMY_OPTIONS: Array<{ value: AutonomyMode; label: string; hint: string }> = [
   {
@@ -154,7 +157,27 @@ function ApprovalCard({ approval, onDecide, pending }: {
         {target.capability ? <span className="badge neutral mono">{target.capability}</span> : null}
         {target.model ? <span className="badge neutral mono">{target.model}</span> : null}
         {target.host ? <span className="badge neutral mono">{target.host}</span> : null}
-        {target.permissionProfile ? <span className="badge warn">{target.permissionProfile}</span> : null}
+        {/*
+          * El permiso, con su nombre y su tono, no con la palabra de la base.
+          *
+          * Aquí ponía `auto` a secas, que no le dice nada a quien está a punto de autorizar: `auto`
+          * significa «escribe ficheros en el destino, y lo que toque queda tocado», y esa frase ya
+          * estaba escrita en `labels.ts` sin que nadie la enseñara. En la única superficie donde el
+          * producto promete que entre lo que se lee y lo que se ejecuta no cabe un cambio, la
+          * etiqueta tiene que decir lo que se va a poder hacer.
+          *
+          * El tono también sale de ahí: `safe` es verde, `auto` ámbar y `yolo` rojo. Antes los tres
+          * salían en ámbar, así que el más peligroso se leía igual que el intermedio.
+          */}
+        {target.permissionProfile ? (
+          <span
+            className={`badge ${PERMISSION[target.permissionProfile as PermissionProfile]?.tone ?? 'warn'}`}
+            title={PERMISSION[target.permissionProfile as PermissionProfile]?.help}
+          >
+            <Glyph icon={PERMISSION_ICON[target.permissionProfile as PermissionProfile] ?? ACTION_ICON.insecure} />
+            {permissionName(target.permissionProfile)}
+          </span>
+        ) : null}
         <span className="muted">caduca en {expiresIn} min</span>
       </div>
 
@@ -440,10 +463,21 @@ function MessageBubble({ message, conversationId, bodies }: {
   if (message.role === 'tool') return <ToolTrace message={message} />;
 
   if (message.role === 'event') {
+    /*
+     * Un evento también puede traer lo que el turno dejó pulsable.
+     *
+     * Es el caso de un turno que **no pudo cumplir su decisión**: el core guarda las referencias en
+     * la fila de evento para que lo que ya se produjo no se pierda porque el final saliera mal. Un
+     * asistente que preparó tres artifacts y acabó diciendo «no puedo lanzar eso» los tenía
+     * guardados y no los enseñaba: la mitad del arreglo estaba hecha y esta mitad los tiraba.
+     */
     return (
-      <div className="chat-event">
-        <Glyph icon={STATUS_ICON.activity} size={14} />
-        <span>{message.text}</span>
+      <div className="chat-event-block">
+        <div className="chat-event">
+          <Glyph icon={STATUS_ICON.activity} size={14} />
+          <span>{message.text}</span>
+        </div>
+        <MessageRefs message={message} conversationId={conversationId} bodies={bodies} />
       </div>
     );
   }
@@ -470,6 +504,114 @@ function MessageBubble({ message, conversationId, bodies }: {
   );
 }
 
+/**
+ * La autonomía, en un chip que se abre.
+ *
+ * Sigue estando a la vista y sigue cambiándose donde se está usando —que es lo que pedía el
+ * diseño— pero deja de costar una fila entera. En un móvil el selector de tres segmentos ocupaba
+ * el ancho completo de la cabecera para enseñar una decisión que se toma una vez y se mira de
+ * reojo; el modo actual se lee igual en un chip, y el selector aparece cuando lo pides.
+ */
+function AutonomyChip({ value, onChange, pending }: {
+  value: AutonomyMode;
+  onChange: (next: AutonomyMode) => void;
+  pending: boolean;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const current = AUTONOMY_OPTIONS.find((option) => option.value === value) ?? AUTONOMY_OPTIONS[0];
+  return (
+    <div className="autonomy">
+      <button
+        type="button"
+        className={`badge ${value === 'manual' ? 'neutral' : 'warn'} autonomy-chip`}
+        aria-expanded={open}
+        aria-label={`Autonomía: ${current?.label}. Cambiar`}
+        title={current?.hint}
+        disabled={pending}
+        onClick={() => setOpen(!open)}
+      >
+        <Glyph icon={value === 'manual' ? ACTION_ICON.secure : ACTION_ICON.insecure} />
+        {current?.label}
+        <Glyph icon={open ? ACTION_ICON.collapse : ACTION_ICON.expand} size={12} />
+      </button>
+      {open ? (
+        <>
+          <button type="button" className="autonomy-veil" aria-label="Cerrar"
+            onClick={() => setOpen(false)} />
+          <div className="autonomy-menu card" role="dialog" aria-label="Cuánta cuerda tiene">
+            {AUTONOMY_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className="autonomy-option"
+                aria-current={option.value === value}
+                onClick={() => { onChange(option.value); setOpen(false); }}
+              >
+                <span className="row tight">
+                  <Glyph icon={option.value === value ? ACTION_ICON.approve : ACTION_ICON.chevron} size={13} />
+                  <strong className="small">{option.label}</strong>
+                </span>
+                <span className="tiny faint">{option.hint}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Una línea que dice si esto va a funcionar, y con qué.
+ *
+ * Sustituye a la fila de distintivos, que ocupaba su propio renglón para decir tres cosas sueltas.
+ * El punto mira **si responden las máquinas**, que es lo que decidió quien usa esto: sin máquinas
+ * no hay nada que consultar por muy bien que esté el modelo.
+ *
+ * Lo que no hace es decir «online» a secas. Un punto verde que colapsa el modelo, las capacidades,
+ * el índice y seis hosts en una palabra es un indicador que no se puede comprobar; aquí cada cosa
+ * se cuenta con su número, y el que esté mal se lee.
+ */
+function StatusLine({ hosts, capabilities }: {
+  hosts: { reachable: boolean }[] | undefined;
+  capabilities: ChatCapabilities | undefined;
+}): JSX.Element | null {
+  if (!capabilities) return null;
+  const responden = hosts?.filter((host) => host.reachable).length ?? null;
+  const total = hosts?.length ?? 0;
+  const model = capabilities.localAvailable ? capabilities.localModel
+    : capabilities.cloudAvailable ? capabilities.cloudModel : null;
+
+  const tono = !model ? 'danger'
+    : responden !== null && total > 0 && responden < total ? 'warn' : 'ok';
+
+  const partes: string[] = [];
+  if (responden !== null && total > 0) {
+    partes.push(responden === total
+      ? `${total} máquina${total === 1 ? '' : 's'}`
+      : `${responden} de ${total} máquinas`);
+  }
+  partes.push(model ? shortModel(model) : 'sin modelo');
+  if (capabilities.capabilityCount) {
+    partes.push(capabilities.capabilityMode === 'router'
+      ? `${capabilityCount(capabilities)} · las busca`
+      : `${capabilityCount(capabilities)}`);
+  }
+
+  return (
+    <span className={`chat-status ${tono}`}>
+      <span className="chat-status-dot" aria-hidden="true" />
+      <span className="truncate">{partes.join(' · ')}</span>
+    </span>
+  );
+}
+
+/** Las capacidades, con el aviso pegado cuando quedan pocas. */
+const capabilityCount = (capabilities: ChatCapabilities): string =>
+  capabilities.capabilityMode !== 'router' && capabilities.capabilityRoom <= 3
+    ? `${capabilities.capabilityCount} capacidades · quedan ${capabilities.capabilityRoom}`
+    : `${capabilities.capabilityCount} capacidades`;
+
 export function AssistantScreen(): JSX.Element {
   usePageMeta({ title: 'Asistente', subtitle: 'El modelo de casa, con las máquinas delante' });
   const route = useRoute();
@@ -495,6 +637,14 @@ export function AssistantScreen(): JSX.Element {
   const resolve = useResolveApproval();
 
   const spend = useSpend();
+  /*
+   * Si responden las máquinas, que es lo que dice el punto de la cabecera.
+   *
+   * Sin `probe`: es una lectura de base con cinco minutos de caché, no una conexión por host. El
+   * sondeo de verdad cuesta una conexión por máquina y vive en la pantalla de Salud, que es donde
+   * alguien va a mirar eso a propósito.
+   */
+  const hosts = useHosts();
   const [draft, setDraft] = useState('');
   /**
    * La lista de conversaciones, en estrecho, como hoja.
@@ -666,62 +816,30 @@ export function AssistantScreen(): JSX.Element {
               </button>
             ) : null}
             {/*
-              * El título del hilo, no el de la sección: la cabecera de la página ya pone
-              * «Asistente», y repetirlo debajo gasta una línea de un móvil para no decir nada.
+              * El título del hilo y, debajo, si esto va a funcionar.
+              *
+              * Las dos cosas en la misma columna y no en dos filas: antes el título ocupaba un
+              * renglón y los distintivos otro, y en un móvil eso son dos de las cinco líneas que
+              * hay antes del primer mensaje.
               */}
-            {active ? <h2>{stream.title ?? conversation?.title ?? 'Conversación'}</h2> : null}
+            <span className="chat-head-id">
+              <h2 className="truncate">
+                {active ? (stream.title ?? conversation?.title ?? 'Conversación') : 'Asistente'}
+              </h2>
+              <StatusLine hosts={hosts.data?.hosts} capabilities={capabilities} />
+            </span>
           </div>
 
           <div className="chat-head-meta">
-            {capabilities?.localAvailable ? (
-              <span className="badge ok tiny" title={`Contesta ${capabilities.localModel}`}>
-                {shortModel(capabilities.localModel)}
-              </span>
-            ) : null}
-            {capabilities?.cloudAvailable ? (
-              <span className="badge neutral tiny" title={`Se escala a ${capabilities.cloudModel}, con tu permiso`}>
-                <Glyph icon={SOURCE_ICON.cloud} />
-                {shortModel(capabilities.cloudModel)}
-              </span>
-            ) : null}
-            {/*
-              * Cuántas capacidades, y **cómo** se le ofrecen.
-              *
-              * El repliegue al router es silencioso: pasado el tope de funciones de la API, el
-              * modelo deja de elegir a la primera y tiene que buscarlas antes, lo que cuesta una
-              * vuelta más por consulta. Hasta ahora eso sólo se notaba porque el asistente iba
-              * más lento, y nadie tenía por qué relacionarlo con las cuatro herramientas que
-              * alguien enchufó ayer en otra máquina. Por eso el aviso llega antes de caer: con
-              * tres huecos o menos, el distintivo ya lo dice.
-              */}
-            {capabilities?.capabilityCount ? (
-              <span
-                className={`badge tiny ${capabilities.capabilityMode === 'router' ? 'warn'
-                  : capabilities.capabilityRoom <= 3 ? 'warn' : 'neutral'}`}
-                title={capabilities.capabilityMode === 'router'
-                  ? 'No caben todas como herramientas del modelo, así que las busca antes de usarlas: '
-                    + 'una vuelta más por consulta.'
-                  : `Se le ofrecen todas de golpe. Caben ${capabilities.capabilityRoom} más antes `
-                    + 'de que tenga que buscarlas.'}
-              >
-                <Glyph icon={ACTION_ICON.capability} />
-                {capabilities.capabilityCount}
-                {capabilities.capabilityMode === 'router' ? ' · las busca'
-                  : capabilities.capabilityRoom <= 3 ? ` · quedan ${capabilities.capabilityRoom}` : ''}
-              </span>
-            ) : null}
             {spend.data ? <SpendBadge spend={spend.data} /> : null}
           </div>
 
           {active ? (
             <div className="chat-head-actions">
-              <Segmented
-                label="Autonomía"
+              <AutonomyChip
                 value={autonomy}
-                options={AUTONOMY_OPTIONS.map((option) => ({
-                  value: option.value, label: option.label, hint: option.hint,
-                }))}
-                onChange={(value) => setAutonomy.mutate(value)}
+                pending={setAutonomy.isPending}
+                onChange={(next) => setAutonomy.mutate(next)}
               />
               <button
                 type="button"

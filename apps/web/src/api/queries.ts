@@ -672,8 +672,10 @@ export const useArtifact = (
   artifactId: string | null,
 ): UseQueryResult<ChatArtifact> => useQuery({
   queryKey: ['artifact', conversationId ?? 'none', artifactId ?? 'none'],
-  queryFn: () => get<ChatArtifact>(
-    `/api/chat/${conversationId as string}/artifacts/${artifactId as string}`),
+  // La respuesta viene envuelta, como el resto de la casa: `{ artifact }`, no el objeto pelado.
+  queryFn: () => get<{ artifact: ChatArtifact }>(
+    `/api/chat/${conversationId as string}/artifacts/${artifactId as string}`)
+    .then((response) => response.artifact),
   enabled: Boolean(conversationId && artifactId),
   staleTime: Infinity,
   refetchOnWindowFocus: false,

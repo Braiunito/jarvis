@@ -1755,6 +1755,16 @@ a:hover { text-decoration: underline; }
 }
 .shell:has(.assistant-page) .workarea { min-height: 0; }
 
+/*
+ * En el asistente no hay buscador arriba.
+ *
+ * Poner un campo de texto justo encima de un chat es poner dos entradas en la misma pantalla, y en
+ * un teléfono eso es un problema real de cuál tocar: se ha entrado a hablar, no a buscar. Y ese
+ * campo ocupa exactamente el alto que se quiere dar al hilo. La paleta sigue estando en Ctrl+K y
+ * en su botón, que es de donde se usa de verdad.
+ */
+.shell:has(.assistant-page) .topbar-search { display: none; }
+
 .assistant-page {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
@@ -1840,14 +1850,73 @@ a:hover { text-decoration: underline; }
 }
 
 .chat-head-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
+/* El título y el estado en la misma columna: dos líneas de texto, no dos filas de cabecera. */
+.chat-head-id { display: grid; gap: 1px; min-width: 0; }
 .chat-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14.5px;
+  line-height: 1.25;
   /* Un título largo no puede empujar los distintivos fuera de la fila. */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/*
+ * Si esto va a funcionar, y con qué.
+ *
+ * El punto mira si responden las máquinas. No dice «online»: una palabra así colapsa el modelo,
+ * las capacidades, el índice y seis hosts en un color, y luego no se puede comprobar. Cada cosa va
+ * con su número al lado, y la que esté mal se lee.
+ */
+.chat-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.chat-status-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--text-faint); }
+.chat-status.ok .chat-status-dot { background: var(--ok); }
+.chat-status.warn .chat-status-dot { background: var(--warn); }
+.chat-status.danger .chat-status-dot { background: var(--danger); }
+.chat-status.danger { color: var(--danger); }
+
+/*
+ * La autonomía: visible siempre, pero en un chip.
+ *
+ * Sigue leyéndose de un vistazo en qué modo estás —que es la decisión que más cambia lo que va a
+ * pasar— sin gastar una fila entera de la cabecera en tres segmentos. El selector con las
+ * explicaciones aparece al pedirlo, que es cuando se va a cambiar.
+ */
+.autonomy { position: relative; }
+.autonomy-chip { cursor: pointer; gap: 5px; }
+.autonomy-veil { position: fixed; inset: 0; z-index: 44; background: transparent; border: 0; padding: 0; }
+.autonomy-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 45;
+  width: min(300px, calc(100vw - 32px));
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  box-shadow: var(--shadow-pop);
+}
+.autonomy-option {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.autonomy-option:hover { background: var(--bg-elevated); }
+.autonomy-option[aria-current="true"] { background: var(--accent-soft); }
 .chat-head-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .chat-head-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 /* La puerta a la lista sólo existe donde la lista no cabe al lado. */
@@ -2216,6 +2285,15 @@ a:hover { text-decoration: underline; }
   font-size: 12px;
 }
 
+/*
+ * Un evento con lo que el turno alcanzó a producir.
+ *
+ * La línea del evento sigue centrada y pequeña —no la dijo nadie— pero lo que trae debajo son
+ * acciones, y ésas se alinean como las de cualquier respuesta: a la izquierda y con su ancho.
+ */
+.chat-event-block { align-self: stretch; max-width: 46rem; display: grid; gap: 6px; }
+.chat-event-block .chat-event { align-self: center; }
+
 .chat-thinking { display: flex; align-items: center; gap: 6px; align-self: flex-start; padding: 4px 2px; }
 
 .chat-approval { align-self: stretch; max-width: 46rem; }
@@ -2271,8 +2349,14 @@ a:hover { text-decoration: underline; }
   .chat-head-list { display: inline-flex; }
   /* En un móvil la palabra sobra: el icono va con su etiqueta accesible. */
   .chat-head-word { display: none; }
-  .chat-head-actions { width: 100%; margin-left: 0; }
-  .chat-head-actions .segmented { flex: 1; }
+  /*
+   * Las acciones ya **no** bajan a su propia fila.
+   *
+   * Ocupaban el ancho completo para enseñar el selector de autonomía, y eso costaba un renglón de
+   * los cinco que había antes del primer mensaje. Con la autonomía en un chip caben al lado del
+   * título, que es donde deberían haber estado siempre.
+   */
+  .chat-head { padding: 8px 12px; gap: 8px; }
 
   .chat-rail {
     position: fixed;
