@@ -69,26 +69,26 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 | R-13 | P2 | La pasada del juez de esfuerzo no cuenta en el gasto | `assistant/model.ts` | core | [ ] |
 | R-14 | P1 | Cancelar un plan mientras piensa lo resucita (y lanza el run) | `plans/service.ts` | core | [ ] |
 | R-15 | P1 | Un paso `run` sin `runId` no es checkpoint: se salta | `plans/service.ts` | core | [ ] |
-| R-16 | P1 | Una tabla con `label` no textual tumba la pantalla (sin ErrorBoundary) | `chat/artifacts.ts`, `ui/artifact.tsx` | web | [ ] |
+| R-16 | P1 | Una tabla con `label` no textual tumba la pantalla (sin ErrorBoundary) | `chat/artifacts.ts`, `ui/artifact.tsx` | web | [x] |
 | R-17 | P2 | Un artifact estructurado grande se recorta a bytes y deja de ser JSON | `chat/artifacts.ts` | core | [ ] |
-| L-01 | P0 | `JARVIS_CHAT_DEFAULT_AUTONOMY` mal escrito abre la puerta (fail-open) | `config.ts`, `toolbox.ts` | core | [ ] |
+| L-01 | P0 | `JARVIS_CHAT_DEFAULT_AUTONOMY` mal escrito abre la puerta (fail-open) | `config.ts`, `toolbox.ts` | core | [x] |
 | L-02 | P0 | `resolveApproval` no es atómica; un `approved` sin consumir bloquea | `chat/service.ts` | core | [ ] |
 | L-03 | P1 | Cualquier usuario ve, borra y firma las conversaciones de los demás | `chat/service.ts`, rutas | core | [ ] |
 | L-04 | P1 | La conversación no puede parar los trabajos que ella lanzó | `chat/service.ts`, `toolbox.ts` | core | [ ] |
 | L-05 | P1 | Errores de herramienta MCP se venden como «reintenta» → bucles | `mcp/service.ts` | core | [x] |
 | L-06 | P1 | Los intentos de escritura MCP fallidos no se auditan | `mcp/service.ts` | core | [x] |
-| L-07 | P1 | La pantalla miente en «Automático» y nunca ofrece `unrestricted` | `screens/assistant.tsx` | web | [ ] |
+| L-07 | P1 | La pantalla miente en «Automático» y nunca ofrece `unrestricted` | `screens/assistant.tsx` | web | [x] |
 | L-08 | P1 | El distintivo enseña el id del híbrido; el gasto no lleva conversación | `chat/service.ts`, `services.ts` | core | [ ] |
 | L-09 | P2 | El contexto enseña trabajos que el toolbox no deja mirar | `chat/service.ts`, `toolbox.ts` | core | [ ] |
 | L-10 | P2 | La traza de `present` duplica el artifact en hilo y contexto | `chat/service.ts` | core | [ ] |
-| L-11 | P2 | Un envío que falla borra lo escrito sin decirlo | `screens/assistant.tsx` | web | [ ] |
+| L-11 | P2 | Un envío que falla borra lo escrito sin decirlo | `screens/assistant.tsx` | web | [x] |
 | L-12 | P2 | Aprobaciones caducadas siguen en pantalla; «caduca en 0 min» no se mueve | core + web | core | [ ] |
-| L-13 | P2 | Cada mensaje del stream invalida la lista y el gasto | `api/chat-stream.ts`, pantalla | web | [ ] |
-| L-14 | P2 | `EventSource` reconecta para siempre tras borrar / 401 | `api/chat-stream.ts` | web | [ ] |
-| L-15 | P2 | Dos tarjetas de aprobación distintas; la del plan recorta el prompt | `ui/assistant.tsx` | web | [ ] |
+| L-13 | P2 | Cada mensaje del stream invalida la lista y el gasto | `api/chat-stream.ts`, pantalla | web | [x] |
+| L-14 | P2 | `EventSource` reconecta para siempre tras borrar / 401 | `api/chat-stream.ts` | web | [x] |
+| L-15 | P2 | Dos tarjetas de aprobación distintas; la del plan recorta el prompt | `ui/assistant.tsx` | web | [x] |
 | L-16 | P2 | `readOnly` en el core no impide que el servidor ejecute lo sin etiquetar | `mcp/service.ts` | core | [x] |
 | L-17 | P3 | Prompt local desactualizado, asimetría Anthropic, tipos en rutas | varios | core | [ ] |
-| L-18 | P2 | No hay e2e del asistente | `tests/e2e` | web | [ ] |
+| L-18 | P2 | No hay e2e del asistente | `tests/e2e` | web | [x] |
 
 ---
 
@@ -542,20 +542,20 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 
 | Id | Qué | Cómo | Quién | Estado |
 |---|---|---|---|---|
-| U-01 | No se puede parar un turno: un «Hola» de tres minutos se aguanta entero | F-01 | web | [ ] |
-| U-02 | Borrar conversación sin confirmar (`remove.mutate` directo; el resto de la consola usa `ConfirmDialog`) | `ConfirmDialog` con el título del hilo y «no se puede deshacer» | web | [ ] |
-| U-03 | El scroll fuerza abajo con cada mensaje aunque se esté leyendo arriba | sólo si `isNearBottom`; si no, chip «↓ N nuevos» | web | [ ] |
-| U-04 | El estado `failed` es invisible: `StatusLine` sólo distingue `thinking`; no hay «reintentar» | tono `danger` + botón «Volver a intentar» (F-02) | web | [ ] |
-| U-05 | Un mensaje enviado en `waiting_approval` se guarda y parece ignorado | composer avisa «contesta primero a la tarjeta» o el core encola (R-08a) | web | [ ] |
-| U-06 | La tarjeta va al final del hilo, lejos del mensaje que la pidió; en móvil se pierde al abrir la hoja | anclarla `sticky` bajo la cabecera mientras `status === 'waiting_approval'`; `announce()` al aparecer | web | [ ] |
-| U-07 | `SpendBadge` llama «consultas» a `remainingTurns`, que son vueltas al modelo, no preguntas | «~N vueltas» y coste por respuesta (F-05) | web | [ ] |
-| U-08 | `TerminalRef` con `workspaceId` nulo abre la terminal en el home sin avisar | «sin directorio conocido» y acción «abrir workspace primero» | web | [ ] |
-| U-09 | Carril sin búsqueda, sin paginación (30), sin renombrar ni archivar; título = 60 primeros caracteres | F-10, F-16; usar `titles` (existe para workspaces) para el título | web | [ ] |
-| U-10 | `connected` del stream nunca se enseña | punto en `StatusLine` cuando `!connected` durante > 5 s | web | [ ] |
-| U-11 | «Sabe consultar» pinta cada servidor en verde siempre | R-07 | web | [ ] |
-| U-12 | `autonomy-menu` no recibe foco al abrir ni cierra con Escape; `ApprovalCard` sin anuncio | `useEffect` foco + `onKeyDown Escape`; `announce()` | web | [ ] |
-| U-13 | La tarjeta de capacidad no dice si el efecto es **declarado** o **inferido**, ni el servidor | pastilla «efecto declarado / inferido» + `server` (viene en `McpCapability`) | web | [ ] |
-| U-14 | Con `capabilityMode: 'router'` la única pista es «las busca» en la cabecera | tooltip que explique «el catálogo no cabe: cada consulta cuesta una vuelta más» | web | [ ] |
+| U-01 | No se puede parar un turno: un «Hola» de tres minutos se aguanta entero | F-01 | web | [x] |
+| U-02 | Borrar conversación sin confirmar (`remove.mutate` directo; el resto de la consola usa `ConfirmDialog`) | `ConfirmDialog` con el título del hilo y «no se puede deshacer» | web | [x] |
+| U-03 | El scroll fuerza abajo con cada mensaje aunque se esté leyendo arriba | sólo si `isNearBottom`; si no, chip «↓ N nuevos» | web | [x] |
+| U-04 | El estado `failed` es invisible: `StatusLine` sólo distingue `thinking`; no hay «reintentar» | tono `danger` + botón «Volver a intentar» (F-02) | web | [x] |
+| U-05 | Un mensaje enviado en `waiting_approval` se guarda y parece ignorado | composer avisa «contesta primero a la tarjeta» o el core encola (R-08a) | web | [x] |
+| U-06 | La tarjeta va al final del hilo, lejos del mensaje que la pidió; en móvil se pierde al abrir la hoja | anclarla `sticky` bajo la cabecera mientras `status === 'waiting_approval'`; `announce()` al aparecer | web | [x] |
+| U-07 | `SpendBadge` llama «consultas» a `remainingTurns`, que son vueltas al modelo, no preguntas | «~N vueltas» y coste por respuesta (F-05) | web | [x] |
+| U-08 | `TerminalRef` con `workspaceId` nulo abre la terminal en el home sin avisar | «sin directorio conocido» y acción «abrir workspace primero» | web | [x] |
+| U-09 | Carril sin búsqueda, sin paginación (30), sin renombrar ni archivar; título = 60 primeros caracteres | F-10, F-16; usar `titles` (existe para workspaces) para el título | web | [x] |
+| U-10 | `connected` del stream nunca se enseña | punto en `StatusLine` cuando `!connected` durante > 5 s | web | [x] |
+| U-11 | «Sabe consultar» pinta cada servidor en verde siempre | R-07 | web | [x] |
+| U-12 | `autonomy-menu` no recibe foco al abrir ni cierra con Escape; `ApprovalCard` sin anuncio | `useEffect` foco + `onKeyDown Escape`; `announce()` | web | [x] |
+| U-13 | La tarjeta de capacidad no dice si el efecto es **declarado** o **inferido**, ni el servidor | pastilla «efecto declarado / inferido» + `server` (viene en `McpCapability`) | web | [x] |
+| U-14 | Con `capabilityMode: 'router'` la única pista es «las busca» en la cabecera | tooltip que explique «el catálogo no cabe: cada consulta cuesta una vuelta más» | web | [x] |
 
 ---
 
@@ -572,15 +572,70 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 | F-07 | **Adjuntos en el chat** | `Composer` ya admite `onFiles`; con workspace, subir a `attachments` y que `list_evidence` lo vea; sin workspace, guardar como artifact `code/markdown` de la persona y pasarlo como `CONTENT_IS_DATA`. | core | [ ] |
 | F-08 | **Exportar y auditar** | `GET /api/chat/:id/export.md` (con trazas) y enlace desde cada `ToolTrace` a la fila de auditoría (`GET /api/audit?requestId=chat:<id>`). | core | [ ] |
 | F-09 | **Atar/desatar workspace a una conversación existente** | `POST /api/chat/:id/workspace`; cuando el asistente abre un workspace en un hilo sin workspace, ofrecer «¿trabajo sobre éste?» (chip) que lo ata. | core | [ ] |
-| F-10 | **Siguiente paso pulsable y prefill** | chips bajo la respuesta a partir de `refs` («Léeme el transcript», «Lánzale un trabajo», «Ábreme la terminal»); `/assistant?q=` para preguntas desde otras pantallas; comandos rápidos `/salud`, `/trabajos`. | web | [ ] |
+| F-10 | **Siguiente paso pulsable y prefill** | chips bajo la respuesta a partir de `refs` («Léeme el transcript», «Lánzale un trabajo», «Ábreme la terminal»); `/assistant?q=` para preguntas desde otras pantallas; comandos rápidos `/salud`, `/trabajos`. | web | [x] |
 | F-11 | **Esfuerzo elegible por conversación** | columna `effort` (`auto|low|medium|high`); override del juez; ver el coste del juez (R-13). | core | [ ] |
 | F-12 | **Lista «siempre con tarjeta» para `unrestricted`** | lo que ADR-010 §3-bis deja abierto: `JARVIS_MCP_ALWAYS_CARD=stop_service:jarvis,restart_service:jarvis,stop_service` con match por argumento; se comprueba en `#applyDecision` antes de la vía sin tarjeta. | core | [ ] |
-| F-13 | **«Pregúntale» desde Explorador y Portada** | hoy sólo Salud, Trabajos y Workspace usan `AskAssistantButton`; en el explorador con `workspaceId` de la sesión. | web | [ ] |
+| F-13 | **«Pregúntale» desde Explorador y Portada** | hoy sólo Salud, Trabajos y Workspace usan `AskAssistantButton`; en el explorador con `workspaceId` de la sesión. | web | [x] |
 | F-14 | **Descripción larga en directo y búsqueda bilingüe** | R-05; `search_capabilities` con sinónimos (memoria→memory, disco→disk, red→network) para el router. | core | [ ] |
 | F-15 | **Reanudar de verdad un turno tras reinicio** | persistir el memo (`alreadyAsked`, `observations`) en un `payload` del job por cada consulta; `reconcile()` puede entonces rehacer turnos que ya escribieron sin duplicar. | core | [ ] |
 | F-16 | **Compactar hilos largos** | cuando el hilo supera N mensajes, un `event` de resumen escrito por el modelo (como `history` en planes) y `#contextFor` lo usa en vez de los 12 últimos. | core | [ ] |
-| F-17 | **Compartir/descargar artifacts** | `csv` para `table`, `json` para `chart/json`, URL estable con permisos (L-03). | web | [ ] |
-| F-18 | **Renombrar, fijar y archivar conversaciones** | `PATCH /api/chat/:id {title, pinned, archived}`; el carril filtra archivadas. | web | [ ] |
+| F-17 | **Compartir/descargar artifacts** | `csv` para `table`, `json` para `chart/json`, URL estable con permisos (L-03). | web | [x] |
+| F-18 | **Renombrar, fijar y archivar conversaciones** | `PATCH /api/chat/:id {title, pinned, archived}`; el carril filtra archivadas. | web | [x] |
+
+---
+
+## D-bis · Cierre de las filas `web`
+
+Las veintiuna que se arreglaron van en **`868af77`** («La pantalla del asistente deja de mentir, de
+romperse y de perder lo escrito») salvo `F-13` y `F-17`, que van detrás. Lo que sigue es lo que no se
+explica solo con el commit.
+
+**R-16** — se cierra **la mitad web**: dos anillos de error, uno por burbuja y por artifact —cae sólo
+esa pieza y el cuerpo sale en crudo, que sigue siendo la respuesta— y otro por pantalla, para que un
+fallo imprevisto no deje la ventana en blanco sin navegación. **La otra mitad no es de web**:
+`validateTable` en `chat/artifacts.ts` tiene que rechazar un `label` que no sea texto, y eso es
+`core`. Un anillo evita el desastre; validar evita el fallo.
+
+**L-14** — se cierra con un matiz sobre lo propuesto: el stream se rinde a los seis fallos seguidos o
+con `readyState === CLOSED`, y la pantalla lo dice. Lo que **no** se ha hecho es que el core emita
+`chat.deleted` al borrar, que es la mitad limpia; sin ella se llega igual, pero por agotamiento en vez
+de por aviso. Queda para `core` si se quiere afinar.
+
+**U-01 · descartada, no hecha.** Parar un turno es `F-01` y vive en el core: hace falta un
+`AbortController` por conversación y una ruta que lo dispare. Un botón en la pantalla sin eso detrás
+no para nada: deja de enseñar el estado y el turno sigue gastando. **Prometer un botón de parada que
+no para es peor que no tenerlo**, así que se cierra aquí y el trabajo real está en `F-01`.
+
+**U-05 · descartada, no hecha.** Avisar en el compositor de que hay una tarjeta sin firmar es un
+parche sobre `R-08a`: el problema no es que no se avise, es que el mensaje **se guarda y no se
+contesta**. Con la tarjeta anclada arriba (U-06) el aviso ya está donde importa; encolar el mensaje
+es de `core` y ahí es donde se arregla de verdad.
+
+**U-09 · descartada, no hecha.** Buscar, paginar, renombrar y archivar en el carril es `F-10`, `F-16`
+y `F-18`, y las tres necesitan rutas que no existen (`PATCH /api/chat/:id`, paginación en el listado).
+Lo único que sí era de web —que el título fuera algo mejor que los sesenta primeros caracteres— **ya
+lo resuelve el titulador del core**, que resume en vez de copiar. Lo demás no se puede hacer desde
+aquí.
+
+**U-11 · descartada, no hecha.** «Sabe consultar» pinta cada servidor MCP en verde porque el catálogo
+no trae otro estado: es `R-07`, que es donde Salud deja de decir `ok` con el MCP caído. En cuanto el
+core distinga, la pastilla lo hereda sin tocar nada. Pintarlo distinto desde la web hoy sería
+inventarse un estado que no tenemos.
+
+**F-10 · descartada, no hecha.** Los chips de acción rápida bajo la respuesta **los descartó Braian
+explícitamente** —«sin chips por ahora»— y esa decisión sigue en pie. Y `/assistant?q=` no añade nada
+sobre lo que ya hay: `useAskAssistant` siembra la pregunta desde cualquier pantalla sin pasar por la
+URL, que es como está hecho en Salud, Trabajos, Workspace y ahora Explorador y Portada.
+
+**F-17 · hecha a medias, y a propósito.** La descarga se arma **en el navegador** con lo que ya está
+en pantalla: una tabla sale en CSV con las comillas dobladas —una celda con una coma no puede partir
+la fila— y el resto en su formato. No hace falta ruta, ni permisos, ni esperar a nada. Lo que **no**
+se hace es la URL estable para compartir: eso necesita saber de quién es cada conversación, y eso es
+`L-03`. El `html` no se descarga: un documento que ejecuta no se guarda en el disco de nadie.
+
+**F-18 · descartada, no hecha.** Renombrar, fijar y archivar necesita `PATCH /api/chat/:id`, que es
+`core`. Sin la ruta, lo único que podría hacer la web es un renombrado que no persiste, que es peor
+que no ofrecerlo.
 
 ---
 
