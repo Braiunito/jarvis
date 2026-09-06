@@ -1157,6 +1157,10 @@ export class ChatService {
       ...(this.#deps.plans
         ? { plans: { conversationId: conversation.id, workspaceId: workspace?.id ?? null } }
         : {}),
+      // Y la flota, para que el esquema del workflow pueda **nombrar** las máquinas en vez de
+      // pedirle al modelo que se acuerde de una lista que no tiene delante. Es la misma que valida
+      // el sobre, así que lo que se le ofrece elegir y lo que se le acepta son la misma lista.
+      ...(this.#deps.hosts?.length ? { hosts: this.#deps.hosts } : {}),
       // Y lo que ya se encontró, porque el toolbox es de un turno y la conversación no.
       knownSessions: this.#knownSessions(this.#repository.lastMessages(conversation.id, this.#historyMessages)),
       health: this.#deps.health,

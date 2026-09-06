@@ -193,6 +193,14 @@ export interface CoreToolboxDeps {
    */
   plans?: { conversationId: string; workspaceId: string | null };
   /**
+   * Las máquinas de la casa, para poder **nombrárselas** en el esquema del workflow.
+   *
+   * No es decoración: sin ellas el modelo rellena `hosts` con lo que tiene delante, y lo que tiene
+   * delante son los workspaces del contexto, con su `id` y su `host` en la misma fila. Medido en
+   * producción: propuso un workflow con cuatro ids de workspace como máquinas.
+   */
+  hosts?: readonly string[];
+  /**
    * Dónde se guardan los artifacts, y de qué conversación son.
    *
    * Opcional porque un plan no tiene hilo al que colgarlos: `present` no se le ofrece y no se
@@ -339,6 +347,10 @@ const memoKey = (name: string, input: Record<string, unknown>): string => {
     : JSON.stringify(Object.keys(input).sort().map((key) => [key, input[key]]));
   return `tool:${name}:${shape}`;
 };
+
+/** El nombre pelado de una capacidad: `zeus.x`, `x` y `mcp__zeus__x` son la misma. */
+const bareCapability = (name: string): string =>
+  (name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name);
 
 const asProfile = (value: unknown, fallback: PermissionProfile): PermissionProfile =>
   (PROFILES as readonly string[]).includes(String(value)) ? value as PermissionProfile : fallback;
@@ -600,7 +612,19 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
  * nombre nuevo se come uno. Tres nombres aquí apagarían el modo directo para toda la casa, en
  * silencio, y lo único que se notaría es que el asistente va más lento.
  */
-export const WORKFLOW_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
+/**
+ * La herramienta de workflows, con las máquinas de la casa dentro.
+ *
+ * Se construye en vez de ser una constante porque `hosts` **tiene que enumerar la flota**. Decirle
+ * «sólo las que ya has visto» y no decirle cuáles son es pedirle que se acuerde de una lista que no
+ * tiene delante, y entonces coge la que sí tiene: los ids de workspace del contexto. Un `enum` es
+ * la única forma de que el campo no admita otra cosa.
+ *
+ * Sin flota configurada se queda como estaba —cadenas libres—, porque un `enum` vacío no describe
+ * «cualquier máquina», describe «ninguna», y eso haría irrellenable el campo.
+ */
+export function workflowTool(hosts: readonly string[] = []): ToolDefinition {
+  return Object.freeze<ToolDefinition>({
   name: 'workflow',
   description: 'Propón, corrige o gobierna un plan de varios pasos, para lo que no cabe en una '
     + 'sola acción. Con `draft` propones el plan **entero y estimativo**: di qué quieres conseguir '
@@ -634,8 +658,11 @@ export const WORKFLOW_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
       },
       hosts: {
         type: 'array',
-        items: { type: 'string' },
-        description: 'Sólo para draft: las máquinas que esperas tocar. Sólo las que ya has visto.',
+        items: hosts.length ? { type: 'string', enum: [...hosts] } : { type: 'string' },
+        description: hosts.length
+          ? `Sólo para draft: las máquinas que esperas tocar, de estas: ${hosts.join(', ')}. `
+            + 'No son los identificadores de los workspaces.'
+          : 'Sólo para draft: las máquinas que esperas tocar. Sólo las que ya has visto.',
       },
       max_runs: { type: 'integer', description: 'Sólo para draft: cuántos trabajos como mucho.' },
       highest_permission_profile: { type: 'string', enum: ['safe', 'auto'] },
@@ -666,9 +693,10 @@ export const WORKFLOW_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
       action: { type: 'string', enum: ['pause', 'resume', 'cancel'], description: 'Sólo para steer.' },
     },
     required: ['op'],
-  },
-  decides: true,
-});
+    },
+    decides: true,
+  });
+}
 
 export const OPEN_WORKSPACE_TOOL: ToolDefinition = Object.freeze<ToolDefinition>({
   name: 'open_workspace',
@@ -929,7 +957,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       ...(deps.mcp?.configured && deps.capabilityWrites ? [REQUEST_CAPABILITY_TOOL] : []),
       ...(deps.workspaces ? [OPEN_WORKSPACE_TOOL] : []),
       ...(deps.canEscalate ? [ESCALATE_TOOL] : []),
-      ...(deps.plans ? [WORKFLOW_TOOL] : []),
+      ...(deps.plans ? [workflowTool(deps.hosts ?? [])] : []),
     ]);
   }
 
@@ -1001,12 +1029,18 @@ export class CoreAssistantToolbox implements AssistantToolbox {
        * Se comprueba **antes** que el presupuesto a propósito: una repetición no debe gastar una
        * de las consultas del turno, porque no aporta nada que no estuviera ya en el hilo.
        *
-       * Las capacidades quedan fuera de este camino y las memoriza `#useCapability`, que sabe
-       * normalizar el nombre —`zeus.x`, `x` y `mcp__zeus__x` son la misma cosa— y la forma de los
-       * argumentos. Dos memos con claves distintas sobre el mismo mapa, sin pisarse.
+       * **Las capacidades entran por aquí también**, y antes no. Su memo vivía dentro de
+       * `#useCapability`, que corre en `#run` — o sea, **después** del cobro. Para las 108
+       * capacidades, que son casi todo el catálogo, la regla de arriba no se cumplía: repetir sí
+       * gastaba. Y con el alias no coincidía ni la clave, así que `zeus.disk_usage` y
+       * `mcp__zeus__disk_usage` eran dos consultas distintas y costaban dos huecos.
+       *
+       * Medido en producción: once llamadas para una tabla de disco, dos de ellas la misma
+       * capacidad por sus dos nombres, y la respuesta fue «me quedé sin margen» con siete consultas
+       * buenas hechas y tiradas.
        */
-      if (name !== 'use_capability' && !this.#direct.has(name)) {
-        const previous = this.#alreadyAsked.get(memoKey(name, input));
+      {
+        const previous = this.#alreadyAsked.get(this.#memoKeyFor(name, input));
         if (previous !== undefined) {
           this.#repeats += 1;
           return {
@@ -1065,12 +1099,22 @@ export class CoreAssistantToolbox implements AssistantToolbox {
        * el dato viejo diciendo que es viejo— así que tampoco es una respuesta que valga por dos.
        * Memorizarla convertiría un tropiezo de red en «ya lo preguntaste» durante el resto del turno.
        */
-      if (!definition.decides && outcome.type === 'observation'
-        && name !== 'use_capability' && !this.#direct.has(name)) {
-        const served = outcome.content as { ok?: unknown; stale?: unknown } | null;
-        if (served?.ok !== false && served?.stale !== true) {
-          this.#alreadyAsked.set(memoKey(name, input), outcome.content);
-        }
+      if (!definition.decides && outcome.type === 'observation') {
+        const served = outcome.content as
+          { ok?: unknown; stale?: unknown; error?: { code?: unknown } } | null;
+        /*
+         * Un fallo de validación sí se memoriza, y es la excepción a la regla de arriba.
+         *
+         * «Reintentar es legítimo» vale para la red: puede haber cambiado algo. No vale para unos
+         * argumentos mal escritos — repetir el mismo `BAD_INPUT` con los mismos argumentos no puede
+         * salir bien nunca, y visto en producción lo repite: dos `request_capability` idénticas
+         * seguidas, dos huecos del turno. Memorizarlo convierte el segundo intento en «ya lo
+         * intentaste, y esto fue lo que te dije» en vez de en otra vuelta perdida.
+         */
+        const codigo = String(served?.error?.code ?? '');
+        const validacion = codigo === 'BAD_INPUT' || codigo === 'BAD_REQUEST';
+        const util = validacion || (served?.ok !== false && served?.stale !== true);
+        if (util) this.#alreadyAsked.set(this.#memoKeyFor(name, input), outcome.content);
       }
       return outcome;
     } catch (error) {
@@ -1349,6 +1393,27 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   #asWorkspaceId(sessionId: string, remembered: SeenSession | undefined): Workspace | null {
     if (remembered) return null;
     return this.#deps.workspaces?.find(sessionId) ?? null;
+  }
+
+  /**
+   * La clave del memo, con las capacidades normalizadas.
+   *
+   * Una capacidad se identifica por su nombre pelado y sus argumentos, venga como venga escrita:
+   * por el router (`use_capability` con `name`), como herramienta propia aplanada
+   * (`mcp__zeus__disk_usage`) o cualificada. Las tres son la misma pregunta y tienen que compartir
+   * entrada, o el turno paga dos veces por lo mismo.
+   */
+  #memoKeyFor(name: string, input: Record<string, unknown>): string {
+    const directa = this.#direct.get(name);
+    if (directa) return `cap:${bareCapability(directa.name)}:${memoKey('', input)}`;
+    if (name === 'use_capability') {
+      const pedida = asString(input['name']) ?? '';
+      const args = (input['args'] && typeof input['args'] === 'object' && !Array.isArray(input['args']))
+        ? input['args'] as Record<string, unknown>
+        : {};
+      return `cap:${bareCapability(pedida)}:${memoKey('', args)}`;
+    }
+    return memoKey(name, input);
   }
 
   /** Apunta lo que se sabe de una sesión, sin perder lo que ya se sabía. */
@@ -1974,33 +2039,14 @@ export class CoreAssistantToolbox implements AssistantToolbox {
      * conversación real repitió la consulta más cara del catálogo y se gastó en eso 200 segundos
      * y media respuesta.
      */
-    const bare = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name;
-    const memo = `${bare}:${JSON.stringify(args)}`;
-    const previous = this.#alreadyAsked.get(memo);
-    if (previous !== undefined) {
-      /*
-       * Repetir se contesta como error, no como éxito con una nota al pie.
-       *
-       * Devolverlo como `ok: true` con un «no la vuelvas a pedir» no funcionó: gpt-5-nano llamó
-       * cuatro veces seguidas a la misma capacidad con los mismos argumentos y gastó el turno
-       * entero. Un modelo trata un éxito como una señal de que va bien. El dato se le devuelve
-       * igual —no tiene por qué perderlo— pero la respuesta dice que esto no era un paso adelante.
-       */
-      return {
-        type: 'observation',
-        content: {
-          ok: false,
-          error: {
-            code: 'ALREADY_ASKED',
-            message: `ya consultaste ${name} con esos mismos argumentos en este turno`,
-            hint: 'no la repitas: responde con finish usando lo que ya tienes, o consulta otra cosa distinta',
-          },
-          name,
-          previousResult: previous,
-        },
-      };
-    }
-
+    /*
+     * Aquí ya no se memoriza: lo hace `invoke` antes de cobrar el presupuesto.
+     *
+     * Tenía su propio memo, que sabía normalizar el nombre pero corría en `#run` —después del
+     * cobro—, así que para las capacidades la regla «una repetición no gasta consulta» no se
+     * cumplía. Ahora la clave la calcula `#memoKeyFor`, que entiende las tres formas de nombrar la
+     * misma capacidad, y la comprobación está donde tiene que estar.
+     */
     let result;
     try {
       result = await mcp.call(name, args, {
@@ -2079,7 +2125,6 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       }
       throw error;
     }
-    this.#alreadyAsked.set(memo, result.content);
     return {
       type: 'observation',
       content: {
@@ -2181,8 +2226,19 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     const name = asString(input['name']);
     const summary = asString(input['summary']);
     if (!name || !summary) {
-      return toolError('BAD_INPUT', 'faltan name o summary',
-        'el resumen es lo que la persona lee antes de autorizar; sin él no hay nada que decidir');
+      /*
+       * Se dice **cuál** falta, no que faltan dos.
+       *
+       * Es la regla de `validateTable` —«se avisa de la columna que falta, no de que no valida»—
+       * aplicada aquí, y no es cosmética: visto en producción, el modelo mandó `name` correcto sin
+       * `summary`, leyó «faltan name o summary», no supo cuál arreglar y **repitió la llamada
+       * idéntica**. Dos huecos del turno por un mensaje que no señalaba.
+       */
+      const falta = !name && !summary ? 'name y summary' : (!name ? 'name' : 'summary');
+      return toolError('BAD_INPUT', `falta ${falta}`,
+        !name
+          ? 'el nombre exacto de la capacidad, tal como lo devuelve list_capabilities'
+          : 'el resumen es lo que la persona lee antes de autorizar; sin él no hay nada que decidir');
     }
     const args = (input['args'] && typeof input['args'] === 'object' && !Array.isArray(input['args']))
       ? input['args'] as Record<string, unknown>

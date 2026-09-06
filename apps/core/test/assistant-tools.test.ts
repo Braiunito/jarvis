@@ -13,7 +13,7 @@ import { openDatabase } from '../src/platform/db.js';
 import { fixedClock } from '../src/platform/clock.js';
 import { newRunId } from '../src/platform/ids.js';
 import { buildServices, type CoreServices } from '../src/services.js';
-import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
+import { CoreAssistantToolbox, workflowTool } from '../src/assistant/toolbox.js';
 import {
   AnthropicModel, cleanSummary, clipToolResult, OpenAiCompatibleModel, renderContext,
   sanitizeToolCalls, type FetchLike,
@@ -1527,5 +1527,63 @@ describe('SES · el id que llega no siempre es el que dice ser', () => {
       reason: 'mirar', host: 'bastion', provider: 'claude', sessionId: 'sid-1',
     });
     expect(toolbox.terminalOffer?.sessionId).toBe('sid-1');
+  });
+});
+
+/**
+ * Que el modelo sepa qué máquinas hay cuando se le pide que las nombre.
+ *
+ * Medido contra producción el 2026-09-06: propuso un workflow con `hosts` lleno de **ids de
+ * workspace** —`wuj4f0lcf55an888j` y tres más—. No es que se equivocara al elegir: es que el
+ * contexto le enseña los workspaces con su `id` y su `host` en la misma fila, y el esquema le pedía
+ * las máquinas sin decirle cuáles existen. Se acabó cogiendo lo que tenía delante.
+ *
+ * Lo cazó `buildEnvelope`, que rechaza en vez de recortar, así que el daño fue un plan que no llegó
+ * a proponerse. Pero la persona vio un plan fallar por algo que no era su culpa ni la del plan.
+ */
+describe('WORKFLOW · las máquinas se nombran, no se adivinan', () => {
+  it('el esquema enumera la flota, y lo dice también en la descripción', () => {
+    const definition = workflowTool(['zeus', 'bastion']);
+    const hosts = (definition.inputSchema as {
+      properties: { hosts: { items: { enum?: string[] }; description: string } };
+    }).properties.hosts;
+
+    // El `enum` es lo que hace que el campo no admita otra cosa; la descripción es para cuando el
+    // modelo la lee en vez de obedecer el esquema, que pasa.
+    expect(hosts.items.enum).toEqual(['zeus', 'bastion']);
+    expect(hosts.description).toContain('zeus, bastion');
+    expect(hosts.description).toContain('No son los identificadores de los workspaces');
+  });
+
+  it('sin flota configurada el campo sigue siendo rellenable', () => {
+    const hosts = (workflowTool([]).inputSchema as {
+      properties: { hosts: { items: { enum?: string[] } } };
+    }).properties.hosts;
+
+    // Un `enum` vacío no describe «cualquier máquina», describe «ninguna»: dejaría el campo
+    // imposible de rellenar y el borrador moriría por una lista que nadie configuró.
+    expect(hosts.items.enum).toBeUndefined();
+  });
+
+  it('y la conversación se las pasa, que es donde se rompía la cadena', () => {
+    const toolbox = new CoreAssistantToolbox({
+      sessions: services.sessions,
+      health: services.health,
+      runs: services.runs,
+      audit: services.audit,
+      autonomy: 'manual',
+      user,
+      plans: { conversationId: 'c1', workspaceId: null },
+      hosts: ['zeus', 'bastion'],
+    });
+
+    const definition = toolbox.definitions().find((tool) => tool.name === 'workflow');
+    const hosts = (definition?.inputSchema as {
+      properties: { hosts: { items: { enum?: string[] } } };
+    }).properties.hosts;
+
+    // Es la misma lista con la que `buildEnvelope` valida el sobre: lo que se le ofrece elegir y lo
+    // que se le acepta después tienen que salir del mismo sitio, o se le invita a fallar.
+    expect(hosts.items.enum).toEqual(['zeus', 'bastion']);
   });
 });
