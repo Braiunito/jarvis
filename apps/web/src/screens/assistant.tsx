@@ -864,7 +864,7 @@ export function AssistantScreen(): JSX.Element {
                 * la fila. Va con `title` para que se pueda leer entero sin abrir la lista, donde
                 * también está completo.
                 */}
-              <h2 className="truncate" title={active
+              <h2 title={active
                 ? (stream.title ?? conversation?.title ?? 'Conversación') : undefined}>
                 {active ? (stream.title ?? conversation?.title ?? 'Conversación') : 'Asistente'}
               </h2>
