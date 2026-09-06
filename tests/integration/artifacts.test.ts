@@ -38,6 +38,15 @@ function identityHeader(): string {
 }
 const authed = (): Record<string, string> => ({ 'x-jarvis-identity': identityHeader() });
 
+/**
+ * Cómo pide el documento un navegador de verdad: embebido.
+ *
+ * Se pone en el ayudante y no en cada prueba porque **es la única forma en que el documento se
+ * sirve**: la ruta exige `sec-fetch-dest: iframe` y falla cerrado si no viene. Una prueba que lo
+ * pidiera de otra manera comprobaría las cabeceras de una respuesta que en producción nadie recibe.
+ */
+const comoIframe = (): Record<string, string> => ({ ...authed(), 'sec-fetch-dest': 'iframe' });
+
 const build = (path: string, extra: Record<string, unknown> = {}): CoreServices => buildServices({
   db: openDatabase({ path: join(root, path) }),
   index: new FakeSessionIndex([indexRow()]) as never,
@@ -101,7 +110,7 @@ const html = (target = artifacts, conversation = conversationId): string => (tar
 
 describe('ARTIFACT · el documento sale con su propio aislamiento', () => {
   it('el sandbox va en la respuesta, no confiado al atributo del iframe', async () => {
-    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: authed() });
+    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: comoIframe() });
     const csp = response.headers.get('content-security-policy') ?? '';
 
     expect(response.status).toBe(200);
@@ -112,13 +121,13 @@ describe('ARTIFACT · el documento sale con su propio aislamiento', () => {
   });
 
   it('NUNCA lleva allow-same-origin: con las dos juntas el frame se quita el sandbox', async () => {
-    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: authed() });
+    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: comoIframe() });
 
     expect(response.headers.get('content-security-policy')).not.toContain('allow-same-origin');
   });
 
   it('una lista blanca sin `default-src` deja permitido lo que no nombra', async () => {
-    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: authed() });
+    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: comoIframe() });
     const csp = response.headers.get('content-security-policy') ?? '';
 
     /*
@@ -145,8 +154,21 @@ describe('ARTIFACT · el documento sale con su propio aislamiento', () => {
     expect(comoIframe.status).toBe(200);
   });
 
+  it('y tampoco sin cabecera: abrirse por ausencia es abrirse igual', async () => {
+    /*
+     * El guardián decía «si viene y no es un iframe, 403», así que una petición **sin** la cabecera
+     * pasaba. Es la misma forma del fallo que el informe señala en la autonomía: abrirse por
+     * ausencia. Un navegador siempre la manda, de modo que lo único que se cerraba con esto es
+     * pedirlo a mano — que es justo lo que no debe poder hacerse.
+     */
+    const id = html();
+    const sinCabecera = await fetch(
+      `${baseUrl}/api/chat/${conversationId}/artifacts/${id}/raw`, { headers: authed() });
+    expect(sinCabecera.status).toBe(403);
+  });
+
   it('no puede llamar a casa: ni exfiltrar lo que lleva ni contar que lo abriste', async () => {
-    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: authed() });
+    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: comoIframe() });
     const csp = response.headers.get('content-security-policy') ?? '';
 
     expect(csp).toContain("connect-src 'none'");
@@ -160,7 +182,7 @@ describe('ARTIFACT · el documento sale con su propio aislamiento', () => {
   });
 
   it('el script llega entero: aislarlo no es prohibirlo', async () => {
-    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: authed() });
+    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: comoIframe() });
     const csp = response.headers.get('content-security-policy') ?? '';
 
     // Con `default-src 'none'` el script no correría, que sería aislar lo que ya no se ejecuta.
@@ -171,7 +193,7 @@ describe('ARTIFACT · el documento sale con su propio aislamiento', () => {
   it('una casa que no los quiera puede apagarlos', async () => {
     const otro = new ArtifactRepository({ db: sinHtml.db, clock: systemClock });
     const response = await fetch(
-      `${baseUrlSinHtml}/api/chat/c-art/artifacts/${html(otro, 'c-art')}/raw`, { headers: authed() },
+      `${baseUrlSinHtml}/api/chat/c-art/artifacts/${html(otro, 'c-art')}/raw`, { headers: comoIframe() },
     );
 
     expect(response.status).toBe(403);
@@ -181,13 +203,13 @@ describe('ARTIFACT · el documento sale con su propio aislamiento', () => {
     const id = (artifacts.create(conversationId, {
       kind: 'markdown', presentation: 'panel', title: 'Nota', body: 'texto',
     }) as { id: string }).id;
-    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${id}/raw`, { headers: authed() });
+    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${id}/raw`, { headers: comoIframe() });
 
     expect(response.status).toBe(400);
   });
 
   it('y un artifact de otra conversación no existe para ésta', async () => {
-    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/tnoexiste/raw`, { headers: authed() });
+    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/tnoexiste/raw`, { headers: comoIframe() });
 
     expect(response.status).toBe(404);
   });

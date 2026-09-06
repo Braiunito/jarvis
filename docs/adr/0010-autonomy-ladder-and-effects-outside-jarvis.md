@@ -53,11 +53,24 @@ el otro eje, y por eso el otro eje no sirve.
 Este criterio ordena el resto del documento y es lo que hay que aplicar a cada capacidad nueva.
 
 Sirve además para lo que no es una herramienta. Un artifact HTML que el asistente entrega ejecuta
-código en el navegador de quien lo lee, lo que suena a concesión grande y no lo es: comprobado en un
-navegador real con contenido hostil dentro, embebido y abierto como pestaña con la cookie en el
-contexto, el script corre y no alcanza nada —padre, cookie y `localStorage` dan `SecurityError`, y
-ni un intento llega a la red—. El gesto se queda dentro, así que se puede conceder. Lo que decide no
-es que ejecute código: es hasta dónde llega.
+código en el navegador de quien lo lee, lo que suena a concesión grande y no lo es: el gesto se queda
+dentro. Lo que decide no es que ejecute código, es hasta dónde llega.
+
+> **Corregido el 2026-09-06.** Aquí ponía «ni un intento llega a la red», y era falso. La
+> comprobación en la que me apoyé cubrió `connect`, `img` y `form`; no cubrió `frame` ni la
+> navegación del documento raíz, y por esas dos **sí se salía**: un `<iframe src="http://…">` dentro
+> del artifact cargaba, porque el `frame-src 'self'` de la aplicación gobierna el iframe de primer
+> nivel y no lo que ese iframe mete dentro; y abierto como pestaña, `location.href` navegaba, porque
+> `sandbox` restringe frames y no al documento raíz.
+>
+> El fallo no fue de quien midió: fue mío al escribir. **Convertí «no salió por estas tres puertas»
+> en «no hay ninguna puerta»**, que es una afirmación distinta y más grande, y la puse en un ADR,
+> que es donde las afirmaciones se dan por comprobadas sin volver a mirarlas. Comprobar tres salidas
+> y concluir que no hay ninguna es el error; la CSP incompleta fue su consecuencia.
+>
+> Cerrado en `976227d`: CSP con `default-src 'none'` —una lista blanca parcial no es una lista
+> blanca— y el documento sólo se sirve embebido, con `sec-fetch-dest: iframe` exigido. Lo que aquí
+> se puede afirmar ahora es lo que las pruebas comprueban, y no más.
 
 ### 2. La escalera, con tres peldaños
 

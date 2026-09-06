@@ -167,8 +167,17 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
      * navegadores mandan `sec-fetch-dest`, así que lo que se pierde es abrirlo a mano — que es
      * justo lo que no debe poder hacerse.
      */
+    /*
+     * Sin cabecera tampoco. Falla cerrado.
+     *
+     * Dejarla pasar cuando no viene es la misma forma del fallo que este informe señala en la
+     * autonomía: abrirse por ausencia. Un navegador siempre la manda —Fetch Metadata está en los
+     * tres motores— así que lo único que se pierde es pedirlo a mano, que es exactamente lo que no
+     * debe poder hacerse, y lo que quedaría abierto es un motor viejo que no la mande: justo el
+     * caso en que el resto de las defensas también son más débiles.
+     */
     const destino = request.headers['sec-fetch-dest'];
-    if (destino !== undefined && destino !== 'iframe') {
+    if (destino !== 'iframe') {
       throw new JarvisError('FORBIDDEN',
         'este documento sólo se sirve embebido en la consola, no como página');
     }
