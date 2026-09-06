@@ -1313,6 +1313,38 @@ Emparenta con TEC-12.
 
 ## Hallazgos
 
+> **Un turno juzgado `minimal` no deja rastro de por qué no miró nada** (2026-09-06). Cuando la
+> pasada previa decide que no hay nada que averiguar, al turno no se le ofrecen lecturas — es lo que
+> impide que un saludo salga de pesca. Consecuencia: **ese turno no escribe ni una fila de
+> herramienta**, así que al releer la conversación mañana, «contestó de memoria» y «no se le dejó
+> mirar» se ven exactamente igual: una burbuja sin consultas.
+>
+> Antes no importaba, porque todos los turnos tenían el catálogo delante y una respuesta sin
+> consultas era una elección del modelo. Ahora puede ser una decisión que el juez tomó por él.
+>
+> Lo que lo cierra es `ChatMessage.effort` —contrato, migración y repositorio—. **El motivo bueno no
+> es tener el histórico completo**: es que hoy no hay ningún sitio donde comprobar una decisión
+> automática que ya afecta a la respuesta. El indicador en vivo no sirve para esto, porque se va
+> cuando el turno acaba.
+>
+> El daño está acotado y por eso no urge: un `minimal` mal juzgado gasta cero consultas, la persona
+> ve una respuesta pobre y vuelve a preguntar, y el turno siguiente se juzga con el intercambio
+> fallido ya en el historial. Y la salida existe: en `minimal` siguen ofreciéndose las seis que
+> deciden, `ask_human` y `escalate` incluidas.
+
+> **De dos mitades, la que nadie ejecuta junta es la que falla** (2026-09-06). Cuatro fallos de la
+> misma forma en una noche, y en ninguno hubo un descuido: **cada uno miró su mitad y la suya estaba
+> bien**. El core guardaba las referencias de los mensajes de evento y la pantalla las tiraba; el
+> endpoint devolvía `{ artifact }` envuelto y la interfaz esperaba el objeto pelado; la pastilla
+> tenía su `max-width` y el desbordamiento mandaba en un `min-width: auto` dos niveles por encima;
+> y `minimal` tenía tres caras —herramientas, esfuerzo y contexto— de las que sólo se veía una cada
+> vez.
+>
+> Ninguno lo cazó una prueba ni una revisión. Los cuatro salieron al ejecutar las dos mitades juntas
+> contra algo real. La regla que se deriva no es «probar más», es **probar el camino entero**: una
+> prueba que cubre tu lado confirma justo lo que ya sabías.
+
+
 > **El clasificador de esfuerzo acierta más con `minimal` que con `low`** (2026-09-06). Medido
 > contra la API de producción con `gpt-5-nano`, siete preguntas y tres rondas por nivel:
 >
