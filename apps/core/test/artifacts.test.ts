@@ -12,8 +12,11 @@ import { openDatabase } from '../src/platform/db.js';
 import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
 import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
-import { ArtifactRepository, MAX_ARTIFACT_BYTES, previewOf } from '../src/chat/artifacts.js';
-import type { ToolOutcome } from '../src/assistant/types.js';
+import { ArtifactRepository, MAX_ARTIFACT_BYTES, previewOf, resolveKind } from '../src/chat/artifacts.js';
+import type {
+  AssistantToolbox, PlanContext, ToolDefinition, ToolOutcome,
+} from '../src/assistant/types.js';
+import { OpenAiCompatibleModel, type FetchLike } from '../src/assistant/model.js';
 
 const user = { userId: 'u1', username: 'braian' };
 const NOW = '2026-09-05T12:00:00.000Z';
@@ -111,6 +114,32 @@ describe('ARTIFACT · un cuerpo mal formado se corrige, no se rechaza y ya', () 
     served(await caja.invoke('present', {
       kind: 'table', presentation: 'inline', title: 'Disco', body: table([{ host: 'zeus', libre: '40G' }]),
     }));
+  });
+});
+
+describe('ARTIFACT · confundir los dos campos no cuesta el turno', () => {
+  it('un kind que es una presentación se resuelve mirando el cuerpo, no se rechaza', async () => {
+    // Medido en producción: `kind: "panel"` con `presentation: "panel"`. Son dos enumerados
+    // seguidos y «panel» es una respuesta plausible a «de qué tipo es».
+    const outcome = served(await toolbox().invoke('present', {
+      kind: 'panel', presentation: 'panel', title: 'Planes',
+      body: '- Plan corto: validar\n- Plan medio: estabilizar',
+    }));
+
+    expect(outcome['presentation']).toBe('panel');
+  });
+
+  it('y el cuerpo decide el tipo: una tabla se reconoce por sus columnas', () => {
+    expect(resolveKind('panel', table([{ host: 'zeus' }]))).toBe('table');
+    expect(resolveKind('modal', JSON.stringify({ shape: 'meter', value: 1, max: 2 }))).toBe('chart');
+    expect(resolveKind('inline', '<p>hola</p>')).toBe('html');
+    expect(resolveKind('panel', 'texto normal')).toBe('markdown');
+    expect(resolveKind('markdown', 'texto normal')).toBe('markdown');
+  });
+
+  it('pero un kind que no es ni un tipo ni una presentación sigue siendo un error', () => {
+    // Adivinar aquí sería inventar: sólo se rescata la confusión que se ha visto de verdad.
+    expect(resolveKind('diagrama', 'lo que sea')).toBeNull();
   });
 });
 
@@ -244,5 +273,95 @@ describe('ARTIFACT · enseñar no es consultar', () => {
     });
 
     expect(sinArtifacts.definitions().map((tool) => tool.name)).not.toContain('present');
+  });
+});
+
+/**
+ * Enseñar no es consultar, y el presupuesto del turno tiene que saberlo.
+ *
+ * Medido en producción y con la conversación delante: cuatro consultas y **un** `present` agotaban
+ * el presupuesto de seis vueltas, y la persona —que había preguntado por sus planes— recibía «se
+ * agotó el presupuesto de consultas de este turno» como respuesta. Dos fallos en uno: uno de
+ * contabilidad y otro de qué se le enseña a alguien cuando el contador llega al final.
+ */
+class ContadorToolbox implements AssistantToolbox {
+  readonly calls: string[] = [];
+  terminalOffer = null;
+  refs = [];
+  repeats = 0;
+  observations = 0;
+  spent = false;
+
+  definitions({ decisionsOnly = false }: { decisionsOnly?: boolean } = {}): ToolDefinition[] {
+    const all: ToolDefinition[] = [
+      { name: 'get_health', description: '', inputSchema: { type: 'object', properties: {} }, decides: false },
+      { name: 'present', description: '', inputSchema: { type: 'object', properties: {} }, decides: false, free: true },
+      { name: 'finish', description: '', inputSchema: { type: 'object', properties: {} }, decides: true },
+    ];
+    return all.filter((tool) => !decisionsOnly || tool.decides || tool.free === true);
+  }
+
+  async invoke(name: string): Promise<ToolOutcome> {
+    this.calls.push(name);
+    if (name === 'finish') return { type: 'decision', decision: { kind: 'finish', summary: 'aquí tienes' } };
+    if (name !== 'present') this.observations += 1;
+    return { type: 'observation', content: { ok: true } };
+  }
+}
+
+const contexto: PlanContext = {
+  objective: 'dime qué puedes hacer con los planes, y gráficamelo',
+  history: [],
+  pendingInput: null,
+  pendingApprovals: [],
+  limits: { stepsUsed: 0, maxSteps: 12, maxToolCalls: 2, maxToolOutputBytes: 60_000 },
+};
+
+/** Un modelo guionizado a nivel de HTTP: cada respuesta es la vuelta siguiente. */
+const fetchQue = (nombres: string[]): FetchLike => {
+  let i = 0;
+  return (async () => {
+    const name = nombres[i++];
+    const message = name
+      ? { tool_calls: [{ id: `c${i}`, type: 'function', function: { name, arguments: '{}' } }] }
+      : { content: 'sin nada' };
+    const payload = { choices: [{ message }] };
+    return {
+      ok: true, status: 200,
+      json: async () => payload,
+      text: async () => JSON.stringify(payload),
+    } as unknown as Response;
+  }) as unknown as FetchLike;
+};
+
+describe('TURNO · el presupuesto cuenta lo que consulta, no lo que enseña', () => {
+  it('presentar tres cosas no gasta el margen de consultas', async () => {
+    const toolbox = new ContadorToolbox();
+    const model = new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'https://api.test', model: 'm', maxToolCalls: 2,
+      fetchImpl: fetchQue(['get_health', 'present', 'present', 'present', 'get_health', 'finish']),
+    });
+
+    const decision = await model.decide(contexto, toolbox);
+
+    // Con el fallo anterior las tres presentaciones se comían las vueltas y esto era el mensaje
+    // del contador en vez de una respuesta.
+    expect(decision).toEqual({ kind: 'finish', summary: 'aquí tienes' });
+    expect(toolbox.calls).toEqual(['get_health', 'present', 'present', 'present', 'get_health', 'finish']);
+  });
+
+  it('y cuando se acaba de verdad, lo que se lee es una respuesta y no un contador', async () => {
+    const toolbox = new ContadorToolbox();
+    const model = new OpenAiCompatibleModel({
+      apiKey: 'k', baseUrl: 'https://api.test', model: 'm', maxToolCalls: 1,
+      fetchImpl: fetchQue(['get_health', 'get_health', 'get_health', 'get_health', 'get_health', 'get_health']),
+    });
+
+    const decision = await model.decide(contexto, toolbox);
+
+    expect(decision.kind).toBe('finish');
+    const summary = (decision as { summary: string }).summary;
+    expect(summary).not.toContain('presupuesto');
+    expect(summary).toContain('vuelve a preguntarme');
   });
 });

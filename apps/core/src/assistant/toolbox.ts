@@ -20,9 +20,10 @@ import type {
   Workspace,
 } from '@jarvis/contracts';
 import { JarvisError, MCP_AREAS } from '@jarvis/contracts';
-import type { ArtifactKind, ArtifactPresentation, ChatRef, McpCapability } from '@jarvis/contracts';
+import type { ArtifactPresentation, ChatRef, McpCapability } from '@jarvis/contracts';
+import { ARTIFACT_KINDS, ARTIFACT_PRESENTATIONS } from '@jarvis/contracts';
 import {
-  MAX_ARTIFACTS_PER_TURN, previewOf, type ArtifactRepository,
+  MAX_ARTIFACTS_PER_TURN, previewOf, resolveKind, type ArtifactRepository,
 } from '../chat/artifacts.js';
 import type { McpService } from '../mcp/service.js';
 import type { SessionService } from '../sessions/service.js';
@@ -1007,16 +1008,33 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     }
 
     const kind = asString(input['kind']);
-    const presentation = asString(input['presentation']);
+    const asked = asString(input['presentation']);
     const title = asString(input['title']);
     const body = asString(input['body']);
-    if (!kind || !presentation || !title || body === null) {
-      return toolError('BAD_INPUT', 'faltan kind, presentation, title o body');
+    if (!kind || !title || body === null) {
+      return toolError('BAD_INPUT', 'faltan kind, title o body');
     }
+    /*
+     * El modelo confunde los dos enumerados, y cuando lo hace el cuerpo dice lo que es.
+     *
+     * Rechazarlo costaba una vuelta entera del turno y la persona se quedaba sin ver nada, así
+     * que se resuelve: si `kind` traía una presentación, ésa es la presentación, y el tipo sale
+     * de mirar el cuerpo.
+     */
+    const resolved = resolveKind(kind, body);
+    if (!resolved) {
+      return toolError('BAD_INPUT', `no sé enseñar un \`${kind}\``,
+        `los tipos son ${ARTIFACT_KINDS.join(', ')}`);
+    }
+    const presentation = (ARTIFACT_PRESENTATIONS as readonly string[]).includes(asked ?? '')
+      ? asked as ArtifactPresentation
+      : ((ARTIFACT_PRESENTATIONS as readonly string[]).includes(kind)
+        ? kind as ArtifactPresentation
+        : 'inline');
 
     const created = artifacts.repository.create(artifacts.conversationId, {
-      kind: kind as ArtifactKind,
-      presentation: presentation as ArtifactPresentation,
+      kind: resolved,
+      presentation,
       title,
       body,
       language: asString(input['language']),

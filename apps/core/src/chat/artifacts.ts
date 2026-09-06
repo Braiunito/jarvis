@@ -250,6 +250,40 @@ function validateChart(parsed: unknown): ArtifactRejection | null {
 }
 
 /**
+ * Qué es esto de verdad, cuando el modelo confundió los dos campos.
+ *
+ * Visto en producción: llamó con `kind: "panel"` y `presentation: "panel"`. Son dos enumerados
+ * seguidos y uno de los valores del segundo —«panel»— es una respuesta plausible a «de qué tipo
+ * es», así que la confusión no es un despiste raro sino la forma natural de equivocarse aquí.
+ *
+ * Se corrige en vez de rechazarse, por lo que costaba rechazarlo: el error se le devolvía, el
+ * modelo gastaba otra vuelta y la persona acababa sin ver nada. Y el cuerpo ya dice lo que es
+ * —una tabla trae `columns` y `rows`, un gráfico trae `shape`, un documento empieza por `<`—, así
+ * que no hay que adivinar: hay que leerlo. Es la misma regla que ya se aplicó a los
+ * identificadores: cuando lo que llega es del otro campo y se puede resolver sin inventar, se
+ * resuelve.
+ */
+export function resolveKind(kind: string, body: string): ArtifactKind | null {
+  if ((ARTIFACT_KINDS as readonly string[]).includes(kind)) return kind as ArtifactKind;
+  // Sólo se rescata la confusión concreta que se ha visto. Un `kind` que no sea ni un tipo ni una
+  // presentación es otra cosa, y adivinarla sería inventar.
+  if (!(ARTIFACT_PRESENTATIONS as readonly string[]).includes(kind)) return null;
+
+  const trimmed = body.trimStart();
+  if (trimmed.startsWith('<')) return 'html';
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (isRecord(parsed)) {
+      if (Array.isArray(parsed['columns']) && Array.isArray(parsed['rows'])) return 'table';
+      if (typeof parsed['shape'] === 'string') return 'chart';
+    }
+    return 'json';
+  } catch {
+    return 'markdown';
+  }
+}
+
+/**
  * `html` nunca va dentro de la burbuja.
  *
  * Un documento que ejecuta JavaScript no puede aparecer solo mientras lees: se mira a propósito,

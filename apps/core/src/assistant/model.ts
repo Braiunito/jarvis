@@ -72,6 +72,17 @@ Al cerrar:
  * No pretende ser listo: pretende ser **determinista**, que es lo que hace falta para probar que
  * un plan sobrevive a un reinicio sin depender de la red ni de una factura.
  */
+/**
+ * Lo que se le dice a la persona cuando el turno se queda sin sitio para consultar.
+ *
+ * Antes decía «se agotó el presupuesto de consultas de este turno», que es contabilidad del
+ * mecanismo puesta donde va una respuesta: alguien preguntó por sus planes y recibió el estado
+ * de un contador que no sabe que existe. Que el turno tenga límite es cierto y se dice, pero lo
+ * primero es que hay una salida —volver a preguntar— y que lo mirado no se ha perdido.
+ */
+const OUT_OF_BUDGET = 'Me quedé sin margen para seguir mirando en este turno. Lo que llevo '
+  + 'consultado está arriba; vuelve a preguntarme y sigo desde ahí.';
+
 export class ScriptedModel implements AssistantModel {
   readonly id = 'scripted';
   readonly #maxSteps: number;
@@ -424,11 +435,16 @@ export class AnthropicModel implements AssistantModel {
   async decide(context: PlanContext, toolbox: AssistantToolbox): Promise<AssistantDecision> {
     const messages: AnthropicMessage[] = [{ role: 'user', content: renderContext(context) }];
 
-    for (let call = 0; call <= this.#maxToolCalls; call += 1) {
-      // Sólo quedan las que cierran cuando es la última vuelta **o cuando el core ya dijo que no
+    // El presupuesto cuenta las vueltas que consultan, no las que enseñan. Ver el mismo bloque en
+    // el adaptador de abajo: presentar no va a ninguna máquina y no puede costar lo que ir.
+    let spent = 0;
+    const maxRounds = this.#maxToolCalls * 2 + 2;
+    for (let round = 0; round <= maxRounds; round += 1) {
+      // Sólo quedan las que cierran cuando se acabó el margen **o cuando el core ya dijo que no
       // queda presupuesto**: ofrecerle lecturas que van a ser rechazadas gasta una vuelta entera.
-      const decisionsOnly = call === this.#maxToolCalls || toolbox.spent;
+      const decisionsOnly = spent >= this.#maxToolCalls || toolbox.spent;
       const tools = toolbox.definitions({ decisionsOnly });
+      const free = new Set(tools.filter((tool) => tool.free).map((tool) => tool.name));
       const body = await this.#ask(messages, tools);
       const blocks = body.content ?? [];
       const uses = blocks.filter((block) => block.type === 'tool_use' && block.name);
@@ -451,7 +467,9 @@ export class AnthropicModel implements AssistantModel {
        * ejecuta, porque el core persiste un checkpoint por turno y no dos.
        */
       const results: Array<Record<string, unknown>> = [];
+      let consulted = false;
       for (const use of uses) {
+        if (!free.has(use.name as string)) consulted = true;
         const outcome = await toolbox.invoke(use.name as string, use.input ?? {});
         if (outcome.type === 'decision') return outcome.decision;
         results.push({
@@ -464,10 +482,11 @@ export class AnthropicModel implements AssistantModel {
       // Las observaciones se le devuelven al modelo y se sigue dentro del mismo turno.
       messages.push({ role: 'assistant', content: blocks as unknown as Array<Record<string, unknown>> });
       messages.push({ role: 'user', content: results });
+      if (consulted) spent += 1;
     }
 
     // Inalcanzable con el bucle de arriba, pero un plan nunca se queda sin salida por un `for`.
-    return { kind: 'finish', summary: 'se agotó el presupuesto de consultas de este turno' };
+    return { kind: 'finish', summary: OUT_OF_BUDGET };
   }
 
   async #ask(messages: AnthropicMessage[], tools: ToolDefinition[]): Promise<{ content?: AnthropicContentBlock[] }> {
@@ -605,9 +624,24 @@ export class OpenAiCompatibleModel implements AssistantModel {
     /** Si ya se le tuvo que pedir que contestara. Se hace una vez por turno, no en bucle. */
     let nudged = false;
 
-    for (let call = 0; call <= this.#maxToolCalls; call += 1) {
-      const decisionsOnly = call === this.#maxToolCalls || toolbox.spent || nudged;
+    /*
+     * El presupuesto cuenta las vueltas que **consultan**, no las que enseñan.
+     *
+     * Antes se contaba la vuelta entera, así que una herramienta gratis gastaba turno igual que
+     * una lectura. Medido en producción: cuatro consultas y **un** `present` agotaban el
+     * presupuesto de seis y la persona recibía «se agotó el presupuesto de consultas» como
+     * respuesta a lo que había preguntado. Presentar no va a ninguna máquina: no puede costar lo
+     * mismo que ir.
+     *
+     * El tope exterior sigue existiendo porque un bucle sin freno es un bucle: acota las vueltas
+     * totales aunque todas sean gratis, y cada herramienta gratis tiene además su propio techo.
+     */
+    let spent = 0;
+    const maxRounds = this.#maxToolCalls * 2 + 2;
+    for (let round = 0; round <= maxRounds; round += 1) {
+      const decisionsOnly = spent >= this.#maxToolCalls || toolbox.spent || nudged;
       const tools = toolbox.definitions({ decisionsOnly });
+      const free = new Set(tools.filter((tool) => tool.free).map((tool) => tool.name));
       const message = await this.#ask(messages, tools);
       const calls = message.tool_calls ?? [];
 
@@ -646,9 +680,12 @@ export class OpenAiCompatibleModel implements AssistantModel {
        * conversación de este turno no vuelve a usarse.
        */
       const answers: OpenAiMessage[] = [];
+      /** Si esta vuelta llegó a consultar algo. Enseñar no cuenta; mirar, sí. */
+      let consulted = false;
       for (const call of calls) {
         const name = call.function?.name;
         if (!name) continue;
+        if (!free.has(name)) consulted = true;
         let input: Record<string, unknown> = {};
         try {
           input = JSON.parse(call.function?.arguments || '{}') as Record<string, unknown>;
@@ -677,9 +714,10 @@ export class OpenAiCompatibleModel implements AssistantModel {
        */
       messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: sanitizeToolCalls(calls) });
       messages.push(...answers);
+      if (consulted) spent += 1;
     }
 
-    return { kind: 'finish', summary: 'se agotó el presupuesto de consultas de este turno' };
+    return { kind: 'finish', summary: OUT_OF_BUDGET };
   }
 
   #report(
