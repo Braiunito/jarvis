@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import type {
   Approval, AutonomyMode, Plan, PlanStep, PlanStatus, Run, UserIdentity, Workspace,
+  WorkflowEnvelope,
 } from '@jarvis/contracts';
 import { AUTONOMY_MODES, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
@@ -34,6 +35,10 @@ interface PlanRow {
   escalate_for_step: number | null;
   /** Cuánta cuerda tiene el asistente en este plan. Ver la migración 15 y ADR-010. */
   autonomy: string;
+  /** De qué conversación salió, si salió de una. Migración 17. */
+  conversation_id: string | null;
+  /** El perímetro firmado, si es un workflow. Migración 17. */
+  envelope_json: string | null;
 }
 
 interface StepRow {
@@ -68,6 +73,9 @@ const toPlan = (row: PlanRow): Plan => ({
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   finishedAt: row.finished_at,
+  autonomy: autonomyOf(row.autonomy),
+  conversationId: row.conversation_id,
+  envelope: row.envelope_json ? JSON.parse(row.envelope_json) as WorkflowEnvelope : null,
   summary: row.summary,
 });
 
@@ -234,6 +242,11 @@ export class PlanService {
       updatedAt: at,
       finishedAt: null,
       summary: null,
+      // Un plan creado por REST no es un workflow: nadie firmó un perímetro para él y no sale
+      // de ninguna conversación. Lo que decide si se comprueba el sobre es tenerlo o no.
+      autonomy: 'manual',
+      conversationId: null,
+      envelope: null,
     };
     this.#deps.db.prepare(`INSERT INTO plans
       (id, workspace_id, created_by, objective, status, current_step, created_at, updated_at)

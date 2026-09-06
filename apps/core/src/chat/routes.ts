@@ -137,11 +137,17 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
    * fuera —la misma baliza por otra puerta— lo sostiene el `frame-src 'self'` de la aplicación,
    * que por eso está declarado explícito y no heredado.
    *
-   * Verificado en un navegador de verdad, embebido y abriendo esta URL como pestaña: el script
-   * corre, y leer el padre, la cookie y `localStorage` dan `SecurityError`; ni un intento llega a
-   * la red. **Aviso para quien lo compruebe a mano**: `document.location.origin` devuelve el
-   * origen de la URL, no `null`, porque refleja la dirección y no el origen de seguridad. Que el
-   * documento está en un origen opaco lo demuestran los `SecurityError`, no esa línea.
+   * **Corrección de lo que aquí decía antes.** Se afirmaba que «ni un intento llega a la red», y
+   * era falso: la comprobación cubrió `connect`, `img` y `form`, y no `frame` ni la navegación del
+   * documento. Con una lista blanca sin `default-src`, todo lo que no estaba nombrado quedaba
+   * permitido —un `<iframe src="http://…">` dentro del artifact cargaba— y abierto como pestaña,
+   * `location.href` navegaba, porque el sandbox restringe frames y no al documento raíz.
+   *
+   * Comprobar tres salidas y concluir que no hay ninguna es el error, no la CSP.
+   *
+   * **Aviso para quien lo compruebe a mano**: `document.location.origin` devuelve el origen de la
+   * URL, no `null`, porque refleja la dirección y no el origen de seguridad. Que el documento esté
+   * en un origen opaco lo demuestran los `SecurityError`, no esa línea.
    */
   app.get('/api/chat/:id/artifacts/:artifactId/raw', async (request, reply) => {
     const { id, artifactId } = request.params as { id: string; artifactId: string };
@@ -152,20 +158,49 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
     if (!services.chat.htmlArtifactsAllowed) {
       throw new JarvisError('FORBIDDEN', 'los artifacts html están desactivados en este servidor');
     }
+    /*
+     * Sólo embebido en la consola, nunca como pestaña.
+     *
+     * `sandbox` restringe los **frames**, no al documento raíz: abierto en una pestaña, un
+     * `location.href = 'http://…'` navega y se lleva lo que quiera contar. Exigir que la petición
+     * venga de un iframe cierra esa puerta entera en vez de intentar tapar cada salida. Todos los
+     * navegadores mandan `sec-fetch-dest`, así que lo que se pierde es abrirlo a mano — que es
+     * justo lo que no debe poder hacerse.
+     */
+    const destino = request.headers['sec-fetch-dest'];
+    if (destino !== undefined && destino !== 'iframe') {
+      throw new JarvisError('FORBIDDEN',
+        'este documento sólo se sirve embebido en la consola, no como página');
+    }
     return reply
       .header('content-security-policy', [
-        // El origen opaco, que es todo el aislamiento.
-        "sandbox allow-scripts",
+        /*
+         * `default-src 'none'` va **primero y de verdad**.
+         *
+         * Lo quité en su día creyendo que prohibiría el script que todo esto existe para aislar, y
+         * era un error de lectura mío: `default-src` sólo cubre lo que no se declara, y `script-src`
+         * está declarado justo debajo. Sin él, todo lo que no estuviera en la lista quedaba
+         * permitido — y lo que no estaba era `frame-src`, así que un `<iframe src="http://…">`
+         * dentro del artifact cargaba. Una lista blanca parcial no es una lista blanca.
+         */
+        "default-src 'none'",
+        // El origen opaco, que es el aislamiento. Va también como cabecera y no sólo como atributo
+        // del iframe, para que valga se cargue como se cargue.
+        'sandbox allow-scripts',
         "script-src 'unsafe-inline'",
         "style-src 'unsafe-inline'",
         "img-src data:",
         "font-src data:",
+        // Las cuatro que faltaban. `frame-src` es por la que se salía: el `frame-src 'self'` de la
+        // aplicación gobierna el iframe de primer nivel, no lo que ese iframe meta dentro.
+        "frame-src 'none'",
+        "child-src 'none'",
+        "worker-src 'none'",
+        "media-src 'none'",
         "connect-src 'none'",
         "form-action 'none'",
         "base-uri 'none'",
         "object-src 'none'",
-        // Que sólo lo embeba la propia consola: `securityHeaders()` pone `'none'` y con eso el
-        // iframe no renderiza, así que esta ruta lleva las suyas.
         "frame-ancestors 'self'",
       ].join('; '))
       .header('x-content-type-options', 'nosniff')

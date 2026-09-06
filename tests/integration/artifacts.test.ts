@@ -117,6 +117,34 @@ describe('ARTIFACT · el documento sale con su propio aislamiento', () => {
     expect(response.headers.get('content-security-policy')).not.toContain('allow-same-origin');
   });
 
+  it('una lista blanca sin `default-src` deja permitido lo que no nombra', async () => {
+    const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: authed() });
+    const csp = response.headers.get('content-security-policy') ?? '';
+
+    /*
+     * Ésta es la que faltaba y por la que se salía. Comprobamos `connect`, `img` y `form`, y de ahí
+     * concluimos que no había ninguna salida — pero `frame-src` no estaba declarado, así que un
+     * `<iframe src="http://…">` dentro del artifact cargaba. Con `default-src 'none'` delante, lo
+     * que no se nombra queda prohibido en vez de permitido.
+     */
+    expect(csp.startsWith("default-src 'none'")).toBe(true);
+    for (const directiva of ["frame-src 'none'", "child-src 'none'", "worker-src 'none'", "media-src 'none'"]) {
+      expect(csp).toContain(directiva);
+    }
+  });
+
+  it('y no se sirve como pestaña: el sandbox restringe frames, no al documento raíz', async () => {
+    const id = html();
+    const comoPagina = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${id}/raw`,
+      { headers: { ...authed(), 'sec-fetch-dest': 'document' } });
+    const comoIframe = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${id}/raw`,
+      { headers: { ...authed(), 'sec-fetch-dest': 'iframe' } });
+
+    // Abierto a pelo, `location.href` navegaba y se llevaba lo que quisiera contar.
+    expect(comoPagina.status).toBe(403);
+    expect(comoIframe.status).toBe(200);
+  });
+
   it('no puede llamar a casa: ni exfiltrar lo que lleva ni contar que lo abriste', async () => {
     const response = await fetch(`${baseUrl}/api/chat/${conversationId}/artifacts/${html()}/raw`, { headers: authed() });
     const csp = response.headers.get('content-security-policy') ?? '';

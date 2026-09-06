@@ -574,4 +574,27 @@ export const MIGRATIONS: Migration[] = [
         WHERE status IN ('ready', 'running');
     `,
   },
+  {
+    version: 17,
+    name: 'workflows',
+    sql: `
+      -- Un plan que nació de una conversación, y el perímetro que alguien firmó para él.
+      --
+      -- \`conversation_id\` cierra el bucle: el borrador se enseña en el hilo, la tarjeta vuelve al
+      -- hilo y el avance se cuenta ahí. Sin él, el asistente propone un plan y luego no tiene dónde
+      -- contar qué pasó con él. Va sin clave foránea a propósito: borrar una conversación no debe
+      -- llevarse por delante un trabajo que quizá lleva media hora corriendo en una máquina.
+      ALTER TABLE plans ADD COLUMN conversation_id TEXT;
+
+      -- El sobre: hosts, topes, permiso más alto, si escribe y qué capacidades por nombre.
+      --
+      -- Se guarda entero y no en columnas porque lo que importa de él es que **es lo que se firmó**:
+      -- el digest de la aprobación se calcula sobre este objeto, así que partirlo en campos sería
+      -- invitar a que alguien cambie uno y el digest deje de cubrir lo que dice cubrir.
+      ALTER TABLE plans ADD COLUMN envelope_json TEXT;
+
+      CREATE INDEX idx_plans_conversation ON plans (conversation_id)
+        WHERE conversation_id IS NOT NULL;
+    `,
+  },
 ];
