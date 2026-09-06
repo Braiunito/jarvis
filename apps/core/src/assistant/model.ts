@@ -12,6 +12,7 @@
  *
  * La credencial vive aquí, en el core: el navegador no la ve nunca (ADR-001).
  */
+import { MAX_ARTIFACTS_PER_TURN } from '../chat/artifacts.js';
 import type {
   AssistantDecision, AssistantModel, AssistantToolbox, PlanContext, ToolDefinition,
 } from './types.js';
@@ -438,7 +439,17 @@ export class AnthropicModel implements AssistantModel {
     // El presupuesto cuenta las vueltas que consultan, no las que enseñan. Ver el mismo bloque en
     // el adaptador de abajo: presentar no va a ninguna máquina y no puede costar lo que ir.
     let spent = 0;
-    const maxRounds = this.#maxToolCalls * 2 + 2;
+    /*
+     * El techo de vueltas es una red, no el presupuesto.
+     *
+     * Quien decide cuándo se acaba es `spent`, que cuenta **las vueltas que consultan**: enseñar
+     * no gasta, así que un turno que presenta tres cosas necesita más vueltas que consultas y no
+     * puede acotarse contándolas todas. Pero el margen tiene que estar atado a lo que de verdad
+     * cabe —el presupuesto más el tope de artifacts, más una para cerrar— y no a un múltiplo:
+     * con `maxToolCalls * 2` un modelo que se atasca cuesta el doble de viajes contra la API sin
+     * poder hacer nada más con ellos.
+     */
+    const maxRounds = this.#maxToolCalls + MAX_ARTIFACTS_PER_TURN + 1;
     for (let round = 0; round <= maxRounds; round += 1) {
       // Sólo quedan las que cierran cuando se acabó el margen **o cuando el core ya dijo que no
       // queda presupuesto**: ofrecerle lecturas que van a ser rechazadas gasta una vuelta entera.
@@ -483,6 +494,9 @@ export class AnthropicModel implements AssistantModel {
       messages.push({ role: 'assistant', content: blocks as unknown as Array<Record<string, unknown>> });
       messages.push({ role: 'user', content: results });
       if (consulted) spent += 1;
+      // Pasado el presupuesto se sale: en la vuelta anterior ya se le ofrecieron sólo las que
+      // deciden, así que si ha vuelto a consultar es que no va a decidir por su cuenta.
+      if (spent > this.#maxToolCalls) break;
     }
 
     // Inalcanzable con el bucle de arriba, pero un plan nunca se queda sin salida por un `for`.
@@ -637,7 +651,17 @@ export class OpenAiCompatibleModel implements AssistantModel {
      * totales aunque todas sean gratis, y cada herramienta gratis tiene además su propio techo.
      */
     let spent = 0;
-    const maxRounds = this.#maxToolCalls * 2 + 2;
+    /*
+     * El techo de vueltas es una red, no el presupuesto.
+     *
+     * Quien decide cuándo se acaba es `spent`, que cuenta **las vueltas que consultan**: enseñar
+     * no gasta, así que un turno que presenta tres cosas necesita más vueltas que consultas y no
+     * puede acotarse contándolas todas. Pero el margen tiene que estar atado a lo que de verdad
+     * cabe —el presupuesto más el tope de artifacts, más una para cerrar— y no a un múltiplo:
+     * con `maxToolCalls * 2` un modelo que se atasca cuesta el doble de viajes contra la API sin
+     * poder hacer nada más con ellos.
+     */
+    const maxRounds = this.#maxToolCalls + MAX_ARTIFACTS_PER_TURN + 1;
     for (let round = 0; round <= maxRounds; round += 1) {
       const decisionsOnly = spent >= this.#maxToolCalls || toolbox.spent || nudged;
       const tools = toolbox.definitions({ decisionsOnly });
@@ -715,6 +739,9 @@ export class OpenAiCompatibleModel implements AssistantModel {
       messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: sanitizeToolCalls(calls) });
       messages.push(...answers);
       if (consulted) spent += 1;
+      // Pasado el presupuesto se sale: en la vuelta anterior ya se le ofrecieron sólo las que
+      // deciden, así que si ha vuelto a consultar es que no va a decidir por su cuenta.
+      if (spent > this.#maxToolCalls) break;
     }
 
     return { kind: 'finish', summary: OUT_OF_BUDGET };
