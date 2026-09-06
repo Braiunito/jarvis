@@ -597,4 +597,74 @@ export const MIGRATIONS: Migration[] = [
         WHERE conversation_id IS NOT NULL;
     `,
   },
+  {
+    version: 18,
+    name: 'plans_without_workspace',
+    sql: `
+      -- Un plan puede no tener sesión: «compara el disco de las tres máquinas» es trabajo de la
+      -- casa y no de ningún agente. \`workspace_id\` era \`NOT NULL\` desde el primer día, cuando un
+      -- plan siempre salía de una sesión abierta.
+      --
+      -- SQLite no sabe relajar un \`NOT NULL\`: hay que reconstruir la tabla. Y \`plan_steps\` y
+      -- \`approvals\` cuelgan de ella con \`ON DELETE CASCADE\`, así que soltar la tabla vieja se
+      -- lleva por delante el historial de pasos y las tarjetas que alguien firmó. Sin error: la
+      -- migración pasa, el arranque sigue, y lo que falta no lo echa nadie de menos hasta que va a
+      -- mirar qué se hizo el mes pasado.
+      --
+      -- **La receta de manual no sirve aquí, y está comprobado.** Lo que la documentación de SQLite
+      -- recomienda —\`PRAGMA foreign_keys=OFF\` alrededor de la reconstrucción— es un no-op silencioso
+      -- dentro de una transacción, y el runner ejecuta cada migración dentro de una. Y
+      -- \`legacy_alter_table\`, que sí se puede cambiar ahí dentro, tampoco evita la pérdida: se probó
+      -- con las dos formas y las hijas desaparecían igual.
+      --
+      -- Así que las hijas se apartan, se reconstruye, y se devuelven. Es más largo de leer y es lo
+      -- único que se sostuvo al medirlo.
+      CREATE TABLE _plan_steps_copia AS SELECT * FROM plan_steps;
+      CREATE TABLE _approvals_copia AS SELECT * FROM approvals;
+      DELETE FROM plan_steps;
+      DELETE FROM approvals;
+
+      CREATE TABLE plans_nueva (
+        id                TEXT PRIMARY KEY,
+        -- Nulable, y \`SET NULL\` en vez de \`CASCADE\`: borrar una sesión no puede llevarse por
+        -- delante el plan que la usó, porque el plan es el registro de lo que se hizo en ella.
+        workspace_id      TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+        created_by        TEXT NOT NULL,
+        objective         TEXT NOT NULL,
+        status            TEXT NOT NULL,
+        current_step      INTEGER NOT NULL DEFAULT 0,
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL,
+        finished_at       TEXT,
+        summary           TEXT,
+        escalate_for_step INTEGER,
+        autonomy          TEXT NOT NULL DEFAULT 'manual',
+        conversation_id   TEXT,
+        envelope_json     TEXT
+      );
+
+      -- Las columnas van nombradas y no con \`SELECT *\`: el orden de una tabla que ha crecido con
+      -- cuatro \`ALTER\` no es el que uno supone, y un \`*\` mete el objetivo en el estado.
+      INSERT INTO plans_nueva
+        (id, workspace_id, created_by, objective, status, current_step, created_at, updated_at,
+         finished_at, summary, escalate_for_step, autonomy, conversation_id, envelope_json)
+      SELECT
+         id, workspace_id, created_by, objective, status, current_step, created_at, updated_at,
+         finished_at, summary, escalate_for_step, autonomy, conversation_id, envelope_json
+      FROM plans;
+
+      DROP TABLE plans;
+      ALTER TABLE plans_nueva RENAME TO plans;
+
+      INSERT INTO plan_steps SELECT * FROM _plan_steps_copia;
+      INSERT INTO approvals SELECT * FROM _approvals_copia;
+      DROP TABLE _plan_steps_copia;
+      DROP TABLE _approvals_copia;
+
+      -- Los índices se van con la tabla vieja, así que se vuelven a poner los dos.
+      CREATE INDEX idx_plans_status ON plans (status, updated_at DESC);
+      CREATE INDEX idx_plans_conversation ON plans (conversation_id)
+        WHERE conversation_id IS NOT NULL;
+    `,
+  },
 ];
