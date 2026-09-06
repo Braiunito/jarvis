@@ -729,9 +729,26 @@ export class OpenAiCompatibleModel implements AssistantModel {
     // que está pensando ahora, y al terminar ya no está pensando.
     if (this.#turnEffort) toolbox.noteEffort?.(this.#turnEffort);
 
+    /*
+     * Si no hay nada que averiguar, tampoco hace falta contarle lo que hay abierto.
+     *
+     * El contexto lleva el estado de la casa —workspaces abiertos, trabajos vivos, sesiones ya
+     * encontradas— porque quita la razón más común para gastar una consulta. Pero delante de un
+     * saludo eso no es ayuda, es lo único que hay que mirar: medido, a «hola» contestó
+     * «¿autorizo activar la cámara triple y revisar la red en los workspaces…?». No se lo inventó,
+     * se lo dimos nosotros y era lo más concreto que tenía delante.
+     *
+     * Con `minimal` se le da el objetivo y poco más. Es la tercera cara de lo mismo: no ofrecerle
+     * herramientas evita que busque, no darle estado evita que conteste sobre lo que no se le
+     * preguntó, y pedir `low` le deja componer una frase.
+     */
+    const paraElPrompt = this.#turnJudged === 'minimal'
+      ? { ...context, house: undefined, found: undefined, capabilities: undefined }
+      : context;
+
     const messages: OpenAiMessage[] = [
       { role: 'system', content: this.#systemPrompt },
-      { role: 'user', content: renderContext(context) },
+      { role: 'user', content: renderContext(paraElPrompt) },
     ];
     /** Si ya se le tuvo que pedir que contestara. Se hace una vez por turno, no en bucle. */
     let nudged = false;
