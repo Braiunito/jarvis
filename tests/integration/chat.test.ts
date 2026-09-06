@@ -345,6 +345,45 @@ describe('CHAT · la puerta a la nube', () => {
     expect(services.chat.messages(conversation.id).at(-1)?.text).toContain('38%');
   });
 
+  it('R-03 · alterar lo firmado no se ejecuta: se anula y se audita', async () => {
+    /*
+     * El sondeo de codex: se cambia `target_json` de una aprobación pendiente y al autorizarla **se
+     * ejecuta lo alterado**, con el `action_digest` original intacto al lado. La huella se calculaba
+     * al crear y no se miraba al consumir, así que la promesa de `docs/security.md` —«cambiar
+     * cualquier parte la invalida»— no la sostenía nadie.
+     */
+    const local = new ScriptedBrain('local', [
+      () => ({
+        kind: 'capability', title: 'memoria', capability: 'zeus.memory_info', args: {},
+        summary: 'mirar la memoria', effectsDeclared: true,
+      }),
+    ]);
+    const { services } = track(harness({ local }));
+
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'mira la memoria', user);
+    await settled(services, conversation.id);
+
+    const [aprobacion] = services.chat.pendingApprovals(conversation.id);
+    // Alguien toca la fila entre la firma y el efecto.
+    services.db.prepare('UPDATE approvals SET target_json = ? WHERE id = ?')
+      .run(JSON.stringify({ capability: 'zeus.docker_restart', args: { container: 'jarvis' } }),
+        aprobacion!.id);
+
+    await expect(services.chat.resolveApproval(aprobacion!.id, 'approved', user))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
+
+    // Y queda dicho: anulada por el sistema, con su fila de auditoría.
+    const fila = services.db.prepare('SELECT status, resolved_by FROM approvals WHERE id = ?')
+      .get(aprobacion!.id) as { status: string; resolved_by: string };
+    expect(fila.status).toBe('rejected');
+    expect(fila.resolved_by).toBe('system');
+    const auditada = services.db
+      .prepare("SELECT COUNT(*) n FROM audit_events WHERE event_type = 'approval.tampered'")
+      .get() as { n: number };
+    expect(auditada.n).toBe(1);
+  });
+
   it('rechazar la escalada no consulta a la nube', async () => {
     const local = new ScriptedBrain('local', [() => ({ kind: 'escalate', reason: 'no puedo' })]);
     const cloud = new ScriptedBrain('nube', [() => ({ kind: 'finish', summary: 'no debería llegar aquí' })]);

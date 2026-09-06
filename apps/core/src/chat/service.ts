@@ -17,7 +17,6 @@
  * lo decide una persona—: tocar una máquina, lanzar trabajo en autonomía `manual`, y salir a la
  * nube. Las tres pasan por la misma tarjeta de aprobación, con su digest y su caducidad.
  */
-import { createHash } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import type {
   Approval, AutonomyMode, ChatArtifact, ChatCapabilities, ChatMessage, ChatRef, Conversation,
@@ -26,6 +25,7 @@ import type {
 import { AUTONOMY_MODES, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId } from '../platform/ids.js';
+import { approvalDigest, digestMatches } from '../platform/approvals.js';
 import type { JobRepository } from '../platform/jobs.js';
 import type { AuditLog } from '../platform/audit.js';
 import type { AttachmentService } from '../attachments/service.js';
@@ -944,6 +944,28 @@ export class ChatService {
       db.prepare("UPDATE approvals SET status = 'expired' WHERE id = ?").run(approvalId);
       throw new JarvisError('APPROVAL_EXPIRED', 'la aprobación caducó sin respuesta');
     }
+    /*
+     * La huella se comprueba **antes** de cambiar nada, que es lo que le da sentido.
+     *
+     * Se calculaba al crear y no se miraba al consumir, así que alterar `target_json` de una fila
+     * pendiente y autorizarla ejecutaba lo alterado —con el digest original intacto al lado—.
+     * `docs/security.md` promete que cambiar cualquier parte la invalida: la promesa estaba
+     * escrita, la huella guardada, y nadie las juntaba.
+     *
+     * No casar no es un error del que se pueda seguir: la fila queda rechazada por el sistema y se
+     * audita, porque si alguien tocó eso hay que poder verlo después.
+     */
+    if (!digestMatches(approval.actionDigest, approval.actionType, approval.target)) {
+      db.prepare("UPDATE approvals SET status = 'rejected', resolved_by = 'system', resolved_at = ? WHERE id = ?")
+        .run(clock.nowIso(), approvalId);
+      this.#deps.audit.record({
+        actorUser: user.username,
+        eventType: 'approval.tampered',
+        payload: { approvalId, conversationId: approval.conversationId, actionType: approval.actionType },
+      });
+      throw new JarvisError('CONFLICT',
+        'lo que se autorizó no es lo que hay guardado: la aprobación queda anulada');
+    }
 
     db.prepare('UPDATE approvals SET status = ?, resolved_by = ?, resolved_at = ? WHERE id = ?')
       .run(decision, user.username, clock.nowIso(), approvalId);
@@ -1039,7 +1061,7 @@ export class ChatService {
     const id = newApprovalId();
     const at = clock.nowIso();
     // El digest cubre la acción y su destino: cambiar cualquier cosa invalida lo que se concedió.
-    const digest = createHash('sha256').update(JSON.stringify({ actionType, target })).digest('hex');
+    const digest = approvalDigest(actionType, target);
     db.prepare(`INSERT INTO approvals
       (id, plan_id, conversation_id, action_type, target_json, action_digest, summary, requested_by,
        requested_at, expires_at, status)
