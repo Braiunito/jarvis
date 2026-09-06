@@ -12,6 +12,9 @@
  * plan**, no dentro de un turno. Una prueba que mire un solo paso da por bueno un `maxRuns` que
  * nunca se llega a agotar.
  */
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeSessionIndex, fakeSshPath, indexRow } from '@jarvis/testkit';
 import type { AutonomyMode, PermissionProfile, WorkflowEnvelope } from '@jarvis/contracts';
@@ -49,9 +52,9 @@ afterEach(() => {
   open = [];
 });
 
-function harness(model: PlanBrain): CoreServices {
+function harness(model: PlanBrain, dbPath = ':memory:'): CoreServices {
   const services = buildServices({
-    db: openDatabase({ path: ':memory:' }),
+    db: openDatabase({ path: dbPath }),
     index: new FakeSessionIndex([indexRow()]) as never,
     model: model as never,
     config: {
@@ -394,5 +397,218 @@ describe('WF · un workflow de la casa, sin sesión detrás', () => {
     const final = services.plans.require(plan.id);
     expect(final.status).toBe('failed');
     expect(final.summary).toContain('no está atado a ninguna sesión');
+  });
+});
+
+describe('WF · corregir el plan sin volver a firmarlo', () => {
+  /*
+   * Lo que hace legítima una revisión sin firma nueva es que el perímetro no cambie: se firmó el
+   * sobre precisamente porque los pasos iban a cambiar. Lo que no puede hacer una corrección es
+   * ensanchar ese perímetro, porque entonces deja de corregir un plan y pasa a proponer otro.
+   */
+  const enMarcha = (envelope = sobre()) => {
+    const services = harness(new PlanBrain([]));
+    const { plan } = draftWorkflow(services, envelope);
+    services.plans.activate(plan.id, user);
+    return { services, plan };
+  };
+
+  it('reescribir un paso que no ha empezado se aplica sin preguntar', () => {
+    const { services, plan } = enMarcha();
+    const resultado = services.plans.revise({
+      planId: plan.id,
+      reason: 'el log está rotado, hay que mirar el del día',
+      changes: [{ op: 'replace', ordinal: 0, title: 'Mirar el log del día', intent: 'ver el log de hoy' }],
+      user,
+    });
+
+    expect(resultado).toEqual({ ok: true });
+    const pasos = services.plans.steps(plan.id);
+    expect(pasos[0]?.title).toBe('Mirar el log del día');
+    expect((pasos[0]?.input as { intent: string }).intent).toBe('ver el log de hoy');
+    // Y el resto sigue ahí: corregir uno no reescribe el plan entero.
+    expect(pasos).toHaveLength(2);
+  });
+
+  it('añadir un paso por delante cabe, si el sobre da para él', () => {
+    const { services, plan } = enMarcha(sobre({ maxSteps: 6 }));
+    expect(services.plans.revise({
+      planId: plan.id,
+      reason: 'antes hay que saber si hay rotación',
+      changes: [{ op: 'insert_after', ordinal: 0, title: 'Ver logrotate', intent: 'saber si rota', expects: 'sí o no' }],
+      user,
+    })).toEqual({ ok: true });
+    expect(services.plans.steps(plan.id)).toHaveLength(3);
+  });
+
+  it('una revisión que deja más pasos de los firmados no se aplica, y dice cuántos', () => {
+    const { services, plan } = enMarcha(sobre({ maxSteps: 2 }));
+    const resultado = services.plans.revise({
+      planId: plan.id,
+      reason: 'hacen falta más pasos',
+      changes: [{ op: 'insert_after', ordinal: 0, title: 'Uno más', intent: 'algo', expects: 'algo' }],
+      user,
+    });
+
+    // Ensanchar el perímetro no es corregir: eso lo firma una persona.
+    expect(resultado).toMatchObject({ ok: false });
+    expect((resultado as { message: string }).message).toContain('autorizaste fueron 2');
+    // Y el plan se queda como estaba: una revisión rechazada no deja el plan a medias.
+    expect(services.plans.steps(plan.id)).toHaveLength(2);
+  });
+
+  it('y una que mete un paso que escribe donde se firmó sólo mirar, tampoco', () => {
+    const { services, plan } = enMarcha(sobre({ writes: false }));
+    const resultado = services.plans.revise({
+      planId: plan.id,
+      reason: 'hay que borrar los logs viejos',
+      changes: [{ op: 'replace', ordinal: 0, title: 'Borrar', intent: 'borrar logs', writes: true }],
+      user,
+    });
+
+    expect(resultado).toMatchObject({ ok: false });
+    expect((resultado as { message: string }).message).toContain('sólo mirar');
+  });
+
+  it('no se reescribe lo ya hecho: la historia de un plan no se corrige', async () => {
+    const model = new PlanBrain([
+      () => ({ kind: 'run', title: 'Primero', prompt: 'mira', permissionProfile: 'safe', rationale: 'x' }),
+    ]);
+    const services = harness(model);
+    const { plan } = draftWorkflow(services, sobre());
+    services.plans.activate(plan.id, user);
+    await services.plans.advance(plan.id, user);
+
+    // El paso 0 ya está atado y corriendo: tocarlo sería reescribir lo que pasó.
+    const resultado = services.plans.revise({
+      planId: plan.id, reason: 'mejor de otra forma',
+      changes: [{ op: 'replace', ordinal: 0, title: 'Otra cosa', intent: 'otra' }], user,
+    });
+    expect(resultado).toMatchObject({ ok: false });
+    expect((resultado as { message: string }).message).toMatch(/ya se hicieron|no hay ningún paso pendiente/);
+  });
+
+  it('una revisión sin cambios no es una revisión', () => {
+    const { services, plan } = enMarcha();
+    expect(services.plans.revise({ planId: plan.id, reason: 'porque sí', changes: [], user }))
+      .toMatchObject({ ok: false });
+  });
+});
+
+describe('WF · qué invalida la firma y qué no', () => {
+  /*
+   * El digest es lo que impide que se firme una cosa y se ejecute otra, así que lo que importa no
+   * es que exista sino **de qué depende**. Cubre el sobre entero: subir un tope o añadir una
+   * máquina lo invalida. Lo que no cubre son los pasos, y es a propósito — se firmó el perímetro
+   * precisamente porque los pasos iban a cambiar.
+   */
+  const conSobre = (envelope: WorkflowEnvelope) =>
+    digestOf({ planId: 'pl-fijo', objective: 'el mismo objetivo', envelope });
+
+  it('subir un tope invalida la firma', () => {
+    expect(conSobre(sobre({ maxRuns: 2 }))).not.toBe(conSobre(sobre({ maxRuns: 20 })));
+    expect(conSobre(sobre({ maxSteps: 6 }))).not.toBe(conSobre(sobre({ maxSteps: 60 })));
+  });
+
+  it('añadir una máquina o subir el permiso, también', () => {
+    expect(conSobre(sobre({ hosts: ['bastion'] }))).not.toBe(conSobre(sobre({ hosts: ['bastion', 'serverC'] })));
+    expect(conSobre(sobre({ highestPermissionProfile: 'safe' })))
+      .not.toBe(conSobre(sobre({ highestPermissionProfile: 'auto' })));
+    expect(conSobre(sobre({ writes: false }))).not.toBe(conSobre(sobre({ writes: true })));
+  });
+
+  it('pasar de sólo mirar a poder usar una capacidad, también', () => {
+    expect(conSobre(sobre({ capabilities: [] })))
+      .not.toBe(conSobre(sobre({ capabilities: ['zeus.disk_usage'] })));
+  });
+
+  it('pero el orden en que estén escritos los campos no cambia nada', () => {
+    // Si el digest dependiera del orden de las claves, una revisión inocente invalidaría la firma
+    // y el asistente pediría permiso otra vez sin que nada hubiera cambiado.
+    const uno = { hosts: ['bastion'], maxSteps: 6, maxRuns: 3, highestPermissionProfile: 'safe' as const, writes: false, capabilities: [] };
+    const otro = { capabilities: [], writes: false, highestPermissionProfile: 'safe' as const, maxRuns: 3, maxSteps: 6, hosts: ['bastion'] };
+    expect(conSobre(uno)).toBe(conSobre(otro));
+  });
+});
+
+describe('WF · lo que el hilo puede contar de un workflow', () => {
+  it('describe da lo justo para contarlo, y nada de un plan que no existe', () => {
+    const services = harness(new PlanBrain([]));
+    const { plan } = draftWorkflow(services);
+
+    expect(services.plans.describe(plan.id))
+      .toMatchObject({ objective: expect.stringContaining('pool'), steps: 2, status: 'draft' });
+    // Un id que no es de nadie no inventa un plan vacío: dice que no hay.
+    expect(services.plans.describe('pl-que-no-existe')).toBeNull();
+  });
+});
+
+describe('WF · un workflow sobrevive a que se apague el core', () => {
+  it('el plan, su sobre y los pasos sin atar siguen ahí, y continúa donde estaba', async () => {
+    /*
+     * Un workflow dura más que un turno: entre que se firma y termina puede haber un despliegue.
+     * Lo que tiene que sobrevivir no es sólo el plan, es **qué se firmó** —sin el sobre, al
+     * arrancar de nuevo no habría con qué comprobar nada— y **por dónde iba**.
+     *
+     * Se cierra el servicio y se abre otro sobre la misma base, que es lo que ocurre en un
+     * reinicio. Con `:memory:` no se puede: la base se va con el proceso.
+     */
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'jarvis-wf-')), 'core.db');
+    const antes = harness(new PlanBrain([
+      () => ({ kind: 'run', title: 'Primero', prompt: 'mira el log', permissionProfile: 'safe', rationale: 'x' }),
+    ]), dbPath);
+
+    const workspace = antes.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-1' } }, user,
+    ).workspace;
+    const plan = antes.plans.createWorkflow({
+      workspaceId: workspace.id,
+      objective: 'averiguar por qué se llena el disco',
+      envelope: sobre({ maxRuns: 2 }),
+      autonomy: 'auto',
+      steps: [
+        { title: 'Mirar el log', intent: 'ver qué crece', expects: 'el fichero culpable', unknowns: ['si rota'] },
+        { title: 'Comprobar rotación', intent: 'ver logrotate', expects: 'la política' },
+      ],
+      user,
+    });
+    antes.plans.activate(plan.id, user);
+    await antes.plans.advance(plan.id, user);
+    antes.close();
+
+    // Y aquí se apagó el core.
+    const despues = harness(new PlanBrain([
+      () => ({ kind: 'finish', summary: 'era el journal' }),
+    ]), dbPath);
+
+    const recuperado = despues.plans.require(plan.id);
+    // El sobre sobrevive: sin él, al continuar no habría con qué comprobar si algo se sale.
+    expect(recuperado.envelope).toMatchObject({ maxRuns: 2, writes: false });
+    expect(recuperado.autonomy).toBe('auto');
+
+    const pasos = despues.plans.steps(plan.id);
+    // El primero quedó atado antes del apagón; el segundo sigue esperando a que lo aten.
+    expect(pasos[0]?.kind).toBe('run');
+    expect(pasos[1]?.kind).toBe('estimate');
+    expect(pasos[1]?.status).toBe('draft');
+    // Y lo que el paso atado prometía sigue dentro, que es lo que permite leer si se cumplió.
+    expect((pasos[0]?.input as { estimate?: { intent?: string } }).estimate?.intent).toContain('qué crece');
+
+    despues.close();
+  });
+
+  it('y un borrador sin firmar sigue sin correr después del reinicio', () => {
+    /*
+     * Lo contrario también tiene que aguantar: un plan propuesto y no aprobado no puede
+     * aprovechar un reinicio para colarse. `draft` no es «le toca pensar».
+     */
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'jarvis-wf-')), 'core.db');
+    const antes = harness(new PlanBrain([]), dbPath);
+    const { plan } = draftWorkflow(antes, sobre());
+    antes.close();
+
+    const despues = harness(new PlanBrain([]), dbPath);
+    expect(despues.plans.require(plan.id).status).toBe('draft');
+    despues.close();
   });
 });

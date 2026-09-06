@@ -454,7 +454,23 @@ export class PlanService {
     const { planId, user } = input;
     const plan = this.require(planId);
     const steps = this.steps(planId);
-    const desde = plan.currentStep;
+    /*
+     * Desde dónde se puede corregir: el primer paso **sin atar**.
+     *
+     * No vale `plan.currentStep`. Ese contador dice por dónde va el motor, y tras atar el primer
+     * paso puede seguir apuntando a un ordinal que ya está ocupado por un `run`: entonces el
+     * borrado no se lo lleva —ya no es `draft`— pero la reinserción empieza ahí y choca contra él.
+     * Sale un `UNIQUE constraint failed` en la cara de quien pidió una corrección, que además es
+     * un error del sistema para algo que sólo era una petición imposible.
+     *
+     * Lo que manda son los propios pasos, igual que en `plannedFrom`: dos formas de calcular lo
+     * mismo acaban diciendo cosas distintas.
+     */
+    const primeroSinAtar = steps.find((step) => step.kind === 'estimate' && step.status === 'draft');
+    if (!primeroSinAtar) {
+      return { ok: false, message: 'este workflow ya no tiene pasos por hacer: no hay nada que corregir' };
+    }
+    const desde = primeroSinAtar.ordinal;
 
     /*
      * No poder corregir se devuelve, no se lanza.
