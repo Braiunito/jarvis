@@ -158,6 +158,30 @@ describe('SOBRE · una capacidad que no se firmó no pasa', () => {
     expect(fuera).toContain('4');
   });
 
+  /*
+   * El nombre tiene que ser **el mismo a los dos lados**, y hoy es fácil que no lo sea.
+   *
+   * Las capacidades reales son `servidor.herramienta` (`qualifiedToolName`), pero el sobre se
+   * construye con lo que escribió el modelo, y a éste se le pedía «por su nombre» a secas: en
+   * producción firmó `disk_usage` cuando la real es `zeus.disk_usage`. Hoy no rompe nada porque
+   * esta rama no la alcanza el motor, y por eso mismo es una trampa: el día que se cablee,
+   * rechazaría **todas** las capacidades del propio sobre que se acaba de firmar.
+   *
+   * Se fija el desajuste en vez de hacerlo tolerante a propósito. Aceptar el nombre corto haría que
+   * un `otro-servidor.disk_usage` pasara por un `disk_usage` firmado, que es peor que el fallo.
+   * Lo que se arregla es el origen: el esquema ahora pide el nombre completo.
+   */
+  it('el nombre corto no vale por el completo: se firma y se comprueba lo mismo', () => {
+    const conCorto = { ...envelope, capabilities: ['disk_usage'] };
+
+    expect(outsideEnvelope(conCorto, { kind: 'capability', capability: 'zeus.disk_usage' },
+      { steps: 1, runs: 0 })).toContain('zeus.disk_usage');
+
+    // Y al revés: firmado el completo, se acepta el completo. Es la pareja que tiene que cuadrar.
+    expect(outsideEnvelope(envelope, { kind: 'capability', capability: 'zeus.disk_usage' },
+      { steps: 1, runs: 0 })).toBeNull();
+  });
+
   it('sin sobre no se comprueba nada, y eso es deliberado', () => {
     // Los planes anteriores a los workflows no tienen perímetro firmado. Aplicarles esto o pasaría
     // todo —y entonces no comprueba nada— o bloquearía todo. Lo que decide si hay comprobación es

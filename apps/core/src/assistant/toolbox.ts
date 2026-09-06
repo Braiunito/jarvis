@@ -669,7 +669,9 @@ export function workflowTool(hosts: readonly string[] = []): ToolDefinition {
       capabilities: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Sólo para draft: las capacidades del sistema que vas a necesitar, por su nombre.',
+        description: 'Sólo para draft: las capacidades del sistema que vas a necesitar, por su '
+          + 'nombre completo, con el servidor delante: `zeus.disk_usage`, no `disk_usage`. Es el '
+          + 'nombre con el que se firman y con el que se comprueban después.',
       },
       rationale: { type: 'string', description: 'Sólo para draft: por qué así y no de otra forma.' },
       reason: { type: 'string', description: 'Para revise y steer: qué has descubierto que obliga a esto.' },
