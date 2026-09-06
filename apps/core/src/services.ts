@@ -276,10 +276,22 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
 
   const localModel = buildLocalModel(config, meter('local'));
   const cloudModel = buildCloudModel(config, meter('cloud'));
-  const hybrid = localModel || cloudModel ? new HybridModel({ local: localModel, cloud: cloudModel }) : null;
-  const model = options.model !== undefined
-    ? options.model
-    : hybrid ?? (config.assistantScripted ? new ScriptedModel() : null);
+  /*
+   * El guionizado también es un cerebro, y el chat necesita uno híbrido.
+   *
+   * Antes sólo alimentaba el motor de planes, así que `npm run dev:local` levantaba el producto
+   * entero y **la pantalla del asistente no funcionaba**: crear una conversación contestaba «no hay
+   * modelo configurado». Levantar la consola completa sin credencial y que justo el asistente
+   * quede fuera es lo contrario de para lo que existe ese arranque.
+   *
+   * Va sin nube a propósito: sin dos sitios entre los que escalar, `canEscalate` es falso y la
+   * interfaz no promete una salida que en desarrollo no existe.
+   */
+  const scripted = config.assistantScripted ? new ScriptedModel() : null;
+  const hybrid = localModel || cloudModel
+    ? new HybridModel({ local: localModel, cloud: cloudModel })
+    : scripted && new HybridModel({ local: scripted, cloud: null });
+  const model = options.model !== undefined ? options.model : (hybrid || scripted);
 
   /**
    * Los servidores MCP declarados.

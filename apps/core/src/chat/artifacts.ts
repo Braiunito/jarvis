@@ -87,6 +87,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  */
 export function previewOf(kind: ArtifactKind, body: string): string | null {
   if (kind === 'table' || kind === 'chart' || kind === 'json') return shapeOf(kind, body);
+  /*
+   * Un documento no tiene primera línea que enseñar.
+   *
+   * La suya es marcado —`<style>body{font:14px…`— y ponerla en el botón no dice nada de lo que hay
+   * dentro: dice cómo está hecho. Se queda sin adelanto y lo lleva el título, que además es el
+   * único de los seis tipos que va con marco y etiqueta propios porque puede parecerse a Jarvis.
+   */
+  if (kind === 'html') return null;
   const line = body.split('\n').map((part) => part.trim()).find((part) => part.length > 0);
   if (!line) return null;
   return line.length > PREVIEW_CHARS ? `${line.slice(0, PREVIEW_CHARS)}…` : line;

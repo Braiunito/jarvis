@@ -150,6 +150,24 @@ describe('ARTIFACT · lo que se sirve va acotado y lo dice', () => {
   });
 });
 
+describe('ARTIFACT · lo presentado sobrevive a un turno que acaba en nada', () => {
+  it('un turno sin sesión que quiso lanzar trabajo conserva lo que ya había enseñado', async () => {
+    const caja = toolbox();
+    served(await caja.invoke('present', {
+      kind: 'markdown', presentation: 'inline', title: 'Resumen', body: 'lo que averigüé',
+    }));
+
+    /*
+     * La referencia tiene que salir del toolbox aunque la decisión del turno no se pueda cumplir.
+     *
+     * Es lo que se rompía: el modelo presentaba tres cosas y luego pedía lanzar un trabajo en una
+     * conversación sin sesión; el core escribía el aviso y los tres artifacts quedaban escritos en
+     * su tabla sin ningún mensaje del que colgar. Nadie podía abrirlos y nada decía que existieran.
+     */
+    expect(caja.refs.filter((ref) => ref.kind === 'artifact')).toHaveLength(1);
+  });
+});
+
 describe('ARTIFACT · el botón dice qué hay detrás', () => {
   it('una tabla se anuncia por su tamaño, no por su título a secas', () => {
     expect(previewOf('table', table([{ host: 'a' }, { host: 'b' }, { host: 'c' }])))
@@ -167,6 +185,10 @@ describe('ARTIFACT · el botón dice qué hay detrás', () => {
     }))).toBe('2 porciones');
     expect(previewOf('chart', JSON.stringify({ shape: 'meter', label: 'Disco', value: 60, max: 100 })))
       .toBe('60 de 100');
+  });
+
+  it('un documento no se anuncia por su marcado: eso dice cómo está hecho, no qué hay', () => {
+    expect(previewOf('html', '<style>body{font:14px system-ui}</style><h3>Sonda</h3>')).toBeNull();
   });
 
   it('y lo que se lee se anuncia por su primera línea', () => {

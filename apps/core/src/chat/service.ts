@@ -477,9 +477,20 @@ export class ChatService {
 
     if (decision.kind === 'approval') {
       if (!conversation.workspaceId) {
+        /*
+         * Con las referencias, aunque el turno acabe en nada.
+         *
+         * Lo que el modelo dejó preparado mientras razonaba —una tabla presentada, un workspace
+         * abierto— existe igual: que su última decisión no se pueda cumplir no lo borra. Sin esto
+         * los artifacts del turno quedan huérfanos en su tabla, escritos y sin ningún mensaje del
+         * que colgar, así que nadie los puede abrir. Es la misma regla de arriba, que dice que las
+         * referencias van en **todas** las ramas, aplicada también a las que no llegan a ningún
+         * sitio.
+         */
         this.#say(id, {
           role: 'event',
           text: 'El asistente pidió lanzar un trabajo, pero esta conversación no está atada a ninguna sesión.',
+          refs,
         });
         this.#repository.setStatus(id, 'idle', 'local');
         return;
@@ -510,6 +521,7 @@ export class ChatService {
       this.#say(id, {
         role: 'event',
         text: 'El asistente quiso lanzar un trabajo, pero esta conversación no está atada a ninguna sesión.',
+        refs,
       });
       this.#repository.setStatus(id, 'idle', 'local');
       return;
@@ -529,7 +541,7 @@ export class ChatService {
       });
     } catch (error) {
       this.#say(id, {
-        role: 'event', text: `No se pudo lanzar el trabajo: ${(error as Error).message}`,
+        role: 'event', text: `No se pudo lanzar el trabajo: ${(error as Error).message}`, refs,
       });
     }
     this.#repository.setStatus(id, 'idle', 'local');
