@@ -597,6 +597,32 @@ describe('WF · un workflow sobrevive a que se apague el core', () => {
     despues.close();
   });
 
+  it('un borrador no avanza aunque alguien lo empuje: nadie lo ha firmado', async () => {
+    /*
+     * Visto en producción: un workflow recién propuesto aparecía en `running` **sin que nadie
+     * hubiera firmado la tarjeta**. `#advanceOnce` sólo se paraba en `completed|failed|cancelled`,
+     * y `draft` no estaba en esa lista, así que el supervisor lo empujaba como a cualquier otro:
+     * `#proposeNext` lo ponía en `running` y le pedía una decisión al modelo.
+     *
+     * Con autonomía `manual` el daño se queda en gastar modelo por un plan que nadie autorizó.
+     * Con `auto` sería peor: el sobre existe, así que las comprobaciones pasarían, y un plan que
+     * nadie firmó lanzaría trabajo dentro de un perímetro que nadie firmó tampoco.
+     *
+     * `draft` significa **propuesto y sin aprobar**; que el motor lo trate como pendiente de
+     * pensar vacía de sentido la firma entera.
+     */
+    const model = new PlanBrain([() => ({ kind: 'finish', summary: 'no debería llegar aquí' })]);
+    const services = harness(model);
+    const { plan } = draftWorkflow(services, sobre());
+
+    await services.plans.advance(plan.id, user);
+
+    // Ni se le pregunta al modelo, ni cambia de estado, ni se ata ningún paso.
+    expect(model.calls).toBe(0);
+    expect(services.plans.require(plan.id).status).toBe('draft');
+    expect(services.plans.steps(plan.id).every((step) => step.kind === 'estimate')).toBe(true);
+  });
+
   it('y un borrador sin firmar sigue sin correr después del reinicio', () => {
     /*
      * Lo contrario también tiene que aguantar: un plan propuesto y no aprobado no puede

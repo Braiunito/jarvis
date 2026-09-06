@@ -6,7 +6,6 @@
  * clave de idempotencia del paso decide si hay que observar un efecto que ya ocurrió o ejecutar
  * uno nuevo. Ninguna llamada de modelo se queda abierta esperando horas.
  */
-import { createHash } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import type {
   Approval, AutonomyMode, Plan, PlanStep, PlanStatus, Run, UserIdentity, Workspace,
@@ -15,6 +14,7 @@ import type {
 import { autonomyOf, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId, newPlanId, newStepId } from '../platform/ids.js';
+import { approvalDigest, digestMatches } from '../platform/approvals.js';
 import {
   applyRevision, digestOf, type DraftStep, MAX_STEP_OUTPUT_CHARS, outsideEnvelope,
   revisionOutsideEnvelope,
@@ -613,6 +613,21 @@ export class PlanService {
   async #advanceOnce(planId: string, user: UserIdentity): Promise<Plan> {
     const plan = this.require(planId);
     if (['completed', 'failed', 'cancelled'].includes(plan.status)) return plan;
+    /*
+     * Un borrador no se piensa: está esperando una firma, no un turno.
+     *
+     * `draft` es el estado en que nace un workflow propuesto, y el motor lo trataba como a
+     * cualquier plan pendiente: el supervisor lo empujaba, `#proposeNext` lo pasaba a `running` y
+     * le pedía una decisión al modelo. Visto en producción con un plan de siete pasos que nadie
+     * había aprobado.
+     *
+     * Con autonomía `manual` el daño se quedaba en gastar modelo por algo que nadie autorizó. Con
+     * `auto` es peor: el sobre ya existe, así que las comprobaciones del perímetro pasarían tan
+     * ricamente, y un plan sin firmar lanzaría trabajo dentro de unos límites que tampoco firmó
+     * nadie. Que el motor tratara un borrador como pendiente de pensar vaciaba de sentido la firma
+     * entera.
+     */
+    if (plan.status === 'draft') return plan;
 
     const steps = this.steps(planId);
     /*
@@ -683,6 +698,26 @@ export class PlanService {
       if (approval.status === 'expired') {
         this.#completeStep(step.id, 'failed', { status: approval.status });
         this.#finish(plan.id, 'failed', 'la aprobación caducó sin respuesta');
+        return false;
+      }
+      /*
+       * Lo que se firmó tiene que ser lo que hay. Se comprueba aquí, antes de ejecutar.
+       *
+       * Un plan consume su aprobación en otro momento y a veces en otro proceso que el que la
+       * creó, así que entre la firma y el efecto hay una fila en una base que alguien puede tocar.
+       * La huella existía para esto y no se miraba.
+       */
+      if (approval.status === 'approved'
+        && !digestMatches(approval.actionDigest, approval.actionType, approval.target)) {
+        db.prepare("UPDATE approvals SET status = 'rejected', resolved_by = 'system' WHERE id = ?")
+          .run(approval.id);
+        this.#deps.audit.record({
+          actorUser: plan.createdBy, eventType: 'approval.tampered', workspaceId: plan.workspaceId,
+          payload: { planId: plan.id, approvalId: approval.id, actionType: approval.actionType },
+        });
+        this.#completeStep(step.id, 'failed', { error: 'approval tampered' });
+        this.#finish(plan.id, 'failed',
+          'lo que se autorizó no es lo que había guardado: no se ejecutó nada');
         return false;
       }
       if (approval.status !== 'approved') {
@@ -915,8 +950,7 @@ export class PlanService {
       };
       // El digest cubre acción, destino, permiso y comando: cambiar cualquiera invalida el
       // permiso que se concedió.
-      const digest = createHash('sha256')
-        .update(JSON.stringify({ actionType: decision.actionType, target })).digest('hex');
+      const digest = approvalDigest(decision.actionType, target);
       db.prepare(`INSERT INTO approvals
         (id, plan_id, action_type, target_json, action_digest, summary, requested_by, requested_at, expires_at, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`)
@@ -939,8 +973,7 @@ export class PlanService {
     if (decision.kind === 'escalate') {
       const approvalId = newApprovalId();
       const target = { model: 'cloud', reason: decision.reason, planId };
-      const digest = createHash('sha256')
-        .update(JSON.stringify({ actionType: 'escalate', target })).digest('hex');
+      const digest = approvalDigest('escalate', target);
       db.prepare(`INSERT INTO approvals
         (id, plan_id, action_type, target_json, action_digest, summary, requested_by, requested_at, expires_at, status)
         VALUES (?, ?, 'escalate', ?, ?, ?, ?, ?, ?, 'pending')`)
