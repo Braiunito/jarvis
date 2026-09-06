@@ -346,6 +346,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     maxTurnMs: config.chatMaxTurnMs,
     allowHtmlArtifacts: config.allowHtmlArtifacts,
     directCapabilities: config.chatDirectCapabilities,
+    allowUnrestricted: config.chatAllowUnrestricted,
     maxTools: config.chatMaxTools,
     historyMessages: config.chatHistoryMessages,
     defaultAutonomy: config.chatDefaultAutonomy,

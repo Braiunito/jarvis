@@ -9,9 +9,9 @@
 import { createHash } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import type {
-  Approval, Plan, PlanStep, PlanStatus, Run, UserIdentity, Workspace,
+  Approval, AutonomyMode, Plan, PlanStep, PlanStatus, Run, UserIdentity, Workspace,
 } from '@jarvis/contracts';
-import { isTerminalStatus, JarvisError } from '@jarvis/contracts';
+import { AUTONOMY_MODES, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId, newPlanId, newStepId } from '../platform/ids.js';
 import type { AuditLog } from '../platform/audit.js';
@@ -32,6 +32,8 @@ interface PlanRow {
   current_step: number; created_at: string; updated_at: string; finished_at: string | null; summary: string | null;
   /** El ordinal del paso que puede pensarse en la nube, si alguien lo autorizó. Ver `#proposeNext`. */
   escalate_for_step: number | null;
+  /** Cuánta cuerda tiene el asistente en este plan. Ver la migración 15 y ADR-010. */
+  autonomy: string;
 }
 
 interface StepRow {
@@ -46,6 +48,15 @@ interface ApprovalRow {
   action_digest: string; summary: string; requested_by: string; requested_at: string; expires_at: string;
   status: string; resolved_by: string | null; resolved_at: string | null; consumed_at: string | null;
 }
+
+/**
+ * La autonomía de la fila, o `manual` si es un valor que no reconocemos.
+ *
+ * Cae hacia el modo que más pregunta, no hacia el que más deja pasar. Una columna con basura no
+ * puede ser una forma de conceder permisos.
+ */
+const autonomyOf = (value: string): AutonomyMode =>
+  ((AUTONOMY_MODES as readonly string[]).includes(value) ? value : 'manual') as AutonomyMode;
 
 const toPlan = (row: PlanRow): Plan => ({
   id: row.id,
@@ -413,6 +424,7 @@ export class PlanService {
     if (!model) return this.#finish(planId, 'failed', 'no hay modelo configurado');
 
     const plan = this.require(planId);
+    const row = db.prepare('SELECT autonomy FROM plans WHERE id = ?').get(planId) as { autonomy: string };
     const workspace = this.#deps.workspaces.require(plan.workspaceId);
     const steps = this.steps(planId);
     const context = this.#contextFor(plan, workspace, steps);
@@ -421,6 +433,14 @@ export class PlanService {
     // otro workspace ni actúa como otra persona.
     const toolbox = new CoreAssistantToolbox({
       plan, workspace, sessions, health, runs, audit, user,
+      /*
+       * La autonomía del plan, leída de su fila.
+       *
+       * Antes no se pasaba y el toolbox caía en su valor por defecto, así que **dentro de un plan
+       * no se pedía tarjeta nunca**. Ahora el tipo no admite la omisión, que es lo que convierte
+       * esa clase de olvido en un error de compilación en vez de en un permiso concedido.
+       */
+      autonomy: autonomyOf(row.autonomy),
       ...(this.#deps.mcp ? { mcp: this.#deps.mcp } : {}),
       // En un plan el MCP es de sólo lectura, y la escalada sólo se ofrece si hay nube.
       capabilityWrites: false,

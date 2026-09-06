@@ -152,7 +152,16 @@ export type AssistantDecision =
    * únicamente sabe lanzar runs, y una aprobación que no se puede cumplir es una promesa rota con
    * pasos de por medio.
    */
-  | { kind: 'capability'; title: string; capability: string; args: Record<string, unknown>; summary: string }
+  | {
+    kind: 'capability'; title: string; capability: string; args: Record<string, unknown>; summary: string;
+    /**
+     * Si el servidor declaró el efecto con una etiqueta, en vez de inferirse.
+     *
+     * Viaja en la decisión porque es lo que decide si en `unrestricted` esto se ejecuta o se
+     * pregunta: se relaja lo conocido, nunca lo desconocido (ADR-010).
+     */
+    effectsDeclared: boolean;
+  }
   /**
    * Salir al modelo de la nube.
    *

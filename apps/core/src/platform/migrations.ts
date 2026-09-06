@@ -517,4 +517,21 @@ export const MIGRATIONS: Migration[] = [
         WHERE message_id IS NOT NULL;
     `,
   },
+  {
+    version: 15,
+    name: 'plan_autonomy',
+    sql: `
+      -- Cuánta cuerda tiene el asistente dentro de un plan.
+      --
+      -- No existía, y no era un olvido de columna: la autonomía se había pensado como algo de la
+      -- conversación —«la elige quien escribe»— y un plan no tiene a nadie escribiendo en cada
+      -- turno. Al no pasarla, el toolbox caía en su valor por defecto y **dentro de un plan no se
+      -- pedía tarjeta nunca**, ni para lanzar trabajo con perfil de escritura.
+      --
+      -- Por defecto \`manual\`, que es lo que la casa ya usa para las conversaciones, y no el
+      -- valor con el que se estaba comportando: los planes existentes pasan a preguntar, no al
+      -- revés. Un cambio de conducta hacia pedir permiso no necesita justificarse; el contrario sí.
+      ALTER TABLE plans ADD COLUMN autonomy TEXT NOT NULL DEFAULT 'manual';
+    `,
+  },
 ];

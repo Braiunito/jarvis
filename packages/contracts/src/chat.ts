@@ -20,15 +20,21 @@ import { HostName, Iso8601, Provider } from './common.js';
  * misma casa quiere un asistente suelto para diagnosticar y otro atado para tocar producción, y
  * quien sabe cuál toca es quien está escribiendo.
  *
- * `manual` — todo lo que tenga efectos se pregunta, incluido lanzar un trabajo en perfil seguro.
- * `auto`   — el trabajo en perfil seguro y las lecturas van solos. Siguen preguntando, siempre:
- *            escribir en una máquina, los perfiles `auto` y `yolo`, parar trabajo que lanzó una
- *            persona, y salir a la nube.
+ * `manual`       — todo lo que tenga efectos se pregunta, incluido lanzar un trabajo en perfil seguro.
+ * `auto`         — el perfil seguro y las lecturas van solos. Escribir en una máquina sigue
+ *                  pidiendo tarjeta, y las capacidades con efectos también.
+ * `unrestricted` — además va solo el trabajo en perfil de escritura y la capacidad **etiquetada**
+ *                  con efectos. Se relaja lo conocido, nunca lo desconocido: una capacidad sin
+ *                  etiquetar, cuyo efecto se infiere, sigue pidiendo tarjeta.
  *
- * Que `auto` sea más laxo no lo hace ilimitado: las excepciones de arriba no se pueden apagar
- * desde la interfaz, porque son las que separan «que trabaje solo» de «que decida solo».
+ * Lo que no abre ningún modo, y no se puede apagar desde la interfaz: el perfil `yolo`, salir a la
+ * nube, parar trabajo que lanzó una persona, y las que nunca se ejecutan (apagar o reiniciar el
+ * bastión, instalar paquetes). Son las que separan «que trabaje solo» de «que decida solo».
+ *
+ * `unrestricted` además exige `JARVIS_ALLOW_UNRESTRICTED` en el servidor: una decisión que amplía
+ * lo que una máquina hace sola no puede vivir sólo detrás de un botón de la pantalla. Ver ADR-010.
  */
-export const AUTONOMY_MODES = ['manual', 'auto'] as const;
+export const AUTONOMY_MODES = ['manual', 'auto', 'unrestricted'] as const;
 export type AutonomyMode = (typeof AUTONOMY_MODES)[number];
 export const AutonomyModeSchema = Type.Union(AUTONOMY_MODES.map((mode) => Type.Literal(mode)));
 
@@ -193,5 +199,12 @@ export const ChatCapabilities = Type.Object({
   capabilityMode: Type.Union([Type.Literal('direct'), Type.Literal('router')]),
   /** Cuántas capacidades más caben antes de caer al router. */
   capabilityRoom: Type.Integer({ minimum: 0 }),
+  /**
+   * Qué modos de autonomía puede ofrecer la interfaz.
+   *
+   * No es la lista entera de `AUTONOMY_MODES`: `unrestricted` sólo aparece si el servidor lo
+   * permite. La pantalla no debe ofrecer un modo que la ruta va a rechazar.
+   */
+  autonomyModes: Type.Array(AutonomyModeSchema),
 });
 export type ChatCapabilities = Static<typeof ChatCapabilities>;

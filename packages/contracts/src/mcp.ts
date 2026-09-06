@@ -49,6 +49,18 @@ export const McpCapability = Type.Object({
    * a un servidor sobre si escribe es fiarse justo de quien tiene el efecto.
    */
   writes: Type.Boolean(),
+  /**
+   * Si `writes` sale de una etiqueta del servidor o de inferirlo.
+   *
+   * Importa para una sola cosa, y es la que justifica el campo: el modo de autonomía más suelto
+   * ejecuta sin tarjeta lo que el servidor **declaró** con efectos, y sigue pidiéndola para lo que
+   * nadie etiquetó. Se relaja lo conocido, nunca lo desconocido (ADR-010).
+   *
+   * Con el catálogo de esta casa siempre es `true` —las 112 herramientas de Zeus están
+   * etiquetadas— así que la protección que sostiene es **latente**: existe para el día que se
+   * enchufe un servidor que no etiquete, que es el día en que nadie estará mirando.
+   */
+  effectsDeclared: Type.Boolean(),
   /** El esquema de entrada tal como lo publica el servidor. Sólo se pide cuando hace falta. */
   inputSchema: Type.Optional(Type.Unknown()),
 });

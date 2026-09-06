@@ -287,6 +287,15 @@ export const config = {
    * router entero —nunca recortado: un catálogo al que le faltan cosas sin decirlo engaña—.
    */
   chatDirectCapabilities: bool(env['JARVIS_CHAT_DIRECT_CAPABILITIES'], true),
+  /**
+   * Si esta casa admite el modo de autonomía «sin restricciones».
+   *
+   * Apagado por defecto y **fuera de la interfaz** a propósito: es una decisión que amplía lo que
+   * la máquina hace sola, y una decisión así no puede vivir sólo detrás de un botón de la pantalla.
+   * Apagarlo con conversaciones ya puestas en ese modo no las rompe: degradan a `auto` al leerse
+   * (ADR-010).
+   */
+  chatAllowUnrestricted: bool(env['JARVIS_ALLOW_UNRESTRICTED'], false),
   /** Tope de funciones por petición. La API de OpenAI rechaza con 400 por encima de 128. */
   chatMaxTools: Number(env['JARVIS_CHAT_MAX_TOOLS'] || 128),
   chatHistoryMessages: Number(env['JARVIS_CHAT_HISTORY_MESSAGES'] || 12),

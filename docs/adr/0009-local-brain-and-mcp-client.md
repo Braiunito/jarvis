@@ -73,6 +73,18 @@ Fecha: 2026-09-04 · Estado: aceptado, **con dos enmiendas del 2026-09-05** · A
 > función y el modo se sirve en `/api/chat` (`capabilityMode`, `capabilityRoom`), porque una
 > degradación que sólo se nota en la latencia no se nota.
 
+> ## Enmienda · 2026-09-05 · la autonomía se sale a su propio ADR
+>
+> El §5 de este documento —«la autonomía la elige quien escribe»— resultó estar incompleto en dos
+> sitios, y los dos se arreglan en [ADR-010](0010-autonomy-ladder-and-effects-outside-jarvis.md):
+> el contrato prometía que `auto` seguía pidiendo tarjeta para escribir en una máquina y el código
+> sólo la pedía en `manual`; y el motor de planes no pasaba la autonomía, así que dentro de un plan
+> no se pedía nunca. Aparece además un tercer peldaño, `unrestricted`, con su lista de lo que no
+> abre.
+>
+> Lo que se lleva ADR-010 y aquí no estaba dicho es el **criterio**: la frontera no es leer contra
+> escribir, es si el gesto tiene efecto **fuera de Jarvis**.
+
 ## Contexto
 
 El Assistant pensaba en una API de pago. Funcionaba, y cada turno costaba dinero: coordinar, poner

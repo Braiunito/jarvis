@@ -24,7 +24,7 @@ import type {
   ModelSource,
   UserIdentity,
 } from '@jarvis/contracts';
-import { isTerminalStatus, JarvisError } from '@jarvis/contracts';
+import { AUTONOMY_MODES, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId } from '../platform/ids.js';
 import type { AuditLog } from '../platform/audit.js';
@@ -87,6 +87,8 @@ export interface ChatServiceDeps {
    * cabía en el contexto— y de ahí viene el router, que sigue ahí para cuando no quepa.
    */
   directCapabilities?: boolean;
+  /** Si esta casa admite `unrestricted`. Ver `chatAllowUnrestricted` y ADR-010. */
+  allowUnrestricted?: boolean;
   maxTools?: number;
   toolLimits?: Partial<ToolboxLimits>;
 }
@@ -176,12 +178,30 @@ export class ChatService {
       cloudAvailable: Boolean(model?.cloudId),
       cloudModel: model?.cloudId ?? null,
       capabilityCount: count,
-      capabilityMode: this.#deps.directCapabilities && count > 0 && count <= room ? 'direct' : 'router',
+      /*
+       * Sin catálogo no hay repliegue, así que no se avisa de uno.
+       *
+       * Llevaba `count > 0` en la condición y con cero capacidades contestaba `router`: la pantalla
+       * avisaba de que el modo directo estaba apagado teniendo el cupo entero libre. Un aviso que
+       * salta donde no hay nada que avisar enseña a ignorarlo, y éste es el que avisa de una
+       * degradación que sólo se nota en la latencia.
+       *
+       * Lo que el campo dice es si el catálogo **tuvo que replegarse**. Con el catálogo vacío no
+       * tuvo que hacerlo, y `0 <= room` es verdad sin necesidad de tratarlo aparte.
+       */
+      capabilityMode: this.#deps.directCapabilities && count <= room ? 'direct' : 'router',
       // Lo que **queda**, no el cupo. El campo se llama «room» y la pantalla avisa cuando baja de
       // tres: sirviendo el cupo entero, el aviso no saltaba nunca y el repliegue seguía siendo
       // silencioso, que es justo lo que este campo venía a arreglar.
       capabilityRoom: Math.max(0, room - count),
+      // La pantalla no debe ofrecer un modo que la ruta va a rechazar.
+      autonomyModes: this.autonomyModes(),
     };
+  }
+
+  /** Los modos que esta casa admite. La pantalla no ofrece lo que la ruta va a rechazar. */
+  autonomyModes(): AutonomyMode[] {
+    return this.#deps.allowUnrestricted ? [...AUTONOMY_MODES] : ['manual', 'auto'];
   }
 
   list(options: { limit?: number; workspaceId?: string } = {}): Conversation[] {
@@ -428,6 +448,18 @@ export class ChatService {
     }
 
     if (decision.kind === 'capability') {
+      /*
+       * En `unrestricted`, lo declarado va solo; lo inferido sigue preguntando.
+       *
+       * Se ejecuta por el **mismo sitio** que una capacidad aprobada, no por uno nuevo: hay un
+       * único punto en todo el core que llama al MCP con `allowWrites`, y duplicarlo sería tener
+       * dos sitios auditables que pueden separarse. Lo que cambia es quién firma, no por dónde pasa.
+       */
+      if (this.#autonomyOf(conversation) === 'unrestricted' && decision.effectsDeclared) {
+        this.#repository.append(id, { role: 'assistant', text: decision.summary, source, modelId, refs });
+        await this.#runCapability(id, decision.capability, decision.args, user);
+        return;
+      }
       const approval = this.#createApproval(conversation, {
         actionType: 'capability',
         // Lo que se aprueba son el nombre y los argumentos exactos: van dentro del digest, así que
@@ -602,32 +634,12 @@ export class ChatService {
     }
 
     if (approval.actionType === 'capability') {
-      const name = String(target['capability'] ?? '');
-      const args = (target['args'] ?? {}) as Record<string, unknown>;
-      const conversation = this.#repository.find(conversationId);
-      try {
-        const result = await this.#deps.mcp?.call(name, args, {
-          actor: user.username,
-          // Sólo aquí, y sólo porque hay una tarjeta firmada detrás.
-          allowWrites: true,
-          ...(conversation?.workspaceId ? { workspaceId: conversation.workspaceId } : {}),
-        });
-        this.#repository.append(conversationId, {
-          role: 'tool',
-          text: clipText(JSON.stringify(result?.content ?? null), TOOL_ECHO_CHARS),
-          toolName: name, toolInput: args, toolOk: result?.ok ?? false,
-        });
-      } catch (error) {
-        this.#repository.append(conversationId, {
-          role: 'tool', text: `falló: ${(error as Error).message}`,
-          toolName: name, toolInput: args, toolOk: false,
-        });
-      }
-      this.#repository.setStatus(conversationId, 'idle');
-      this.bus.notify(conversationId);
-      // Se le devuelve el turno para que interprete lo que salió: ejecutar sin contar qué pasó
-      // deja a la persona leyendo un volcado.
-      void this.#kick(conversationId, user);
+      await this.#runCapability(
+        conversationId,
+        String(target['capability'] ?? ''),
+        (target['args'] ?? {}) as Record<string, unknown>,
+        user,
+      );
       return;
     }
 
@@ -792,7 +804,7 @@ export class ChatService {
       // La conversación sí sabe ejecutar una capacidad con efectos tras aprobarla.
       capabilityWrites: true,
       artifacts: { repository: this.#artifacts, conversationId: conversation.id },
-      autonomy: conversation.autonomy,
+      autonomy: this.#autonomyOf(conversation),
       canEscalate: this.#deps.model?.canEscalate === true,
       maxObservations: this.#maxToolCalls,
       // Lo que de verdad acota la espera de quien está mirando la pantalla.
@@ -852,6 +864,57 @@ export class ChatService {
     return [...byId.values()]
       .map((session) => ({ ...session, workspaceId: workspaceOf.get(session.sessionId) ?? null }))
       .slice(-6);
+  }
+
+  /**
+   * Ejecutar una capacidad con efectos. **El único sitio del core que lo hace.**
+   *
+   * Llegan aquí dos caminos —una tarjeta que alguien firmó, y el modo `unrestricted` sobre una
+   * capacidad que el servidor declaró con efectos— y comparten esta función a propósito: lo que
+   * cambia entre los dos es **quién autoriza**, no qué se ejecuta ni qué queda escrito. Dos
+   * implementaciones acabarían separándose, y la que se separa siempre es la que nadie mira.
+   */
+  async #runCapability(
+    conversationId: string,
+    name: string,
+    args: Record<string, unknown>,
+    user: UserIdentity,
+  ): Promise<void> {
+    const conversation = this.#repository.find(conversationId);
+    try {
+      const result = await this.#deps.mcp?.call(name, args, {
+        actor: user.username,
+        allowWrites: true,
+        ...(conversation?.workspaceId ? { workspaceId: conversation.workspaceId } : {}),
+      });
+      this.#repository.append(conversationId, {
+        role: 'tool',
+        text: clipText(JSON.stringify(result?.content ?? null), TOOL_ECHO_CHARS),
+        toolName: name, toolInput: args, toolOk: result?.ok ?? false,
+      });
+    } catch (error) {
+      this.#repository.append(conversationId, {
+        role: 'tool', text: `falló: ${(error as Error).message}`,
+        toolName: name, toolInput: args, toolOk: false,
+      });
+    }
+    this.#repository.setStatus(conversationId, 'idle');
+    this.bus.notify(conversationId);
+    // Se le devuelve el turno para que interprete lo que salió: ejecutar sin contar qué pasó deja
+    // a la persona leyendo un volcado.
+    void this.#kick(conversationId, user);
+  }
+
+  /**
+   * El modo que de verdad rige, que no siempre es el que dice la fila.
+   *
+   * `unrestricted` exige que la casa lo permita. Si el flag se apaga con conversaciones ya puestas
+   * en ese modo, **degradan a `auto`** al leerse en vez de romperse: apagar el permiso tiene que
+   * poder hacerse sin ir a repasar la base, y hacia el lado que pregunta más (ADR-010).
+   */
+  #autonomyOf(conversation: Conversation): AutonomyMode {
+    if (conversation.autonomy === 'unrestricted' && !this.#deps.allowUnrestricted) return 'auto';
+    return conversation.autonomy;
   }
 
   /**

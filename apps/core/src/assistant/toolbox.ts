@@ -192,7 +192,16 @@ export interface CoreToolboxDeps {
    * Cuánta cuerda hay sin preguntar. En `manual`, `create_run` deja de ser una acción y pasa a ser
    * una petición de permiso: el modelo propone lo mismo, pero lo ejecuta una persona.
    */
-  autonomy?: AutonomyMode;
+  /**
+   * Cuánta cuerda tiene sin preguntar. **Obligatorio, y sin valor por defecto a propósito.**
+   *
+   * Tenía `?? 'auto'` y el motor de planes no lo pasaba, así que dentro de un plan la rama de
+   * aprobación no se tomaba nunca: se lanzaba trabajo con perfil de escritura sin que nadie
+   * firmara. No fue elegir mal el default —fue que **no había que elegir**, y una omisión se
+   * decide sola y mal. Sin default, el compilador obliga a cada punto de construcción a declarar
+   * postura (ADR-010).
+   */
+  autonomy: AutonomyMode;
   /** Si hay a dónde escalar. Sin modelo de nube, no se ofrece una salida que no existe. */
   canEscalate?: boolean;
   /**
@@ -1868,7 +1877,16 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     const title = clip(asString(input['title']) ?? 'paso', 120).text;
     const rationale = clip(asString(input['rationale']), 300).text;
 
-    if ((this.#deps.autonomy ?? 'auto') === 'manual') {
+    /*
+     * La escalera (ADR-010).
+     *
+     * `manual` pregunta todo. `auto` deja ir el perfil seguro y **sigue pidiendo tarjeta para
+     * escribir**, que es lo que el contrato prometía desde el principio y el código no cumplía.
+     * `unrestricted` los deja ir los dos; `yolo` no entra por aquí en ningún modo, se corta arriba.
+     */
+    const preguntar = this.#deps.autonomy === 'manual'
+      || (this.#deps.autonomy === 'auto' && profile !== 'safe');
+    if (preguntar) {
       return {
         type: 'decision',
         decision: {
@@ -1930,6 +1948,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         capability: capability.name,
         args,
         summary: clip(summary, 600).text,
+        effectsDeclared: capability.effectsDeclared,
       },
     };
   }

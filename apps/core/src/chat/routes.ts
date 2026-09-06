@@ -7,9 +7,24 @@
  * puede perder lo que ya estaba escrito.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { JarvisError } from '@jarvis/contracts';
+import { JarvisError, type AutonomyMode } from '@jarvis/contracts';
 import { identityOf } from '../app.js';
 import type { CoreServices } from '../services.js';
+
+/**
+ * Que el modo exista y que esta casa lo permita.
+ *
+ * Las dos cosas en el mismo sitio porque para quien llama son el mismo error —el modo que pide no
+ * lo va a tener— y porque separarlas invita a comprobar una y olvidar la otra. `unrestricted`
+ * necesita `JARVIS_ALLOW_UNRESTRICTED`: una decisión que amplía lo que la máquina hace sola no
+ * puede concederse desde el cliente (ADR-010).
+ */
+function assertAutonomy(value: unknown, services: CoreServices): asserts value is AutonomyMode {
+  const allowed = services.chat.autonomyModes();
+  if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) {
+    throw new JarvisError('BAD_REQUEST', `autonomy debe ser ${allowed.join(' o ')}`);
+  }
+}
 
 /** El mismo latido que el de los runs. Si cambia uno, hay que mirar el proxy (ver architecture). */
 const KEEPALIVE_MS = 15_000;
@@ -19,9 +34,7 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
     const body = (request.body ?? {}) as {
       title?: string; workspaceId?: string; autonomy?: 'manual' | 'auto'; message?: string;
     };
-    if (body.autonomy && body.autonomy !== 'manual' && body.autonomy !== 'auto') {
-      throw new JarvisError('BAD_REQUEST', 'autonomy debe ser manual o auto');
-    }
+    if (body.autonomy) assertAutonomy(body.autonomy, services);
     const conversation = services.chat.create({
       ...(body.title ? { title: body.title } : {}),
       ...(body.workspaceId ? { workspaceId: body.workspaceId } : {}),
@@ -70,10 +83,8 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
 
   app.post('/api/chat/:id/autonomy', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = (request.body ?? {}) as { autonomy?: 'manual' | 'auto' };
-    if (body.autonomy !== 'manual' && body.autonomy !== 'auto') {
-      throw new JarvisError('BAD_REQUEST', 'autonomy debe ser manual o auto');
-    }
+    const body = (request.body ?? {}) as { autonomy?: string };
+    assertAutonomy(body.autonomy, services);
     return reply.send({ conversation: services.chat.setAutonomy(id, body.autonomy, identityOf(request)) });
   });
 

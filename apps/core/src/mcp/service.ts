@@ -514,6 +514,7 @@ export class McpService {
       area: areaOf(tool),
       summary: summarize(tool),
       writes: effectsOf(tool, runtime.config),
+      effectsDeclared: effectsDeclaredBy(tool),
       ...(schema ? { inputSchema: tool.inputSchema } : {}),
     };
   }
@@ -553,6 +554,18 @@ function areaOf(tool: McpToolDescriptor): McpArea {
  * incómodo y correcto; al revés —dar por seguro lo que no se sabe— es como se ejecuta un
  * `poweroff` creyendo que se estaba leyendo un log.
  */
+/**
+ * Si el servidor dijo lo que hace la herramienta, en vez de dejar que se infiera.
+ *
+ * Es la mitad que `effectsOf` no puede devolver sin mentir: `writes: true` significa dos cosas muy
+ * distintas —«el servidor la etiquetó `write`» y «nadie la etiquetó y estamos siendo prudentes»— y
+ * hay una decisión, la del modo de autonomía más suelto, que depende de cuál de las dos es.
+ */
+function effectsDeclaredBy(tool: McpToolDescriptor): boolean {
+  const tags = tool.tags.map((tag) => tag.toLowerCase());
+  return tags.some((tag) => EFFECT_TAGS.has(tag) || READ_TAGS.has(tag));
+}
+
 function effectsOf(tool: McpToolDescriptor, config: McpServerConfig): boolean {
   const tags = tool.tags.map((tag) => tag.toLowerCase());
   if (tags.some((tag) => EFFECT_TAGS.has(tag))) return true;
