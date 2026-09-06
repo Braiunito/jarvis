@@ -115,6 +115,15 @@ export class ChatService {
   readonly #deps: ChatServiceDeps;
   readonly #repository: ChatRepository;
   readonly #artifacts: ArtifactRepository;
+
+  /**
+   * Con cuánto esfuerzo está pensando cada hilo ahora mismo.
+   *
+   * Vive en memoria y no en la base a propósito: es un dato **del turno en curso**, y cuando el
+   * turno acaba deja de significar nada. Lo que sí merece quedar escrito es qué esfuerzo costó
+   * cada respuesta, y ése es otro dato y va en otro sitio.
+   */
+  readonly #effort = new Map<string, string>();
   readonly #allowHtmlArtifacts: boolean;
   readonly #maxToolCalls: number;
   readonly #historyMessages: number;
@@ -460,6 +469,9 @@ export class ChatService {
     this.#turns.set(id, next);
     const release = (): void => {
       if (this.#turns.get(id) === next) this.#turns.delete(id);
+      // El esfuerzo era del turno: cuando acaba, deja de haber uno. Se limpia aquí, que es el
+      // único sitio donde se sabe que no queda nada encadenado detrás.
+      this.#effort.delete(id);
       // El turno acabó —bien o mal—, así que lo que se pidió ya no está pendiente. Se cierra aquí
       // y no dentro de `#turn` porque aquí es donde se sabe que no queda nada encadenado detrás.
       const alive = this.#deps.jobs?.alive('conversation', id, CHAT_TURN_JOB);
@@ -685,6 +697,11 @@ export class ChatService {
   }
 
   // ---- artifacts ---------------------------------------------------------
+
+  /** Con cuánto esfuerzo piensa este hilo ahora. Nulo si no está pensando o si no lo decide él. */
+  effortOf(conversationId: string): string | null {
+    return this.#effort.get(conversationId) ?? null;
+  }
 
   /** Si esta casa sirve documentos que ejecutan JavaScript. Lo decide el operador, no el modelo. */
   get htmlArtifactsAllowed(): boolean { return this.#allowHtmlArtifacts; }
@@ -960,7 +977,8 @@ export class ChatService {
       maxTurnMs: this.#maxTurnMs,
       now: () => this.#deps.clock.nowMs(),
     });
-    return new RecordingToolbox(inner, this.#repository, this.bus, conversation.id);
+    return new RecordingToolbox(inner, this.#repository, this.bus, conversation.id,
+      (effort) => this.#effort.set(conversation.id, effort));
   }
 
   /**
@@ -1172,11 +1190,17 @@ class RecordingToolbox implements AssistantToolbox {
   readonly #bus: ChatEventBus;
   readonly #conversationId: string;
 
-  constructor(inner: AssistantToolbox, repository: ChatRepository, bus: ChatEventBus, conversationId: string) {
+  readonly #onEffort: (effort: string) => void;
+
+  constructor(
+    inner: AssistantToolbox, repository: ChatRepository, bus: ChatEventBus, conversationId: string,
+    onEffort: (effort: string) => void,
+  ) {
     this.#inner = inner;
     this.#repository = repository;
     this.#bus = bus;
     this.#conversationId = conversationId;
+    this.#onEffort = onEffort;
   }
 
   get terminalOffer(): AssistantToolbox['terminalOffer'] { return this.#inner.terminalOffer; }
@@ -1184,6 +1208,13 @@ class RecordingToolbox implements AssistantToolbox {
   get repeats(): number { return this.#inner.repeats; }
   get observations(): number { return this.#inner.observations; }
   get spent(): boolean { return this.#inner.spent; }
+
+  noteEffort(effort: string): void {
+    this.#onEffort(effort);
+    // Se despierta el stream: el nivel se enseña **mientras** piensa, así que llegar tarde es
+    // llegar cuando ya no sirve.
+    this.#bus.notify(this.#conversationId);
+  }
 
   definitions(options?: { decisionsOnly?: boolean }): ToolDefinition[] {
     return this.#inner.definitions(options);

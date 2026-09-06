@@ -243,6 +243,14 @@ function streamChat(request: FastifyRequest, reply: FastifyReply, services: Core
     if (current) {
       write(`event: chat.state\ndata: ${JSON.stringify({
         status: current.status, source: current.source, autonomy: current.autonomy, title: current.title,
+        /*
+         * Con cuánto esfuerzo está pensando ahora mismo, si lo decide él.
+         *
+         * Nulo cuando no está pensando y cuando el esfuerzo es fijo: un indicador que siempre dice
+         * lo mismo no informa, y lo que interesa ver es **el salto** cuando la pasada previa decide
+         * que esta pregunta pide más.
+         */
+        effort: services.chat.effortOf(id),
       })}\n\n`);
     }
   };

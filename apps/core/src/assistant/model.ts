@@ -692,6 +692,9 @@ export class OpenAiCompatibleModel implements AssistantModel {
      * decir «éste costó». Una decisión por turno es la que se puede auditar.
      */
     this.#turnEffort = this.#reasoningEffort === AUTO_EFFORT ? await this.#judgeEffort(context) : null;
+    // Se dice en cuanto se sabe, no al terminar: lo que se quiere ver arriba es el nivel con el
+    // que está pensando ahora, y al terminar ya no está pensando.
+    if (this.#turnEffort) toolbox.noteEffort?.(this.#turnEffort);
 
     const messages: OpenAiMessage[] = [
       { role: 'system', content: this.#systemPrompt },

@@ -241,6 +241,15 @@ export interface AssistantToolbox {
    * algo que el core ya sabía.
    */
   readonly spent: boolean;
+  /**
+   * Con cuánto esfuerzo se va a pensar este turno, cuando el modelo lo decide solo.
+   *
+   * Va por el toolbox y no por una devolución del modelo porque **el toolbox es el objeto del
+   * turno**: se construye uno por turno y sabe de qué conversación habla. Un callback global no
+   * podría atribuirlo cuando dos hilos piensan a la vez, y ésa es justo la carrera que aquí no
+   * queremos volver a tener.
+   */
+  noteEffort?(effort: string): void;
 }
 
 export interface AssistantModel {
