@@ -119,7 +119,7 @@ export function ExplorerScreen(): JSX.Element {
     <div className="page">
       {/* Filtros: lo que reduce la lista, en una sola línea y siempre a la vista. */}
       <Card>
-        <div className="row" style={{ gap: 10 }}>
+        <div className="row filters-row" style={{ gap: 10 }}>
           <span className="row tight faint" style={{ flex: '0 0 auto' }}>
             <Glyph icon={ACTION_ICON.filters} size={16} />
           </span>

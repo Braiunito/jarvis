@@ -480,6 +480,18 @@ a:hover { text-decoration: underline; }
 }
 @media (max-width: 760px) {
   .grid.cols-3, .grid.cols-2, .grid.cols-4 { grid-template-columns: minmax(0, 1fr); }
+
+  /*
+   * Las cifras se quedan en dos columnas, aunque el resto se apile.
+   *
+   * Una cifra es un número grande y tres palabras: cabe de sobra en media pantalla de teléfono.
+   * Apiladas de una en una, las tres tarjetas de arriba del explorador ocupaban unos 270 px y
+   * empujaban la primera sesión fuera de la vista, en la pantalla cuyo trabajo es enseñar
+   * sesiones. Se distinguen por lo que llevan dentro y no por una clase nueva, para que valga
+   * igual en las cuatro pantallas que las usan sin tener que acordarse de ponerla.
+   */
+  .grid.cols-3:has(> .card > .stat),
+  .grid.cols-4:has(> .card > .stat) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .card {
@@ -1625,6 +1637,15 @@ a:hover { text-decoration: underline; }
  * que se acierta sin mirar.
  */
 @media (pointer: coarse) {
+  /*
+   * El atajo de teclado no se anuncia donde no hay teclado.
+   *
+   * «Ctrl K» en un teléfono es una pista de algo que no se puede hacer, ocupando sitio en la
+   * franja que está encima de todas las pantallas. El buscador sigue estando y sigue abriendo la
+   * paleta al tocarlo; lo que se va es la promesa de una tecla que no existe.
+   */
+  .kbd { display: none; }
+
   .btn, .btn.small, .btn.icon { min-height: var(--touch); }
   .btn.icon { width: var(--touch); }
   .input, .select, .textarea { min-height: var(--touch); }
@@ -1696,6 +1717,17 @@ a:hover { text-decoration: underline; }
 
 @media (max-width: 560px) {
   .topbar-user { display: none; }
+
+  /*
+   * Los filtros comparten fila en vez de gastar una cada uno.
+   *
+   * Un desplegable con su palabra delante cabe en media pantalla de teléfono; puestos de uno en
+   * uno, los tres del explorador ocupaban unos 165 px y, sumados a las cifras, dejaban la primera
+   * sesión por debajo del pliegue. Los desplegables pierden su ancho fijo y se reparten lo que
+   * hay, que es lo que un `select` sabe hacer sin que se le note.
+   */
+  .filters-row > label { flex: 1 1 44%; min-width: 0; }
+  .filters-row .select { flex: 1 1 auto; width: auto; min-width: 0; }
 
   /*
    * El texto de los chips se esconde de la vista, no del lector de pantalla.
