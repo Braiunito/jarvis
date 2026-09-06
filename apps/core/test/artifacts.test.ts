@@ -19,7 +19,8 @@ import type {
   AssistantToolbox, PlanContext, ToolDefinition, ToolOutcome,
 } from '../src/assistant/types.js';
 import {
-  OpenAiCompatibleModel, REASONING_EFFORTS, type FetchLike, type ModelTurnUsage,
+  OpenAiCompatibleModel, REASONING_EFFORTS, ScriptedModel,
+  type FetchLike, type ModelTurnUsage,
 } from '../src/assistant/model.js';
 
 const user = { userId: 'u1', username: 'braian' };
@@ -450,7 +451,8 @@ describe('ESFUERZO · lo decide una pasada previa y queda anotado', () => {
     await model.decide(contexto, new ContadorToolbox());
 
     expect(enviados[0]?.['tools']).toBeUndefined();
-    expect(enviados[0]?.['reasoning_effort']).toBe('low');
+    // `minimal` y no `low`: medido contra la API, clasifica mejor y gasta cero razonamiento.
+    expect(enviados[0]?.['reasoning_effort']).toBe('minimal');
   });
 
   it('y el turno de verdad se pide con lo que ella dijo', async () => {
@@ -471,5 +473,40 @@ describe('ESFUERZO · lo decide una pasada previa y queda anotado', () => {
 
     expect(decision.kind).toBe('finish');
     expect(enviados[1]?.['reasoning_effort']).toBe('medium');
+  });
+});
+
+/**
+ * El guionizado dice el esfuerzo para que el stack de desarrollo pueda enseñarlo.
+ *
+ * Sin esto se levanta el producto entero y el indicador de la cabecera no se ve nunca: el mismo
+ * agujero que tenía `present` antes de que el guion supiera presentar.
+ */
+describe('ESFUERZO · el stack de desarrollo también puede enseñarlo', () => {
+  const conNota = () => {
+    const notas: string[] = [];
+    const caja = new ContadorToolbox() as ContadorToolbox & { noteEffort(e: string): void };
+    caja.noteEffort = (effort: string): void => { notas.push(effort); };
+    return { caja, notas };
+  };
+
+  it('sale de lo que se pide, así que cambia entre una pregunta y otra', async () => {
+    const corto = conNota();
+    await new ScriptedModel().decide({ ...contexto, objective: 'hola' }, corto.caja);
+    const largo = conNota();
+    await new ScriptedModel().decide({
+      ...contexto,
+      objective: 'compara el disco y la memoria de todas las máquinas de la flota y dime cuál está peor y por qué',
+    }, largo.caja);
+
+    expect(corto.notas).toEqual(['minimal']);
+    expect(largo.notas).toEqual(['high']);
+  });
+
+  it('y se puede forzar uno concreto para ver la pantalla en cada estado', async () => {
+    const { caja, notas } = conNota();
+    await new ScriptedModel().decide({ ...contexto, objective: 'lo que sea @@effort:medium' }, caja);
+
+    expect(notas).toEqual(['medium']);
   });
 });

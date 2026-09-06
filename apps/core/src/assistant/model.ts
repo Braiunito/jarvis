@@ -109,17 +109,30 @@ const OUT_OF_BUDGET = 'Me quedé sin margen para seguir mirando en este turno. L
  * pregunta sino cuántos pasos hay entre ella y la respuesta.
  */
 const EFFORT_JUDGE_PROMPT = `Decides cuánto tiene que pensar un asistente antes de contestar.
-Responde SÓLO con una palabra: low, medium o high.
+Responde SÓLO con una palabra: minimal, low, medium o high.
 
-low    — saludos, charla, dar las gracias; algo que ya está dicho en la conversación; pedir un
-         formato o un resumen de lo que ya se sabe; una única consulta obvia y directa.
-medium — hay que mirar dos o tres cosas y juntarlas; elegir entre opciones acotadas; explicar algo
-         que se sabe pero hay que ordenar.
-high   — hay que planear varios pasos; diagnosticar algo cuya causa no se ve directa; comparar
-         varias máquinas o sesiones; decidir algo que va a tener efectos sobre una máquina.
+minimal — saludos, charla, dar las gracias, despedidas. No hay nada que averiguar.
+low     — algo que ya está dicho en la conversación; pedir un formato o un resumen de lo que ya se
+          sabe; una única consulta obvia y directa.
+medium  — hay que mirar dos o tres cosas y juntarlas; elegir entre opciones acotadas; explicar algo
+          que se sabe pero hay que ordenar.
+high    — hay que planear varios pasos; diagnosticar algo cuya causa no se ve directa; comparar
+          varias máquinas o sesiones; decidir algo que va a tener efectos sobre una máquina.
 
 Guíate por cuántos pasos hay entre la pregunta y la respuesta, no por lo largo que suene el tema.
 Ante la duda, medium.`;
+
+/**
+ * Con cuánto esfuerzo se juzga el esfuerzo.
+ *
+ * `minimal` y no `low`, y esto está **medido contra la API de producción**: con las mismas siete
+ * preguntas y tres rondas, `minimal` acertó 6/7, 6/7 y 6/7, y `low` 5/7, 4/7 y 3/7. Es
+ * contraintuitivo hasta que se mira qué es esta tarea: clasificar contra una lista corta es un
+ * reconocimiento, no un razonamiento, y dejarle deliberar un poco le da margen para dudar de una
+ * respuesta que ya tenía. Además gasta **cero tokens de razonamiento**, que es lo que mantiene
+ * barata la pasada previa.
+ */
+const JUDGE_EFFORT = 'minimal';
 
 export class ScriptedModel implements AssistantModel {
   readonly id = 'scripted';
@@ -130,6 +143,21 @@ export class ScriptedModel implements AssistantModel {
   }
 
   async decide(context: PlanContext, toolbox?: AssistantToolbox): Promise<AssistantDecision> {
+    /*
+     * El guionizado también dice con cuánto esfuerzo piensa.
+     *
+     * No por realismo: porque si no, el stack de desarrollo levanta el producto entero y **el
+     * indicador de esfuerzo no se puede ver nunca**, que es el mismo agujero que tenía `present`
+     * antes de `@@artifact`. Con `@@effort:high` se fuerza uno concreto; sin directiva sale de lo
+     * larga que sea la petición, que basta para verlo cambiar entre una pregunta y otra.
+     */
+    const pedido = /@@effort:(minimal|low|medium|high)/.exec(context.objective)?.[1] as ReasoningEffort | undefined;
+    const largo = context.objective.length;
+    // Los cortes son arbitrarios y sólo existen para que el indicador cambie entre un saludo y
+    // una pregunta de verdad. Aquí no se decide nada del producto: eso lo hace el juez real.
+    toolbox?.noteEffort?.(pedido
+      ?? (largo < 15 ? 'minimal' : largo < 40 ? 'low' : largo < 90 ? 'medium' : 'high'));
+
     const done = context.history.filter((step) => step.status === 'completed');
     const runs = done.filter((step) => step.kind === 'run');
     // Se mira todo el historial, no sólo lo completado: pedir permiso dos veces por lo mismo es
@@ -261,7 +289,7 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
  * elegir. El fallo más probable de esto no es que se rompa, es que conteste siempre lo mismo — y
  * eso, sin el dato de cada turno, se ve idéntico a que funcione.
  */
-export const REASONING_EFFORTS = ['low', 'medium', 'high'] as const;
+export const REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 export const AUTO_EFFORT = 'auto';
 
@@ -864,9 +892,10 @@ export class OpenAiCompatibleModel implements AssistantModel {
               { role: 'system', content: EFFORT_JUDGE_PROMPT },
               { role: 'user', content: context.objective.slice(0, 1000) },
             ],
-            reasoning_effort: 'low',
-            // Sitio para una palabra y para lo que piense antes de decirla. Con menos, en un modelo
-            // que razona la respuesta llega vacía y el juez decide siempre lo mismo por accidente.
+            reasoning_effort: JUDGE_EFFORT,
+            // Sitio para una palabra. Con `minimal` no piensa nada antes de decirla, pero el hueco
+            // se deja igual: con menos, un modelo que razone contestaría vacío y el juez elegiría
+            // siempre lo mismo por accidente, que es indistinguible de funcionar.
             [this.#maxOutputTokensParam]: 600,
           }),
         });
