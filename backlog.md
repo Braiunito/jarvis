@@ -1344,6 +1344,35 @@ Emparenta con TEC-12.
 > contra algo real. La regla que se deriva no es «probar más», es **probar el camino entero**: una
 > prueba que cubre tu lado confirma justo lo que ya sabías.
 
+> **Una comprobación tiene fecha, y si no la dice, no vale como comprobación** (2026-09-06). En una
+> tarde, **tres diagnósticos correctos se retiraron por una verificación posterior mal situada**. En
+> los tres el diagnóstico era bueno, en los tres se fue a comprobar, y en los tres se miró el sitio
+> correcto en el momento equivocado:
+>
+> - jarvis-f9 encontró que `ChatService` no le pasaba `plans` al toolbox, y por eso `WORKFLOW_TOOL`
+>   no se ofrecía nunca. Verificó después leyendo el árbol compartido, donde el arreglo ya estaba
+>   **sin comitear**, vio el comentario que lo acompañaba y lo tomó por historia. `git show
+>   b224f17:` lo desmentía: cero ocurrencias. Se retractó de algo cierto.
+> - jarvis-artifact-rendering acusó a `resolveKind` de no mirar el cuerpo, habiendo leído **el
+>   comentario de encima**, que narra el comportamiento viejo para explicar por qué se arregló. Un
+>   comentario que cuenta *por qué* se cambió algo se lee igual que uno que cuenta *qué hace*.
+> - jarvis-76 acusó al despliegue de construirse del árbol sucio con un `grep -c` que había casado
+>   una subcadena de otra frase ya comiteada.
+>
+> El peligro no es equivocarse: es **la comprobación que llega después y da confianza sin
+> merecerla**. Una retractación se acepta sin discutir porque suena a rigor, y por eso cuesta más
+> caro que el error original — dos de las tres iban a hacer que se rehiciera trabajo ya hecho o que
+> se dejara sin arreglar algo roto.
+>
+> Con varias sesiones en el mismo árbol, «lo he comprobado leyendo el código» **no dice cuándo**.
+> Para afirmar algo sobre el pasado hay que citar un commit (`git show <commit>:<ruta>`,
+> `git merge-base --is-ancestor`), y quien mande un diagnóstico con un arreglo propio sin comitear
+> tiene que decirlo. Corolario del mismo día, del arreglo del puerto fijo del core: **comprobar en la
+> condición en la que fallaba**, no en la que ya pasaba — ese fichero pasaba aislado también antes.
+>
+> Las dos formas que tomó esto en la propia historia de git —un fichero sin comitear que se lleva
+> quien comitea por ruta, y un `--amend` que cae sobre el commit de otro— están en **TEC-13**.
+
 
 > **El clasificador de esfuerzo acierta más con `minimal` que con `low`** (2026-09-06). Medido
 > contra la API de producción con `gpt-5-nano`, siete preguntas y tres rondas por nivel:
