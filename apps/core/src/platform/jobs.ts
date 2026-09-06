@@ -142,6 +142,20 @@ export class JobRepository {
     return claim();
   }
 
+  /**
+   * Coge **este** trabajo, no el siguiente de la cola.
+   *
+   * Lo usa quien encola y se pone a hacerlo en el acto, que es el caso normal: la cola no está
+   * para meter latencia entre que alguien escribe y el asistente piensa, sino para que lo pedido
+   * no se pierda. Marcarlo en marcha desde el principio es lo que hace que `ready` signifique de
+   * verdad «nadie lo está haciendo», y por tanto que el supervisor no pueda arrancar un segundo.
+   */
+  take(id: string, at: string): Job {
+    this.#db.prepare("UPDATE jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ? AND status = 'ready'")
+      .run(at, id);
+    return this.require(id);
+  }
+
   /** Salió bien. Se queda como historial de lo que pasó, no se borra. */
   finish(id: string, at: string): void {
     this.#db.prepare("UPDATE jobs SET status = 'done', last_error = NULL, updated_at = ? WHERE id = ?")

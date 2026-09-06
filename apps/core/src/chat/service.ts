@@ -388,13 +388,24 @@ export class ChatService {
      * escriba el turno, lo que la persona pidió sólo existía en un `Map` en memoria. Un reinicio
      * ahí no dejaba ni rastro de que hubiera que hacer nada.
      */
-    this.#deps.jobs?.enqueue({
+    const at = this.#deps.clock.nowIso();
+    const job = this.#deps.jobs?.enqueue({
       kind: CHAT_TURN_JOB,
       resourceType: 'conversation',
       resourceId: id,
       watermarkSeq: message.seq,
-      at: this.#deps.clock.nowIso(),
+      at,
     });
+    /*
+     * Y se coge en el acto, porque se va a hacer aquí mismo.
+     *
+     * Dejarlo `ready` mientras este proceso ya se pone a pensar es lo que hacía que el supervisor
+     * lo reclamara en su siguiente vuelta y arrancara un **segundo turno** sobre el mismo mensaje.
+     * No se pisaban —`#turns` los serializa— sino que se encadenaban, así que el segundo veía la
+     * respuesta del primero y contestaba otra vez. Medido en producción: un mensaje, dos turnos,
+     * siete minutos y el doble de tokens.
+     */
+    if (job) this.#deps.jobs?.take(job.id, at);
     this.bus.notify(id);
     void this.#kick(id, user);
     return message;
@@ -429,6 +440,14 @@ export class ChatService {
   async resume(conversationId: string): Promise<void> {
     const conversation = this.#repository.find(conversationId);
     if (!conversation) return;
+    /*
+     * Si este proceso ya lo está pensando, no hay nada que retomar.
+     *
+     * No debería llegar aquí —quien encola coge el trabajo en el acto, así que el supervisor no lo
+     * ve— pero entre reclamar y llamar cabe una ventana, y lo que hay al otro lado es un turno
+     * duplicado que cuesta minutos y tokens. La guarda es una línea.
+     */
+    if (this.#turns.has(conversationId)) return;
     await this.#kick(conversationId, { userId: conversation.createdBy, username: conversation.createdBy });
   }
 

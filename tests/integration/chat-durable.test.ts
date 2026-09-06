@@ -265,3 +265,42 @@ describe('DURABLE · la salud cuenta lo que quedó sin contestar', () => {
     expect(rota.checks['chatJobs']?.message).toContain('sin contestar');
   });
 });
+
+describe('DURABLE · el trabajo que ya se está haciendo no se hace otra vez', () => {
+  it('el supervisor no arranca un segundo turno sobre lo que send() ya está pensando', async () => {
+    /*
+     * El fallo medido en producción: un mensaje, dos turnos completos, `attempts: 1`.
+     *
+     * No era un reintento: `send()` encolaba **y** arrancaba el turno, así que el trabajo quedaba
+     * `ready` y el supervisor lo reclamaba en su siguiente vuelta. `#turns` no los pisa, los
+     * **encadena**, de modo que el segundo turno ve la respuesta del primero y contesta otra vez.
+     * Con el esfuerzo de razonamiento alto eso costó siete minutos y el doble de tokens.
+     *
+     * Un trabajo `ready` tiene que significar «nadie lo está haciendo». Mientras el proceso que lo
+     * pidió lo tiene en la mano, está `running`; si ese proceso muere, queda huérfano y es
+     * `reconcile()` quien decide, que es justo para lo que existe.
+     */
+    const local = new ScriptedBrain([
+      () => ({ kind: 'finish', summary: 'primera y única respuesta' }),
+      () => ({ kind: 'finish', summary: 'ésta no debería existir' }),
+    ]);
+    const { services, jobs } = harness(local);
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, '¿qué puedes hacer?', user);
+
+    // El supervisor da su vuelta mientras el turno está en marcha, como pasa de verdad.
+    const supervisor = new JobSupervisor({
+      jobs,
+      clock: { nowIso: () => '2030-01-01T00:00:00.000Z', nowMs: () => Date.parse('2030-01-01T00:00:00.000Z') },
+      handlers: { 'chat.turn': (job) => services.chat.resume(job.resourceId) },
+    });
+    await supervisor.tick();
+    await services.chat.settled(conversation.id);
+
+    // Al modelo se le preguntó una vez, no dos.
+    expect(local.calls).toBe(1);
+    const respuestas = services.chat.messages(conversation.id).filter((m) => m.role === 'assistant');
+    expect(respuestas).toHaveLength(1);
+    expect(respuestas[0]?.text).toContain('única');
+  });
+});
