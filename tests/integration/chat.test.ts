@@ -305,6 +305,46 @@ describe('CHAT · la puerta a la nube', () => {
     expect(services.chat.require(conversation.id).source).toBe('local');
   });
 
+  it('R-02 · un permiso para la nube vale una vuelta, no una conversación', async () => {
+    /*
+     * ADR-009 §2 dice que el permiso vale para un turno, y el código sólo cerraba la puerta en las
+     * dos decisiones que terminan el turno con texto. Así que una escalada firmada pagaba varias
+     * vueltas del modelo caro: se escala, el turno en la nube pide una capacidad, se autoriza la
+     * capacidad, y el turno que interpreta el resultado vuelve a la nube **sin tarjeta**.
+     */
+    const local = new ScriptedBrain('local', [
+      () => ({ kind: 'escalate', reason: 'esto se me escapa' }),
+      () => ({ kind: 'finish', summary: 'con lo que salió: la memoria está al 38%' }),
+    ]);
+    const cloud = new ScriptedBrain('nube', [
+      () => ({
+        kind: 'capability', title: 'memoria', capability: 'zeus.memory_info', args: {},
+        summary: 'mirar la memoria de zeus', effectsDeclared: true,
+      }),
+    ]);
+    const { services } = track(harness({ local, cloud }));
+
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'por qué va lenta', user);
+    await settled(services, conversation.id);
+
+    const [escalada] = services.chat.pendingApprovals(conversation.id);
+    await services.chat.resolveApproval(escalada!.id, 'approved', user);
+    await settled(services, conversation.id);
+    expect(cloud.calls).toBe(1);
+
+    // La nube pidió una capacidad. Al autorizarla, el turno que interpreta el resultado lo piensa
+    // **la de casa**: si quisiera volver fuera, tiene que volver a pedirlo y alguien a firmarlo.
+    const [capacidad] = services.chat.pendingApprovals(conversation.id);
+    expect(capacidad?.actionType).toBe('capability');
+    await services.chat.resolveApproval(capacidad!.id, 'approved', user);
+    await settled(services, conversation.id);
+
+    expect(cloud.calls).toBe(1);
+    expect(services.chat.require(conversation.id).source).toBe('local');
+    expect(services.chat.messages(conversation.id).at(-1)?.text).toContain('38%');
+  });
+
   it('rechazar la escalada no consulta a la nube', async () => {
     const local = new ScriptedBrain('local', [() => ({ kind: 'escalate', reason: 'no puedo' })]);
     const cloud = new ScriptedBrain('nube', [() => ({ kind: 'finish', summary: 'no debería llegar aquí' })]);

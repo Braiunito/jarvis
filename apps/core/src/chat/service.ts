@@ -578,6 +578,20 @@ export class ChatService {
     }
 
     await this.#applyDecision(conversation, decision, user, source, model.id, toolbox);
+    /*
+     * El permiso de salir a la nube vale para **una llamada a `decide`**, no para una respuesta.
+     *
+     * ADR-009 §2 lo decía y el código sólo cerraba la puerta en las dos decisiones que terminan el
+     * turno con texto. Así que una escalada firmada podía pagar varias vueltas del modelo caro: se
+     * escalaba, el turno en la nube pedía una capacidad, se autorizaba la capacidad, y el turno que
+     * interpretaba el resultado **volvía a la nube sin tarjeta**. Peor con un run: la fila se
+     * quedaba en `cloud` y el siguiente mensaje de la persona se pensaba fuera de casa.
+     *
+     * Se cierra aquí, después de decidir y sea cual sea la decisión, porque es el único sitio por
+     * el que pasan todas. Si el modelo de la nube quiere seguir fuera, vuelve a pedir `escalate` y
+     * alguien vuelve a firmar.
+     */
+    if (source === 'cloud') this.#repository.setSource(id, 'local');
     this.bus.notify(id);
   }
 

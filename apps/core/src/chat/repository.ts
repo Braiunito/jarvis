@@ -180,6 +180,18 @@ export class ChatRepository {
       .run(status, this.#clock.nowIso(), conversationId);
   }
 
+  /**
+   * Devuelve la conversación al cerebro de casa **sin tocar su estado**.
+   *
+   * Hace falta separado de `setStatus` porque el permiso de salir a la nube y el estado del hilo
+   * son dos cosas distintas: una conversación que se queda esperando una aprobación sigue
+   * `waiting_approval`, y lo que tiene que caducar es la autorización, no la espera.
+   */
+  setSource(conversationId: string, source: ModelSource): void {
+    this.#db.prepare('UPDATE conversations SET source = ?, updated_at = ? WHERE id = ?')
+      .run(source, this.#clock.nowIso(), conversationId);
+  }
+
   setAutonomy(conversationId: string, autonomy: AutonomyMode): void {
     this.#db.prepare('UPDATE conversations SET autonomy = ?, updated_at = ? WHERE id = ?')
       .run(autonomy, this.#clock.nowIso(), conversationId);
