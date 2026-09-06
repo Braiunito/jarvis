@@ -29,6 +29,10 @@ hacerla —con el motivo escrito—, que también es liquidarla.
 **Estado**: `[ ]` pendiente · `[-]` en curso · `[x]` cerrada (con el commit o el motivo en la
 sección del ítem).
 
+**Dónde se lee el avance**: la marca de la tabla dice **si** está cerrada; la línea `**Cerrado**`
+de la sección del ítem dice **qué** se hizo y en qué commit. Hacen falta las dos, y la segunda es
+la que sirve dentro de seis meses: una marca sin commit obliga a reconstruir la historia a mano.
+
 **Quién**: `core` = todo lo que vive en `apps/core` y `packages/contracts` —seguridad, chat, MCP,
 toolbox, planes, jobs, gasto— · `web` = `apps/web` y las pruebas de extremo a extremo.
 
@@ -181,6 +185,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 - **Prueba**: `tests/integration/artifacts.test.ts`: la CSP contiene `default-src 'none'` y
   `frame-src 'none'`; petición sin `sec-fetch-dest: iframe` → 403. E2E Playwright con canario y
   `route.abort`: cero peticiones externas en los dos escenarios (embebido y URL directa).
+- **Cerrado** · `976227d` (CSP completa con `default-src 'none'` y `sec-fetch-dest: iframe` exigido) y `be370b0`. Este segundo cierra una puerta que las pruebas del primero no cubrían: el guardián decía «si viene y no es un iframe, 403», así que una petición **sin** la cabecera pasaba —abrirse por ausencia—. Y corrige ADR-010 §1, cuya frase «ni un intento llega a la red» era falsa: se comprobaron tres salidas y se concluyó que no había ninguna.
 
 ### R-05 · P1 · En modo directo el catálogo se declara sin parámetros
 
@@ -199,6 +204,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 - **Prueba**: `mcp.test.ts`: `asToolDefinitions()` para `docker_restart` trae `required: ['container']`;
   `chat.test.ts` (modo directo): el modelo llama `mcp__zeus__docker_restart` con `{container}` y el
   argumento llega al servidor falso.
+- **Cerrado** · `80f4d58`. `asToolDefinitions` pide el esquema y manda la descripción larga. El comentario **no lleva** la estimación de tokens del informe: cuánto engorda depende del servidor enchufado, así que se mide en `catalogBytes` (`6a3c1fe`) en vez de escribir un número que no se ha medido.
 
 ### R-06 · P1 · El memo de capacidades mezcla servidores y cobra la repetición
 
@@ -230,6 +236,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   `capabilityStale: boolean` a `ChatCapabilities` para que `StatusLine` lo pinte en ámbar.
 - **Prueba**: `mcp.test.ts` «con catálogo cacheado y servidor caído, `states()` dice `stale` y
   conserva `lastError`»; la prueba de Salud existente debe cubrir este caso.
+- **Cerrado** · `80f4d58`. `states()` distingue `stale` de `ok` y conserva `lastError`. Servir el catálogo viejo está bien; decir que todo va bien, no. La pastilla de la interfaz colapsaba `stale` y `failed` en rojo y lo arregló jarvis-76 al revisarlo (ver U-11).
 
 ### R-08 · P1 · Dos mensajes seguidos: la primera pregunta no se contesta, la segunda dos veces, y el segundo sin job
 
@@ -356,6 +363,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   y otro en `AssistantScreen` que conserve el composer.
 - **Prueba**: `artifacts.test.ts` rechaza `label` no string; proyecto `web` con jsdom: una tabla mal
   formada no rompe el árbol.
+- **Cerrado** · los anillos de la interfaz en `868af77` (jarvis-76) y la validación en `4785d41`. `validateTable` prometía comprobar `key` y `label` y sólo miraba `key`, y no miraba el contenido de las celdas. Hacen falta las dos mitades: el anillo evita el desastre, validar evita el fallo y además le dice al modelo qué fila y qué columna.
 
 ### R-17 · P2 · Un `table`/`chart`/`json` grande se recorta a bytes y deja de ser JSON
 
@@ -383,6 +391,9 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   invertir `#createRun` a fail-closed: `const suelto = autonomy === 'unrestricted' || (autonomy === 'auto'
   && profile === 'safe'); if (!suelto) → approval`.
 - **Prueba**: unidad toolbox con `autonomy: 'foo' as never` → decisión `approval`; unidad de config.
+- **Cerrado** · `4785d41`. El gate se escribe en negativo —se enumera lo que va **suelto**— porque el mismo condicional al revés dejaba pasar cualquier valor que no fuera exactamente `manual` o `auto`. `autonomyOf` sube a los contratos y la usan los tres sitios que guardan una autonomía. Y `apps/core/test/config.test.ts` es la **primera prueba de `config.ts` del repositorio**; el hueco lo vio jarvis-f9.
+
+  Al cerrarla se puso roja `create_run devuelve un checkpoint, no una espera`: esa prueba estaba **en verde por el fallo**, porque construía el toolbox sin declarar autonomía (`80258a0`).
 
 ### L-02 · P0 · `resolveApproval` (chat) no es atómica y no recupera un `approved` sin consumir
 
@@ -427,6 +438,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   `MCP_UNAUTHORIZED → 'FORBIDDEN'`; `MCP_TIMEOUT/MCP_UNAVAILABLE → 'UPSTREAM_UNAVAILABLE'` reintentable.
   `fitToSchema` devuelve `missing[]` y `call` rechaza con `BAD_INPUT «falta container»` antes de salir.
 - **Prueba**: `mcp.test.ts` con los tres tipos de fallo.
+- **Cerrado** · `80f4d58`. `asJarvisError` reparte: `MCP_TOOL_ERROR` → `BAD_REQUEST` no reintentable, `MCP_UNAUTHORIZED` → `FORBIDDEN`, y sólo el transporte sigue siendo reintentable. «Reintenta» es una promesa y no se hace sobre algo que no depende del momento.
 
 ### L-06 · P1 · Los intentos de escritura fallidos no se auditan
 
@@ -435,6 +447,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 - **Cómo**: `mcp.write.requested` **antes** de llamar (nombre, digest de args, actor) y
   `mcp.write` / `mcp.write.failed` después. Para lecturas basta después.
 - **Prueba**: unidad: servidor que falla → dos filas de auditoría.
+- **Cerrado** · `80f4d58`. `mcp.write.requested` antes de llamar y `mcp.write` / `mcp.write.failed` después. Lo que investiga alguien no es sólo lo que pasó: es lo que se intentó.
 
 ### L-07 · P1 · La pantalla miente en «Automático» y nunca ofrece `unrestricted`
 
@@ -525,6 +538,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   sólo para servidores con escrituras.
 - **Cómo**: en servidores `readOnly`, herramienta sin etiqueta = no se ofrece (o se rechaza con
   `UNKNOWN_EFFECT`), salvo `JARVIS_MCP_TRUST_UNTAGGED=<server>`; Salud enseña `untagged: n`.
+- **Cerrado** · `80f4d58` y `6a3c1fe`. Lo sin etiquetar no se sirve **en servidores de sólo lectura** —en uno con escrituras ya pasaba por tarjeta, y filtrarlo ahí habría cambiado «se pregunta» por «no existe»; me lo acotó una prueba que ya estaba—. Se recupera con `JARVIS_MCP_TRUST_UNTAGGED`. Y el modelo ya no dice «no existe» de algo que existe y retenemos: `retained()` le deja contar que hay N sin etiquetar, que es lo que lleva a etiquetarlas.
 
 ### L-17 · P3 · Prompt local desactualizado, asimetría Anthropic, tipos de rutas
 
