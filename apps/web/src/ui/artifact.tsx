@@ -200,6 +200,49 @@ function HtmlArtifact({ conversationId, artifact }: {
   );
 }
 
+/**
+ * Llevarse lo que se está mirando.
+ *
+ * Una tabla de treinta filas en una burbuja se lee, pero no se cruza con otra cosa ni se pega en un
+ * informe; y volver a pedírsela al asistente cuesta una vuelta al modelo por algo que ya está
+ * escrito. La descarga se arma **en el navegador**, con lo que ya está en pantalla: no hace falta
+ * ruta nueva, ni permisos, ni que el artifact tenga una URL que compartir —eso último espera a que
+ * el core sepa de quién es cada conversación—.
+ *
+ * Una tabla sale en CSV, que es lo que abre una hoja de cálculo; lo demás en su propio formato.
+ */
+function descargar(artifact: ChatArtifact): void {
+  const seguro = artifact.title.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').toLowerCase();
+  let texto = artifact.body;
+  let extension = artifact.kind === 'markdown' ? 'md' : artifact.kind === 'code' ? 'txt' : 'json';
+
+  if (artifact.kind === 'table') {
+    const datos = parsed<TableBody>(artifact.body);
+    if (datos?.columns?.length) {
+      /*
+       * Comillas dobladas y campo entrecomillado siempre: es lo que hace que una celda con una coma
+       * o un salto de línea no parta la fila. Con `String()` porque una celda puede ser número o
+       * booleano.
+       */
+      const celda = (valor: unknown): string =>
+        `"${(valor === null || valor === undefined ? '' : String(valor)).replace(/"/g, '""')}"`;
+      const filas = [
+        datos.columns.map((columna) => celda(columna.label)).join(','),
+        ...datos.rows.map((fila) => datos.columns.map((columna) => celda(fila[columna.key])).join(',')),
+      ];
+      texto = filas.join('\n');
+      extension = 'csv';
+    }
+  }
+
+  const url = URL.createObjectURL(new Blob([texto], { type: 'text/plain;charset=utf-8' }));
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = `${seguro || 'artifact'}.${extension}`;
+  enlace.click();
+  URL.revokeObjectURL(url);
+}
+
 /** El cuerpo, por tipo. Cada uno con la pieza que ya usaba el resto de la consola. */
 function Body({ conversationId, artifact }: {
   conversationId: string;
@@ -251,6 +294,15 @@ function Head({ artifact }: { artifact: ChatArtifact }): JSX.Element {
           <span className="badge warn tiny" title="No cabía entero: esto es una parte">recortado</span>
         ) : null}
         <span className="badge neutral tiny">{artifact.kind}</span>
+        {/* El `html` no se descarga: un documento que ejecuta no se guarda en el disco de nadie. */}
+        {artifact.kind !== 'html' ? (
+          <button type="button" className="btn small ghost artifact-download"
+            aria-label={`Descargar ${artifact.title}`}
+            title={artifact.kind === 'table' ? 'Descargar en CSV' : 'Descargar'}
+            onClick={() => descargar(artifact)}>
+            <Glyph icon={ACTION_ICON.download} size={13} />
+          </button>
+        ) : null}
       </span>
       {artifact.caption ? <span className="tiny faint artifact-caption">{artifact.caption}</span> : null}
     </div>

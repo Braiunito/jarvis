@@ -14,5 +14,16 @@
     "resolveJsonModule": true,
     "types": ["vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+  /*
+   * Las pruebas también pasan por el compilador.
+   *
+   * No estaban, así que un fichero de `test/` podía referirse a una propiedad que ya no existe o
+   * afirmar contra una forma vieja y nadie lo decía: vitest quita los tipos sin comprobarlos, y el
+   * fallo aparecía al ejecutar, con un mensaje que no señala la causa. Comprobado poniendo un error
+   * a propósito antes de añadir esta línea: `tsc -b apps/web` pasaba en verde.
+   *
+   * Importa más aquí que en otro sitio, porque estas pruebas son las que sujetan que una pantalla no
+   * se caiga: una prueba que no compila no sujeta nada.
+   */
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "vite.config.ts"]
 }

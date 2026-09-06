@@ -15,6 +15,7 @@ import type { JSX } from 'react';
 import type { Health, Run, Workspace } from '@jarvis/contracts';
 import { useHealth, useMetrics, useRuns, useWorkspaces } from '../api/queries.js';
 import { terminalHref } from '../api/links.js';
+import { AskAssistantButton } from '../ui/ask-assistant.jsx';
 import { Empty, Link, Loading, RunStatusBadge, relativeTime } from '../ui/bits.jsx';
 import { Donut, Meter, Sparkbars, SERIES_COLORS } from '../ui/charts.jsx';
 import {
@@ -110,6 +111,20 @@ function ResumeCard({ workspace, lastRun }: { workspace: Workspace; lastRun: Run
                 <Glyph icon={NAV_ICON.terminal} />
                 Abrir terminal
               </Link>
+              {/*
+                * Y preguntar, desde donde se retoma.
+                *
+                * Es la tarjeta de «seguir donde lo dejaste»: quien llega aquí está reconstruyendo
+                * qué estaba haciendo, que es exactamente la pregunta que el asistente contesta
+                * leyendo la sesión. Con el `workspaceId` puesto, para que alcance ese trabajo.
+                */}
+              <AskAssistantButton
+                className="btn"
+                workspaceId={workspace.id}
+                prompt={'¿De qué va esta sesión y en qué punto está? Léela entera, no te quedes en el título.'}
+              >
+                Pregúntale
+              </AskAssistantButton>
             </div>
           </div>
         </div>

@@ -188,4 +188,6 @@ export const ACTION_ICON = {
   scrollUp: ChevronUp,
   scrollDown: ChevronDown,
   scrollEnd: ChevronsDown,
+  /** Llevarse lo que se está mirando: el artifact se arma en el navegador y se guarda. */
+  download: Download,
 } as const;
