@@ -85,6 +85,7 @@ services:
       JARVIS_ATTACHMENT_ROOT: ${JARVIS_ATTACHMENT_ROOT:-/tmp/jarvis-attachments}
       JARVIS_INTERNAL_SECRET: ${JARVIS_INTERNAL_SECRET:?define JARVIS_INTERNAL_SECRET en .env}
       JARVIS_ALLOW_YOLO: ${JARVIS_ALLOW_YOLO:-false}
+      JARVIS_ALLOW_UNRESTRICTED: ${JARVIS_ALLOW_UNRESTRICTED:-false}
       JARVIS_MODEL_API_KEY: ${JARVIS_MODEL_API_KEY:-}
       JARVIS_MODEL_NAME: ${JARVIS_MODEL_NAME:-claude-sonnet-5}
       # Sin estas dos, una credencial de OpenAI acaba hablando con la API de Anthropic: el
