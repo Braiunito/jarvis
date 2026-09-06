@@ -62,7 +62,37 @@ case "${1:-}" in
         .then(() => fetch('http://core:8770/internal/health'))
         .then(async (r) => { console.log('core   ', r.status, await r.text()); process.exit(r.ok ? 0 : 1); })
         .catch((e) => { console.error(e.message); process.exit(1); });
-    "
+    " || exit 1
+
+    # Y el borde, que es lo que ninguna de las dos comprobaciones de arriba puede ver.
+    #
+    # Las de arriba preguntan desde dentro de la red de compose: contestan si el core y el gateway
+    # están sanos, y eso es cierto y no basta. El 2026-09-06 un despliegue sin `JARVIS_MODE` dejó al
+    # gateway sin puerto publicado —el nginx del host dejó de encontrarlo— y el sitio dio 502 con
+    # las dos piezas diciendo «healthy». Cada una comprobaba lo que sabe de sí misma y nadie
+    # comprobaba por dónde entra la gente.
+    #
+    # Se usa `JARVIS_ORIGINS` porque es el origen que el propio gateway reconoce como su puerta: si
+    # se comprueba otra cosa, se comprueba una puerta que la aplicación no considera suya. Y se pide
+    # desde el host, fuera de la red de compose, con el certificado de verdad — que es lo único que
+    # se parece a lo que hace una persona.
+    origen="$(grep -E '^JARVIS_ORIGINS=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | cut -d, -f1)"
+    if [[ -z "$origen" ]]; then
+      # Saltárselo en silencio es como no tenerlo: el hueco sobrevive porque nadie lo ve faltar.
+      echo "borde   sin comprobar — no hay JARVIS_ORIGINS en deploy/.env"
+      exit 0
+    fi
+    # `curl` ya escribe `000` cuando no llega a conectar, así que el respaldo es sólo para el caso
+    # de que no exista el binario: encadenar los dos imprimía «borde 000000», y un aviso que parece
+    # roto se ignora igual que uno que no está.
+    codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$origen/healthz" 2>/dev/null)"
+    codigo="${codigo:-000}"
+    if [[ "$codigo" == "200" ]]; then
+      echo "borde   200 $origen"
+    else
+      echo "borde   $codigo $origen — las piezas están sanas y por aquí no se entra"
+      exit 1
+    fi
     ;;
   backup)
     shift
