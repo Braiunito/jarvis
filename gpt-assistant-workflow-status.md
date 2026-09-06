@@ -43,6 +43,11 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
    dice que está hecho; el commit dice qué se hizo.
 3. **Commit por rutas**, y este fichero va **solo en su propio commit**: si viaja dentro de uno de
    código, dos sesiones que cierran a la vez colisionan en el que menos importa.
+   **Y por ruta no basta.** Este fichero lo escriben los dos, así que `git add` de su ruta se lleva
+   también lo que el otro tenga a medias: hay que **mirar `git diff` antes de añadirlo**. Pasó —un
+   commit de código se llevó 81 líneas del tablero ajeno, incluida una sección a medio escribir— y
+   no se notó porque el contenido estaba entero de casualidad. Con la sección a medias, lo empujado
+   habría sido un tablero roto firmado por quien no lo escribió.
 4. Si un ítem cambia de dueño, se cambia la columna y se dice en el mensaje, para que no haya dos
    trabajando en lo mismo.
 5. Un ítem que se descarta se marca `[x]` y su sección explica **por qué no**, con el mismo detalle
