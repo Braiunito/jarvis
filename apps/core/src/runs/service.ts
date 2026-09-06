@@ -503,6 +503,24 @@ export class RunService {
     const row = repository.row(runId);
     if (!row) throw new JarvisError('NOT_FOUND', `unknown run ${runId}`, { scope: { runId } });
     const run = this.require(runId);
+    /*
+     * Comprobar y reclamar, **sin un `await` entre medias**. Esto sostiene N04 y es lo que lo hace
+     * frágil, así que va escrito aquí y no sólo en la prueba.
+     *
+     * El supervisor recorre los runs con `Promise.all`, y `activeInWorkspace` no cuenta los
+     * `queued`: dos trabajos en cola del mismo workspace deberían poder colarse los dos. No lo
+     * hacen porque estas dos líneas son síncronas — cuando el segundo callback pregunta, el primero
+     * ya consta como `preparing`, y el `return` de arriba lo devuelve tal cual.
+     *
+     * O sea que la exclusión no la garantiza una transacción ni un `SELECT ... FOR UPDATE`: la
+     * garantiza que Node no interrumpe código síncrono. **Meter cualquier `await` aquí —resolver
+     * una ruta, leer configuración, consultar un host— abre la carrera de verdad**, y el síntoma no
+     * sale en Jarvis: son dos `--resume` a la vez sobre el mismo historial, con el transcript
+     * entrelazado en la máquina.
+     *
+     * Medido el 2026-09-06 forzando la condición (dos `createRun` en paralelo, no encadenados):
+     * no se reproduce. Lo que se anota no es que esté roto, es de qué depende que no lo esté.
+     */
     if (run.status !== 'queued') return run;
 
     this.transition(runId, 'preparing');
