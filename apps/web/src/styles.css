@@ -1897,6 +1897,9 @@ a:hover { text-decoration: underline; }
 
 .chat-capabilities ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; width: 100%; }
 
+/* Su propio renglón: es una cifra, no un distintivo más de la fila. */
+.chat-capabilities-cost { width: 100%; margin-top: 2px; }
+
 .chat-thread {
   display: flex;
   flex-direction: column;

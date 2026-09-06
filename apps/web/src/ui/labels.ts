@@ -45,20 +45,14 @@ export const permissionName = (profile: string): string =>
  * El nivel lo decide una pasada previa barata que **no deja rastro en el hilo**: no llama a
  * ninguna herramienta y no escribe ningún mensaje. Así que este indicador es el único sitio donde
  * se ve que esa decisión existió, y por eso dice también el porqué en su ayuda.
+ *
+ * `minimal` no está y no es un olvido: el juez lo elige, pero el turno que **contesta** nunca corre
+ * con él —no compone una frase— así que a la pantalla no llega nunca. Tenerlo aquí era una etiqueta
+ * que no se podía ver, comprobado pidiéndole un saludo a producción: el juez dijo lo suyo y la línea
+ * puso «poco». Si algún día interesa ver lo que decidió el juez, será por un motivo y con su campo,
+ * no por completar la escala.
  */
 export const EFFORT: Record<string, { name: string; help: string; tone: 'ok' | 'neutral' | 'warn' }> = {
-  /*
-   * `minimal` no razona: gasta cero tokens de razonamiento y contesta directo.
-   *
-   * Se dice «directo» y no «nada» porque la línea lo lee como «pensando · …», y «pensando · nada»
-   * se contradice a sí mismo. Lo que hace es contestar sin pararse, que es lo que corresponde a un
-   * saludo.
-   */
-  minimal: {
-    name: 'directo',
-    help: 'Contesta sin pararse a razonar. Es lo que le corresponde a un saludo o a algo que ya sabe.',
-    tone: 'ok',
-  },
   low: {
     name: 'poco',
     help: 'Le ha parecido una pregunta directa y no se va a entretener.',

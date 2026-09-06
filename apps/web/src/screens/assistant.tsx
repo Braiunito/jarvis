@@ -514,6 +514,16 @@ function AutonomyChip({ value, modes, onChange, pending }: {
 }
 
 /**
+ * Lo que ocupa el catálogo, dicho para quien mira.
+ *
+ * Bytes porque los bytes se miden; los tokens van detrás, redondeados y con su «unos» delante,
+ * porque cuatro caracteres por token es una regla del pulgar y una regla no es una medida. La cifra
+ * en tokens está porque es la que se compara con lo que cuesta el turno, que es la decisión real.
+ */
+const catalogWeight = (bytes: number): string =>
+  `${Math.round(bytes / 1024)} KB, unos ${Math.round(bytes / 4 / 100) * 100} tokens`;
+
+/**
  * Una línea que dice si esto va a funcionar, y con qué.
  *
  * Sustituye a la fila de distintivos, que ocupaba su propio renglón para decir tres cosas sueltas.
@@ -622,7 +632,20 @@ function StatusLine({ hosts, capabilities, thinking, effort, failed, lost }: {
         {model ? shortModel(model) : 'sin modelo'}
       </span>
       {capabilities.capabilityCount ? (
-        <span className="chat-status-part chat-status-count truncate">
+        /*
+         * Cuántas hay, y al pasar por encima, cuánto pesan.
+         *
+         * El aviso de al lado cuenta funciones, que es lo que decide el repliegue al router porque
+         * el tope de la API es de cuenta. Pero desde que cada definición lleva su esquema y su
+         * descripción larga, lo que se paga en cada vuelta es otra cosa, y ninguna de las dos
+         * cifras lo decía. Va en la ayuda y no en la línea porque es un dato para quien está
+         * decidiendo si enchufar una capacidad más, no para quien está leyendo una respuesta —y
+         * porque la línea ya no cabe entera en un teléfono—.
+         */
+        <span
+          className="chat-status-part chat-status-count truncate"
+          title={`El catálogo entero viaja en cada vuelta: ${catalogWeight(capabilities.catalogBytes)}.`}
+        >
           {capabilities.capabilityCount} capacidades
         </span>
       ) : null}
@@ -849,11 +872,53 @@ export function AssistantScreen(): JSX.Element {
                 <li key={area.area}>{area.area} <span className="faint">({area.count})</span></li>
               ))}
             </ul>
-            {catalog.data.servers.map((server) => (
-              <span key={server.name} className={`badge tiny ${server.status === 'ok' ? 'ok' : 'danger'}`}>
-                {server.name} · {server.toolCount}
+            {/*
+              * El servidor, con lo que de verdad sirve y lo que se está quedando fuera.
+              *
+              * Antes decía sólo el nombre y el número, y en verde siempre — el catálogo no traía
+              * otro estado. Ahora sí, y hay dos cosas que enseñar que antes no existían:
+              *
+              *  · **`stale` no es `danger`.** Un catálogo viejo se sigue sirviendo y se puede
+              *    trabajar; caído es que no hay nada. Pintarlos igual haría que el rojo dejara de
+              *    significar algo.
+              *  · **Las que no se sirven se dicen.** Una herramienta que el servidor no etiquetó no
+              *    se ofrece —no se puede saber si escribe— y hasta ahora eso pasaba en silencio: la
+              *    capacidad existía, el asistente contestaba «no existe» y nadie podía enterarse
+              *    salvo leyendo el código. Se cuenta aparte de las denegadas porque la respuesta es
+              *    distinta: a las denegadas no hay nada que hacerles; a éstas, etiquetarlas.
+              */}
+            {catalog.data.servers.map((server) => {
+              const tono = server.status === 'ok' ? 'ok' : server.status === 'stale' ? 'warn' : 'danger';
+              const fuera = server.untagged + server.filteredOut;
+              return (
+                <span
+                  key={server.name}
+                  className={`badge tiny ${tono}`}
+                  title={[
+                    server.status === 'stale' ? 'El catálogo es viejo: se sigue sirviendo, pero el servidor no contesta ahora.'
+                      : server.status === 'ok' ? null : (server.lastError ?? 'No responde.'),
+                    server.untagged ? `${server.untagged} sin etiquetar: no dicen si escriben, así que no se ofrecen.` : null,
+                    server.filteredOut ? `${server.filteredOut} fuera por la lista de permitidas.` : null,
+                  ].filter(Boolean).join(' ')}
+                >
+                  {server.name} · {server.toolCount}
+                  {fuera ? <span className="faint"> · {fuera} fuera</span> : null}
+                </span>
+              );
+            })}
+            {/*
+              * Lo que cuesta tener esto puesto.
+              *
+              * El catálogo entero viaja en **cada vuelta**, así que no es un coste de arranque: es
+              * un peaje por mensaje que crece cada vez que se enchufa un servidor. Se dice aquí,
+              * debajo de lo que se puede enchufar, porque es donde se toma esa decisión; en la
+              * línea de estado no cabría y en la factura aparece ya mezclado con todo lo demás.
+              */}
+            {capabilities?.catalogBytes ? (
+              <span className="tiny faint chat-capabilities-cost">
+                {catalogWeight(capabilities.catalogBytes)} en cada vuelta
               </span>
-            ))}
+            ) : null}
           </div>
         ) : null}
       </aside>
