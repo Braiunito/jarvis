@@ -45,6 +45,8 @@ export interface McpEnv {
   servers?: string | undefined;
   tokens?: string | undefined;
   writeServers?: string | undefined;
+  /** Servidores cuyas herramientas sin etiquetar se sirven igual. Ver `trustUntagged`. */
+  trustUntagged?: string | undefined;
   allow?: string | undefined;
   deny?: string | undefined;
 }
@@ -59,6 +61,7 @@ export interface McpEnv {
 export function parseMcpServers(env: McpEnv): McpServerConfig[] {
   const tokens = parsePairs(env.tokens);
   const writers = new Set((env.writeServers ?? '').split(',').map((name) => name.trim()).filter(Boolean));
+  const trusted = new Set((env.trustUntagged ?? '').split(',').map((name) => name.trim()).filter(Boolean));
   const allow = qualifiedNames(env.allow);
   const deny = qualifiedNames(env.deny);
 
@@ -69,6 +72,15 @@ export function parseMcpServers(env: McpEnv): McpServerConfig[] {
       url,
       ...(token ? { token } : {}),
       readOnly: !writers.has(name),
+      /*
+       * Quién responde por las herramientas que no dicen qué hacen.
+       *
+       * Sin esto no se sirven, que es la postura de reposo. Escribir aquí el nombre de un servidor
+       * es afirmar que se conoce y que se responde por él, y por eso se hace a mano y por escrito
+       * en vez de deducirse de `readOnly`: `readOnly` dice qué permite este core, no qué ejecuta el
+       * otro proceso.
+       */
+      trustUntagged: trusted.has(name),
       allow: allow.forServer(name),
       deny: [...new Set([...deny.forServer(name), ...DEFAULT_DENIED_TOOLS])],
     };

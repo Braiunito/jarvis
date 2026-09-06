@@ -61,6 +61,14 @@ export const McpCapability = Type.Object({
    * enchufe un servidor que no etiquete, que es el día en que nadie estará mirando.
    */
   effectsDeclared: Type.Boolean(),
+  /**
+   * Lo que el servidor cuenta de la herramienta, entero.
+   *
+   * Viaja junto al esquema y por el mismo motivo: en modo directo el modelo **no busca**, así que
+   * si la descripción larga no va aquí no la lee nunca y elige por un resumen de 120 caracteres.
+   * Sólo se pide cuando hace falta, porque son unos 3.700 tokens sobre el catálogo entero.
+   */
+  description: Type.Optional(Type.String()),
   /** El esquema de entrada tal como lo publica el servidor. Sólo se pide cuando hace falta. */
   inputSchema: Type.Optional(Type.Unknown()),
 });
@@ -81,6 +89,14 @@ export const McpServerState = Type.Object({
   toolCount: Type.Integer({ minimum: 0 }),
   /** Cuántas quedaron fuera por la allowlist. Un catálogo recortado lo dice. */
   filteredOut: Type.Integer({ minimum: 0 }),
+  /**
+   * Cuántas se dejan fuera por no decir qué hacen.
+   *
+   * Distinto de `filteredOut`, que son las denegadas a propósito. Éstas no las ha vetado nadie: es
+   * que el servidor no las etiquetó y no se puede saber si escriben. Se cuenta aparte porque la
+   * respuesta también es distinta —a las primeras no hay nada que hacerles; a éstas, etiquetarlas.
+   */
+  untagged: Type.Integer({ minimum: 0 }),
   writesAllowed: Type.Boolean(),
   authenticated: Type.Boolean(),
   lastOkAt: Type.Union([Iso8601, Type.Null()]),

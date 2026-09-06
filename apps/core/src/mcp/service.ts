@@ -40,6 +40,13 @@ export interface McpServerConfig {
    * esto existía.
    */
   readOnly: boolean;
+  /**
+   * Si se sirven sus herramientas sin etiquetar.
+   *
+   * Por defecto no: una herramienta que no dice si escribe no se puede clasificar, y clasificarla
+   * de oído es afirmar algo sobre un proceso que no controlamos.
+   */
+  trustUntagged: boolean;
   /** Nombres exactos permitidos. Vacío = las que el servidor publique. */
   allow: string[];
   deny: string[];
@@ -117,6 +124,8 @@ interface CachedCatalog {
   at: number;
   tools: McpToolDescriptor[];
   filteredOut: number;
+  /** Las que no dicen qué hacen y por eso no se sirven. Ver `#catalogOf`. */
+  untagged: number;
 }
 
 interface ServerRuntime {
@@ -169,7 +178,7 @@ export class McpService {
    * cuenta aparte, en `states()`. La alternativa —fallar entero— convierte la avería de una
    * máquina en la desaparición de todas.
    */
-  async capabilities(): Promise<McpCapability[]> {
+  async capabilities({ schema = false }: { schema?: boolean } = {}): Promise<McpCapability[]> {
     const all: McpCapability[] = [];
     for (const runtime of this.#runtimes) {
       let catalog: CachedCatalog;
@@ -178,7 +187,7 @@ export class McpService {
       } catch {
         continue;
       }
-      for (const tool of catalog.tools) all.push(this.#toCapability(runtime, tool));
+      for (const tool of catalog.tools) all.push(this.#toCapability(runtime, tool, { schema }));
     }
     return all;
   }
@@ -200,11 +209,24 @@ export class McpService {
    * herramienta se pisen.
    */
   async asToolDefinitions(): Promise<Array<{ definition: ToolDefinition; capability: McpCapability }>> {
-    return (await this.capabilities()).map((capability) => ({
+    /*
+     * Con esquema, y aquí está el matiz que faltaba.
+     *
+     * `capabilities()` no lo pide, así que en modo directo el modelo veía las 108 capacidades
+     * **sin un solo parámetro**: `docker_restart` sin `container`, `grep_text` sin patrón. Llamaba
+     * sin argumentos, el servidor rechazaba y se perdía la vuelta. La enmienda de ADR-009 dice que
+     * en directo «elige a la primera y no puede inventarse un nombre»; sin el esquema eso valía
+     * para el nombre y no para lo que hay que pasarle.
+     *
+     * Y la descripción es la larga, no el resumen: en directo el modelo **nunca busca**, así que
+     * la única ocasión de contarle qué hace la herramienta es ésta. El catálogo pasa de unos 5.300
+     * tokens a unos 9.000, que a las tarifas de este escalón es una milésima de dólar por vuelta.
+     */
+    return (await this.capabilities({ schema: true })).map((capability) => ({
       capability,
       definition: {
         name: qualifiedToolName(capability),
-        description: capability.summary,
+        description: describe(capability),
         inputSchema: toInputSchema(capability.inputSchema),
         // Ejecutar una capacidad es una observación; lo que decide el turno son las otras.
         decides: false,
@@ -347,6 +369,26 @@ export class McpService {
      */
     const { args: safeArgs, dropped } = fitToSchema(args, tool.inputSchema);
 
+    /*
+     * Una escritura se apunta **antes** de intentarla.
+     *
+     * La auditoría de abajo va después del `try`, así que una escritura que el servidor rechaza no
+     * dejaba rastro —y una que triunfa y se lleva el core por delante antes de apuntar, tampoco—.
+     * Lo que hace falta registrar no es sólo lo que pasó: es lo que se intentó, que es la pregunta
+     * que se hace quien investiga.
+     */
+    if (writes) {
+      this.#audit.record({
+        actorUser: actor,
+        eventType: 'mcp.write.requested',
+        ...(workspaceId ? { workspaceId } : {}),
+        payload: {
+          capability: `${runtime.config.name}.${tool.name}`,
+          args: JSON.stringify(args).slice(0, 500),
+        },
+      });
+    }
+
     let result;
     try {
       result = await runtime.client.callTool(tool.name, safeArgs);
@@ -354,13 +396,18 @@ export class McpService {
       runtime.lastError = null;
     } catch (error) {
       runtime.lastError = (error as Error).message;
-      // Un servidor que falla se cuenta como upstream caído, no como error interno del core: es
-      // la diferencia entre «arréglate el MCP» y «hay un bug aquí».
-      throw new JarvisError(
-        error instanceof McpError && error.code === 'MCP_TIMEOUT' ? 'UPSTREAM_UNAVAILABLE' : 'UPSTREAM_UNAVAILABLE',
-        `la capacidad ${name} falló: ${(error as Error).message}`,
-        { scope: { capability: name, server: runtime.config.name }, retryable: true },
-      );
+      if (writes) {
+        this.#audit.record({
+          actorUser: actor,
+          eventType: 'mcp.write.failed',
+          ...(workspaceId ? { workspaceId } : {}),
+          payload: {
+            capability: `${runtime.config.name}.${tool.name}`,
+            error: (error as Error).message.slice(0, 300),
+          },
+        });
+      }
+      throw asJarvisError(error, name, runtime.config.name);
     }
 
     /*
@@ -412,16 +459,28 @@ export class McpService {
     for (const runtime of this.#runtimes) {
       try {
         const catalog = await this.#catalogOf(runtime);
+        /*
+         * Servir el catálogo viejo está bien; decir que todo va bien, no.
+         *
+         * `#catalogOf` devuelve lo cacheado cuando el refresco falla —y hace bien: el modelo sigue
+         * sabiendo qué existe— pero entraba por la rama de éxito, así que Salud pintaba `ok` con el
+         * servidor caído y `lastError` a `null`. Nadie veía por qué las capacidades empezaban a
+         * fallar al llamarlas. Servir viejo y decir que es viejo es la regla de esta casa (ADR-007);
+         * lo que faltaba era la segunda mitad.
+         */
+        const caducado = this.#clock.nowMs() - catalog.at >= this.#ttlMs;
+        const stale = runtime.lastError !== null || caducado;
         states.push({
           name: runtime.config.name,
           url: runtime.config.url,
-          status: 'ok',
+          status: stale ? 'stale' : 'ok',
           toolCount: catalog.tools.length,
           filteredOut: catalog.filteredOut,
+          untagged: catalog.untagged,
           writesAllowed: !runtime.config.readOnly,
           authenticated: runtime.client.authenticated,
           lastOkAt: runtime.lastOkAt,
-          lastError: null,
+          lastError: runtime.lastError,
           serverInfo: runtime.client.serverInfo,
         });
       } catch (error) {
@@ -433,6 +492,7 @@ export class McpService {
           status: runtime.catalog ? 'stale' : 'failed',
           toolCount: runtime.catalog?.tools.length ?? 0,
           filteredOut: runtime.catalog?.filteredOut ?? 0,
+          untagged: runtime.catalog?.untagged ?? 0,
           writesAllowed: !runtime.config.readOnly,
           authenticated: runtime.client.authenticated,
           lastOkAt: runtime.lastOkAt,
@@ -477,10 +537,35 @@ export class McpService {
     const inflight = (async (): Promise<CachedCatalog> => {
       const published = await runtime.client.listTools();
       const allowed = published.filter((tool) => isAllowed(tool.name, runtime.config));
+      /*
+       * Lo que no dice qué hace, no se sirve.
+       *
+       * `effectsOf` daba por lectura una herramienta sin etiquetar en un servidor declarado de sólo
+       * lectura, con el argumento de que ahí no hay daño posible. Pero `readOnly` es un interruptor
+       * **de este core**, y quien decide si el servidor ejecuta es el servidor: si al otro lado
+       * encienden las escrituras, ese «no hay daño posible» se convierte en un efecto sin tarjeta.
+       * Estamos afirmando algo sobre un proceso que no controlamos.
+       *
+       * Así que se quedan fuera del catálogo, que es más honesto que ofrecerlas como lectura. Se
+       * pueden recuperar por servidor con `JARVIS_MCP_TRUST_UNTAGGED`, que es donde alguien declara
+       * —a mano y por escrito— que conoce ese servidor y responde por él.
+       *
+       * Sólo en los de sólo lectura. En uno con escrituras, `effectsOf` ya trata lo sin etiquetar
+       * como si escribiera, así que pasa por tarjeta y esa protección sí funciona: quitarlas del
+       * catálogo ahí sería cambiar «se pregunta» por «no existe», que es peor.
+       *
+       * Con el catálogo de esta casa no quita ninguna: las 112 de Zeus están etiquetadas. Es
+       * protección latente, como la de ADR-010 §4, y por el mismo motivo se escribe aquí: para que
+       * dentro de un año nadie la borre por «no hace nada».
+       */
+      const conocidas = runtime.config.trustUntagged || !runtime.config.readOnly
+        ? allowed
+        : allowed.filter((tool) => effectsDeclaredBy(tool));
       const catalog: CachedCatalog = {
         at: this.#clock.nowMs(),
-        tools: allowed,
+        tools: conocidas,
         filteredOut: published.length - allowed.length,
+        untagged: allowed.length - conocidas.length,
       };
       runtime.catalog = catalog;
       runtime.lastOkAt = this.#clock.nowIso();
@@ -515,7 +600,7 @@ export class McpService {
       summary: summarize(tool),
       writes: effectsOf(tool, runtime.config),
       effectsDeclared: effectsDeclaredBy(tool),
-      ...(schema ? { inputSchema: tool.inputSchema } : {}),
+      ...(schema ? { description: tool.description, inputSchema: tool.inputSchema } : {}),
     };
   }
 }
@@ -620,13 +705,74 @@ export function qualifiedToolName(capability: { server: string; tool: string }):
  * Un esquema vacío se manda igualmente como objeto sin propiedades: omitirlo hace que algunos
  * proveedores rechacen la función, y decir «no recibe nada» es además la información correcta.
  */
+/**
+ * El esquema tal como hay que enseñárselo al modelo.
+ *
+ * Se conserva `required` —sin él, «llama sin argumentos» es una lectura válida del esquema— y
+ * `additionalProperties`, que es lo único que le dice a `fitToSchema` si la herramienta admite algo
+ * más de lo que declara. Las `properties` viajan enteras, con su `description` y su `enum`: es lo
+ * que separa acertar a la primera de acertar a la tercera.
+ */
 function toInputSchema(schema: unknown): ToolInputSchema {
-  const object = schema as { properties?: Record<string, unknown>; required?: string[] } | null;
+  const object = schema as {
+    properties?: Record<string, unknown>;
+    required?: string[];
+    additionalProperties?: unknown;
+  } | null;
   return {
     type: 'object',
     properties: object?.properties ?? {},
     ...(object?.required?.length ? { required: object.required } : {}),
+    ...(object?.additionalProperties !== undefined
+      ? { additionalProperties: object.additionalProperties as boolean }
+      : {}),
   };
+}
+
+/**
+ * Lo que el modelo lee para decidir si esta herramienta es la que quiere.
+ *
+ * En modo directo no hay una segunda oportunidad: no existe `search_capabilities` ni un `describe`
+ * por el que preguntar. Así que va la descripción del servidor entera y acotada, y sólo se cae al
+ * resumen corto cuando el servidor no dio ninguna.
+ */
+const DIRECT_DESCRIPTION_CHARS = 600;
+
+function describe(capability: McpCapability): string {
+  const full = (capability.description ?? '').trim();
+  if (!full) return capability.summary;
+  return full.length > DIRECT_DESCRIPTION_CHARS
+    ? `${full.slice(0, DIRECT_DESCRIPTION_CHARS - 1)}…`
+    : full;
+}
+
+/**
+ * Qué clase de fallo fue, que decide si tiene sentido volver a intentarlo.
+ *
+ * Todo iba al mismo saco —`UPSTREAM_UNAVAILABLE` con `retryable: true`, con un ternario que
+ * devolvía lo mismo por las dos ramas— y el toolbox le añadía «puede funcionar si se reintenta».
+ * Así, un argumento inválido o una ruta fuera de las raíces permitidas le decían al modelo que
+ * insistiera, y el modelo insistía hasta agotar el turno. «Reintenta» es una promesa, y hacerla
+ * sobre algo que no depende del momento es mandarle a dar vueltas.
+ */
+function asJarvisError(error: unknown, name: string, server: string): JarvisError {
+  const scope = { capability: name, server };
+  const message = (error as Error).message;
+  if (error instanceof McpError) {
+    // Lo dijo la herramienta, no el transporte: el argumento está mal, la ruta no se puede leer,
+    // falta un parámetro. Repetir lo mismo da lo mismo.
+    if (error.code === 'MCP_TOOL_ERROR') {
+      return new JarvisError('BAD_REQUEST', `${name} rechazó la llamada: ${message}`,
+        { scope, retryable: false });
+    }
+    if (error.code === 'MCP_UNAUTHORIZED') {
+      return new JarvisError('FORBIDDEN',
+        `${server} rechazó la credencial de este core`, { scope, retryable: false });
+    }
+  }
+  // Lo demás sí es el servidor: caído, lento o inalcanzable. Ahí reintentar sí puede cambiar algo.
+  return new JarvisError('UPSTREAM_UNAVAILABLE', `la capacidad ${name} falló: ${message}`,
+    { scope, retryable: true });
 }
 
 function isAllowed(name: string, config: McpServerConfig): boolean {

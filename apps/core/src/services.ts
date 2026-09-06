@@ -311,6 +311,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
       servers: config.mcpServers,
       tokens: config.mcpTokens,
       writeServers: config.mcpWriteServers,
+      trustUntagged: config.mcpTrustUntagged,
       allow: config.mcpAllow,
       deny: config.mcpDeny,
     }),

@@ -116,6 +116,13 @@ export const config = {
    * decorativa: un MCP de sistema puede parar contenedores y reiniciar servicios.
    */
   mcpWriteServers: env['JARVIS_MCP_WRITE_SERVERS'] || '',
+  /**
+   * Servidores cuyas herramientas sin etiquetar se sirven igual.
+   *
+   * Vacío por defecto: lo que no dice qué hace no se ofrece. Escribir aquí un nombre es responder
+   * por ese servidor a mano, que es lo que se pide para levantar una protección.
+   */
+  mcpTrustUntagged: env['JARVIS_MCP_TRUST_UNTAGGED'] || '',
   mcpAllow: env['JARVIS_MCP_ALLOW'] || '',
   mcpDeny: env['JARVIS_MCP_DENY'] || '',
   mcpTtlMs: Number(env['JARVIS_MCP_TTL_MS'] || 10 * 60 * 1000),
