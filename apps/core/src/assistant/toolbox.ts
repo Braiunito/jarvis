@@ -23,7 +23,8 @@ import { autonomyOf, JarvisError, MCP_AREAS } from '@jarvis/contracts';
 import type { ArtifactPresentation, ChatRef, McpCapability } from '@jarvis/contracts';
 import { ARTIFACT_KINDS, ARTIFACT_PRESENTATIONS } from '@jarvis/contracts';
 import {
-  MAX_ARTIFACTS_PER_TURN, previewOf, resolveKind, samePresentation, type ArtifactRepository,
+  MAX_ARTIFACTS_PER_TURN, normalizeTable, previewOf, resolveKind, samePresentation,
+  type ArtifactRepository,
 } from '../chat/artifacts.js';
 import type { McpService } from '../mcp/service.js';
 import type { SessionService } from '../sessions/service.js';
@@ -1239,18 +1240,21 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         ? kind as ArtifactPresentation
         : 'inline');
 
+    // Lo que se guarda es la forma canónica, venga escrita como venga. Ver `normalizeTable`.
+    const cuerpo = resolved === 'table' ? normalizeTable(body) : body;
     const created = artifacts.repository.create(artifacts.conversationId, {
       kind: resolved,
       presentation,
       title,
-      body,
+      body: cuerpo,
       language: asString(input['language']),
       caption: asString(input['caption']),
     });
     if ('code' in created) return toolError(created.code, created.message, created.hint);
 
     this.#presented.push(created.id);
-    this.#presentedBodies.push({ id: created.id, body });
+    // El canónico, para que dos tablas iguales escritas de dos formas se reconozcan como una.
+    this.#presentedBodies.push({ id: created.id, body: cuerpo });
     this.#refs.push({
       kind: 'artifact',
       artifactId: created.id,

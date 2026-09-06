@@ -329,6 +329,23 @@ export function samePresentation(a: string, b: string): boolean {
  * resuelve.
  */
 export function resolveKind(kind: string, body: string): ArtifactKind | null {
+  /*
+   * `markdown` con un cuerpo que es una tabla no es markdown.
+   *
+   * Es la confusión contraria a la de abajo y **es peor**, porque aquélla se resolvía y ésta pasaba
+   * entera: `markdown` es un tipo válido, así que se devolvía tal cual, no pasaba por
+   * `validateTable`, y el JSON crudo se guardaba y se pintaba como texto. `ok: true` sin una queja.
+   * Visto en producción pidiéndole una tabla por escrito: mandó `kind: "markdown"` con
+   * `{"columns":…,"rows":…}` dentro.
+   *
+   * Sólo desde `markdown`, que significa «texto libre» y un objeto con `columns` y `rows` nunca lo
+   * es. Desde `json` **no** se reinterpreta: ahí el modelo está diciendo «esto son datos, enséñalos
+   * como datos», que es coherente, y adivinarle la intención sería quitarle una opción legítima.
+   */
+  if (kind === 'markdown') {
+    const conForma = shapeOfBody(body);
+    if (conForma) return conForma;
+  }
   if ((ARTIFACT_KINDS as readonly string[]).includes(kind)) return kind as ArtifactKind;
   // Sólo se rescata la confusión concreta que se ha visto. Un `kind` que no sea ni un tipo ni una
   // presentación es otra cosa, y adivinarla sería inventar.
@@ -356,6 +373,51 @@ export function resolveKind(kind: string, body: string): ArtifactKind | null {
   } catch {
     return 'markdown';
   }
+}
+
+/** Si el cuerpo declara por sí solo qué forma tiene. `null` si no lo dice. */
+function shapeOfBody(body: string): ArtifactKind | null {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (!isRecord(parsed)) return null;
+    if (Array.isArray(parsed['columns']) && Array.isArray(parsed['rows'])) return 'table';
+    if (typeof parsed['shape'] === 'string') return 'chart';
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Una tabla escrita como se escribe cuando no tienes el esquema delante.
+ *
+ * El modelo manda `columns: ["maquina","estado"]` y `rows: [["zeus","ok"]]` —cadenas y listas
+ * posicionales— porque es la forma natural de una tabla, no un despiste. Rechazarlo cuesta una
+ * vuelta del turno para enseñar algo que ya nos había dicho entero.
+ *
+ * Estricto en lo que se guarda, tolerante en lo que se acepta: dentro queda siempre la forma
+ * canónica, así que la pantalla no tiene que saber que existían dos.
+ */
+export function normalizeTable(body: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed['columns']) || !Array.isArray(parsed['rows'])) {
+    return body;
+  }
+  const columns = (parsed['columns'] as unknown[]).map((column) => (
+    typeof column === 'string' ? { key: column, label: column } : column
+  ));
+  const keys = columns.map((column) => (isRecord(column) ? String(column['key'] ?? '') : ''));
+  const rows = (parsed['rows'] as unknown[]).map((row) => {
+    if (!Array.isArray(row)) return row;
+    // Una fila-lista se empareja por posición con las columnas, que es lo que significa.
+    return Object.fromEntries(keys.map((key, index) => [key, row[index] ?? null]));
+  });
+  return JSON.stringify({ ...parsed, columns, rows });
 }
 
 /**

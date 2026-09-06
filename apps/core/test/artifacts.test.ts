@@ -13,7 +13,8 @@ import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
 import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
 import {
-  ArtifactRepository, MAX_ARTIFACT_BYTES, previewOf, resolveKind, samePresentation, validateBody,
+  ArtifactRepository, MAX_ARTIFACT_BYTES, normalizeTable, previewOf, resolveKind,
+  samePresentation, validateBody,
 } from '../src/chat/artifacts.js';
 import type {
   AssistantToolbox, PlanContext, ToolDefinition, ToolOutcome,
@@ -587,3 +588,56 @@ describe('R-16 · lo que no se puede pintar no llega a pintarse', () => {
   });
 });
 
+describe('un cuerpo con forma no es texto libre, y una tabla se escribe como se escribe', () => {
+  it('`markdown` con una tabla dentro es una tabla, y pasa por su validación', () => {
+    /*
+     * Visto en producción: se le pidió una tabla **por escrito** y mandó `kind: "markdown"` con
+     * `{"columns":…,"rows":…}` en el cuerpo. Como `markdown` es un tipo válido se devolvía tal cual,
+     * no pasaba por `validateTable`, y el JSON crudo se guardaba y se pintaba como texto. `ok: true`
+     * sin una queja: es peor que la confusión contraria, que al menos se resolvía.
+     */
+    const cuerpo = JSON.stringify({
+      columns: [{ key: 'host', label: 'Máquina' }], rows: [{ host: 'zeus' }],
+    });
+    expect(resolveKind('markdown', cuerpo)).toBe('table');
+  });
+
+  it('pero un markdown de verdad sigue siendo markdown', () => {
+    expect(resolveKind('markdown', '# Disco\n\nzeus tiene 40G libres.')).toBe('markdown');
+    expect(resolveKind('markdown', '{"algo":1}')).toBe('markdown');
+  });
+
+  it('`json` no se reinterpreta: ahí el modelo sí está diciendo lo que quiere', () => {
+    // Declarar `json` con datos dentro es coherente —«enséñalo como datos»— y adivinarle la
+    // intención le quitaría una opción legítima.
+    const cuerpo = JSON.stringify({ columns: ['a'], rows: [['x']] });
+    expect(resolveKind('json', cuerpo)).toBe('json');
+  });
+
+  it('columnas de texto y filas por posición se normalizan en vez de rechazarse', () => {
+    // Es cómo se escribe una tabla cuando no tienes el esquema delante, no un despiste. Rechazarlo
+    // costaba una vuelta del turno para enseñar algo que ya nos había dicho entero.
+    const natural = JSON.stringify({
+      columns: ['maquina', 'estado'],
+      rows: [['zeus', 'activa'], ['goro2', 'parada']],
+    });
+    const canonica = JSON.parse(normalizeTable(natural)) as {
+      columns: Array<{ key: string; label: string }>;
+      rows: Array<Record<string, unknown>>;
+    };
+
+    expect(canonica.columns).toEqual([
+      { key: 'maquina', label: 'maquina' }, { key: 'estado', label: 'estado' },
+    ]);
+    expect(canonica.rows[0]).toEqual({ maquina: 'zeus', estado: 'activa' });
+    // Y ya validada: el peor caso deja de ser «se guarda basura».
+    expect(validateBody('table', normalizeTable(natural))).toBeNull();
+  });
+
+  it('lo que ya venía canónico no se toca', () => {
+    const canonica = JSON.stringify({
+      columns: [{ key: 'host', label: 'Máquina' }], rows: [{ host: 'zeus' }],
+    });
+    expect(JSON.parse(normalizeTable(canonica))).toEqual(JSON.parse(canonica));
+  });
+});
