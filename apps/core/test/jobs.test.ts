@@ -58,6 +58,30 @@ describe('JOBS · un trabajo vivo por recurso', () => {
     expect(aDedo).toThrow(/UNIQUE/i);
   });
 
+  it('pero si el hilo ha avanzado, la marca de agua se mueve con él', () => {
+    /*
+     * R-08: un segundo mensaje mientras el asistente piensa.
+     *
+     * No hay trabajo nuevo —el invariante lo impide y está bien así— pero el que hay tiene que
+     * cubrir lo que se acaba de pedir. Si la marca se quedara en el punto del primer mensaje,
+     * `reconcile()` compararía con un `seq` que el primer turno ya subió al escribir, concluiría
+     * que ese trabajo escribió y lo abandonaría: la segunda pregunta no se contesta nunca.
+     *
+     * Mi prueba de arriba daba por buena esa situación porque sólo miraba que no hubiera dos
+     * trabajos. Lo comprobaba, y no comprobaba lo que el trabajo prometía cubrir.
+     */
+    const primero = encolar('c1', 0);
+    const segundo = encolar('c1', 3);
+
+    expect(segundo.id).toBe(primero.id);
+    expect(segundo.watermarkSeq).toBe(3);
+  });
+
+  it('y sólo hacia delante: dos mensajes rápidos no la hacen retroceder', () => {
+    encolar('c1', 5);
+    expect(encolar('c1', 2).watermarkSeq).toBe(5);
+  });
+
   it('dos conversaciones distintas sí tienen cada una el suyo', () => {
     expect(encolar('c1').id).not.toBe(encolar('c2').id);
     expect(jobs.counts().ready).toBe(2);

@@ -97,7 +97,27 @@ export class JobRepository {
     maxAttempts?: number;
   }): Job {
     const existing = this.alive(input.resourceType, input.resourceId, input.kind);
-    if (existing) return existing;
+    if (existing) {
+      /*
+       * Ya había uno vivo, pero el hilo ha avanzado: la marca de agua se mueve.
+       *
+       * Sin esto, un segundo mensaje enviado mientras el asistente piensa **queda sin cubrir**. El
+       * trabajo vivo sigue apuntando al punto del primero, así que si el proceso muere,
+       * `reconcile()` compara con un `seq` que ya subió —lo subió el primer turno al escribir—,
+       * concluye que ese trabajo ya escribió y lo abandona. Resultado: la segunda pregunta no se
+       * contesta nunca y no queda rastro de que hubiera que contestarla, que es exactamente lo que
+       * la cola venía a impedir.
+       *
+       * Sólo hacia delante: dos mensajes rápidos no pueden retroceder la marca.
+       */
+      const nueva = input.watermarkSeq;
+      if (typeof nueva === 'number' && (existing.watermarkSeq === null || nueva > existing.watermarkSeq)) {
+        this.#db.prepare('UPDATE jobs SET watermark_seq = ?, updated_at = ? WHERE id = ?')
+          .run(nueva, input.at, existing.id);
+        return this.require(existing.id);
+      }
+      return existing;
+    }
 
     const id = newJobId();
     this.#db.prepare(`
