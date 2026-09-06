@@ -250,6 +250,32 @@ describe('las decisiones son las acciones que el core sabe ejecutar', () => {
     expect((result['error'] as Record<string, string>)['hint']).toContain('request_approval');
   });
 
+  /*
+   * El tercer peldaño de la escalera, que se encendió en producción sin una sola prueba de qué
+   * hace. Las dos que siguen son las dos mitades del modo y hay que fijar las dos: sin la primera,
+   * `unrestricted` podría no conceder nada y parecería que funciona; sin la segunda, podría
+   * concederlo todo y también lo parecería. Un modo permisivo sólo está bien descrito cuando se
+   * dice **dónde deja de serlo**.
+   */
+  it('sin restricciones, un trabajo de escritura va sin tarjeta: es lo que el modo promete', async () => {
+    const outcome = await toolboxFor(openWorkspace(), 'unrestricted').invoke('create_run', {
+      title: 'Arreglarlo', prompt: 'toca el fichero', permission_profile: 'auto',
+    });
+    expect(outcome).toMatchObject({ type: 'decision', decision: { kind: 'run', permissionProfile: 'auto' } });
+  });
+
+  it('pero sin restricciones tampoco abre `yolo`: eso no es un peldaño, está fuera de la escalera', async () => {
+    /*
+     * `yolo` se corta antes del gate de autonomía, así que ningún modo lo alcanza. Se fija con el
+     * modo más permisivo puesto porque es el único que podría taparlo: con `auto` esta prueba
+     * pasaría igual estando el corte roto.
+     */
+    const result = content(await toolboxFor(openWorkspace(), 'unrestricted').invoke('create_run', {
+      title: 'arreglarlo', prompt: 'lo que haga falta', permission_profile: 'yolo',
+    }));
+    expect((result['error'] as Record<string, string>)['code']).toBe('FORBIDDEN');
+  });
+
   it('la síntesis cita evidencia que existe, y descarta la inventada', async () => {
     const workspace = openWorkspace();
     const runId = seedRun(workspace.id);
