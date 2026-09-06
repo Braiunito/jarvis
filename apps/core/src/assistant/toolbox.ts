@@ -2085,7 +2085,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
          * el manual del servidor en vez de por lo que se buscaba. El servidor ya lo sabemos; lo
          * que hay que adivinar es la herramienta.
          */
-        const nearby = await mcp.search(bare.replace(/[._]+/g, ' '), 3);
+        const nearby = await mcp.search(bareCapability(name).replace(/[._]+/g, ' '), 3);
         /*
          * «No existe» y «no la servimos» no son lo mismo, y confundirlas hace daño.
          *
