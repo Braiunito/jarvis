@@ -1132,6 +1132,17 @@ export class ChatService {
       // Sólo la conversación: un plan ya trabaja sobre una sesión, y dejarle abrir otras le
       // ensancha el alcance sin que nadie lo haya pedido.
       workspaces: this.#deps.workspaces,
+      /*
+       * Y que pueda proponer un plan de varios pasos, sobre esta conversación.
+       *
+       * El motor dice si los hay; la conversación dice sobre qué. El gate sale del motor y no de
+       * otra condición porque `capabilities()` calcula el cupo con ese mismo `Boolean(plans)`: si
+       * cada uno mira su propia señal, la cuenta reserva un hueco para una herramienta que el
+       * catálogo no ofrece, y las dos mitades se contradicen sin que ninguna falle.
+       */
+      ...(this.#deps.plans
+        ? { plans: { conversationId: conversation.id, workspaceId: workspace?.id ?? null } }
+        : {}),
       // Y lo que ya se encontró, porque el toolbox es de un turno y la conversación no.
       knownSessions: this.#knownSessions(this.#repository.lastMessages(conversation.id, this.#historyMessages)),
       health: this.#deps.health,
@@ -1397,6 +1408,7 @@ class RecordingToolbox implements AssistantToolbox {
   get terminalOffer(): AssistantToolbox['terminalOffer'] { return this.#inner.terminalOffer; }
   get refs(): AssistantToolbox['refs'] { return this.#inner.refs; }
   get repeats(): number { return this.#inner.repeats; }
+  get presented(): number { return this.#inner.presented; }
   get observations(): number { return this.#inner.observations; }
   get spent(): boolean { return this.#inner.spent; }
 

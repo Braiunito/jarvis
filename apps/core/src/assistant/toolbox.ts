@@ -23,7 +23,8 @@ import { autonomyOf, JarvisError, MCP_AREAS } from '@jarvis/contracts';
 import type { ArtifactPresentation, ChatRef, McpCapability } from '@jarvis/contracts';
 import { ARTIFACT_KINDS, ARTIFACT_PRESENTATIONS } from '@jarvis/contracts';
 import {
-  MAX_ARTIFACTS_PER_TURN, normalizeTable, previewOf, resolveKind, samePresentation,
+  MAX_ARTIFACTS_PER_TURN, normalizeChart, normalizeTable, previewOf, resolveKind,
+  samePresentation,
   type ArtifactRepository,
 } from '../chat/artifacts.js';
 import type { McpService } from '../mcp/service.js';
@@ -935,6 +936,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   get terminalOffer(): TerminalOffer | null { return this.#terminalOffer; }
   get refs(): ChatRef[] { return this.#refs; }
   get repeats(): number { return this.#repeats; }
+  get presented(): number { return this.#presented.length; }
   get observations(): number { return this.#observations; }
 
   /** Ya no queda presupuesto: ni por número de consultas ni por tiempo. */
@@ -1241,7 +1243,8 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         : 'inline');
 
     // Lo que se guarda es la forma canónica, venga escrita como venga. Ver `normalizeTable`.
-    const cuerpo = resolved === 'table' ? normalizeTable(body) : body;
+    const cuerpo = resolved === 'table' ? normalizeTable(body)
+      : (resolved === 'chart' ? normalizeChart(body) : body);
     const created = artifacts.repository.create(artifacts.conversationId, {
       kind: resolved,
       presentation,

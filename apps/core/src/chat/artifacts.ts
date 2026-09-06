@@ -456,6 +456,49 @@ function markdownQueEsDatos(body: string): ArtifactRejection | null {
  * Estricto en lo que se guarda, tolerante en lo que se acepta: dentro queda siempre la forma
  * canónica, así que la pantalla no tiene que saber que existían dos.
  */
+/**
+ * Un gráfico escrito en el dialecto que existe en el mundo.
+ *
+ * Al primer intento el modelo escribe **Chart.js** —`type`, `data.labels`, `data.datasets[].data`—
+ * porque es el formato de gráficos que ha visto un millón de veces. No es un sinónimo inventado:
+ * es una firma cerrada y reconocible, así que traducirla es leer y no adivinar. Medido: cuatro
+ * vueltas para un anillo de una porción, y la última se quedó sin margen para redactar.
+ *
+ * Y se busca `slices` también un nivel adentro, porque el tercer intento las metió dentro de
+ * `data`: había entendido la palabra y no dónde iba.
+ */
+export function normalizeChart(body: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (!isRecord(parsed)) return body;
+  if (Array.isArray(parsed['slices']) || Array.isArray(parsed['points'])) return body;
+
+  const dentro = isRecord(parsed['data']) ? parsed['data'] : null;
+  // Lo que ya venía con la palabra buena, sólo que un nivel más abajo.
+  if (dentro && (Array.isArray(dentro['slices']) || Array.isArray(dentro['points']))) {
+    return JSON.stringify({ ...parsed, ...dentro, data: undefined });
+  }
+
+  const etiquetas = dentro && Array.isArray(dentro['labels']) ? dentro['labels'] : null;
+  const series = dentro && Array.isArray(dentro['datasets']) ? dentro['datasets'][0] : null;
+  const valores = isRecord(series) && Array.isArray(series['data']) ? series['data'] : null;
+  if (!etiquetas || !valores) return body;
+
+  const puntos = etiquetas.map((label, index) => ({
+    key: String(label),
+    label: String(label),
+    value: Number(valores[index] ?? 0),
+  }));
+  // `type` de Chart.js nombra la misma idea que `shape`, y `pie` es nuestro `donut`.
+  const tipo = String(parsed['shape'] ?? parsed['type'] ?? '');
+  const shape = tipo === 'pie' || tipo === 'doughnut' ? 'donut' : (tipo === 'bar' ? 'bars' : tipo);
+  return JSON.stringify(shape === 'bars' ? { shape, points: puntos } : { shape: 'donut', slices: puntos });
+}
+
 export function normalizeTable(body: string): string {
   let parsed: unknown;
   try {

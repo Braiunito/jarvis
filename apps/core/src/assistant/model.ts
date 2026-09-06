@@ -61,6 +61,9 @@ Cómo trabajar:
 · Un paso por turno, con un motivo que se entienda. Nada de encadenar cinco acciones a ciegas.
 · Cita la evidencia por su identificador de trabajo. No copies salidas enteras: la interfaz enlaza
   a lo completo y el contexto no es un sitio donde guardar buffers.
+· No digas que has mostrado, generado o adjuntado algo si no has llamado a \`present\`. «No vuelques
+  la salida entera» no significa «di que la enseñaste»: si el contenido importa y no lo presentas,
+  va escrito en tu respuesta. Enseñar y contar son las dos únicas salidas; fingir no es una.
 · Si una herramienta falla, di qué te faltó y propón cómo seguir, en vez de declarar que no puedes.
 · Datos con forma van en \`present\`, no en la respuesta. Una tabla de máquinas, un JSON, un
   fragmento de código o un gráfico se **enseñan**: se pueden ordenar, copiar y abrir aparte. Si te
@@ -806,7 +809,23 @@ export class OpenAiCompatibleModel implements AssistantModel {
 
       if (!calls.length || !calls[0]?.function?.name) {
         const text = cleanSummary(message.content ?? '');
-        if (text) return { kind: 'finish', summary: text.slice(0, 4000) };
+        if (text) {
+          /*
+           * No se publica una respuesta que dice haber enseñado algo que no está.
+           *
+           * El core sabe con certeza cuántos artifacts colgó el turno, así que esto no es
+           * interpretar el texto: es contrastar una afirmación con un hecho. Una sola vuelta —la
+           * misma economía que el nudge de arriba— y si insiste, se cierra con lo que dijo: una
+           * respuesta rara es mejor que un bucle.
+           */
+          if (!nudged && toolbox.presented === 0 && CLAIMS_PRESENTED.test(text)) {
+            nudged = true;
+            messages.push({ role: 'assistant', content: message.content ?? null });
+            messages.push({ role: 'user', content: NOTHING_WAS_SHOWN });
+            continue;
+          }
+          return { kind: 'finish', summary: text.slice(0, 4000) };
+        }
         /*
          * Ni herramienta ni texto: un modelo que razona puede gastar la vuelta pensando y no
          * emitir nada. Visto con gpt-5-nano —400 tokens generados, mensaje vacío— y la persona se
@@ -1007,6 +1026,29 @@ export class OpenAiCompatibleModel implements AssistantModel {
  * Va como texto y no como un volcado del objeto porque lo que hace falta subrayar —qué se espera
  * de este turno, qué límites hay— se pierde dentro de un JSON plano.
  */
+/**
+ * Palabras con las que una respuesta afirma haber enseñado algo.
+ *
+ * Se busca al **cerrar el turno**, y sólo cuando el core sabe que no se colgó nada. No es adivinar
+ * lo que quiso decir: es comprobar una afirmación concreta contra un hecho que tenemos delante.
+ */
+const CLAIMS_PRESENTED = /\b(mostrad|most(ré|re)|enseñad|enseñ(é|e)|generad|gener(é|e)|adjunt|presentad|present(é|e)|te dejo (la|el) (tabla|gr[áa]fico|informe|documento)|arriba tienes|aqu[íi] tienes (la|el) (tabla|gr[áa]fico|informe))/i;
+
+/**
+ * Lo que se le dice cuando dice haber enseñado algo que no enseñó.
+ *
+ * Medido en producción: a «enséñame /etc/os-release como bloque de código» contestó «Mostrado el
+ * contenido… equivalente a las claves PRETTY_NAME, NAME, VERSION_ID» sin llamar a `present` y sin
+ * poner los valores. Quien pregunta se queda sin el bloque **y** sin el contenido.
+ *
+ * La causa probable es que el prompt le pide no volcar salidas enteras, y esa mitad le llega: no
+ * vuelca. La otra —que entonces hay que presentarlo— no. Así que se le dice cuál de las dos
+ * salidas tomar, no que lo intente otra vez.
+ */
+const NOTHING_WAS_SHOWN = 'Tu respuesta dice que has mostrado o generado algo y este turno no ha '
+  + 'colgado nada: no existe. Elige una de las dos: llama a `present` con el contenido, o escribe '
+  + 'el contenido en tu respuesta. Lo que no vale es decir que está cuando no está.';
+
 export function renderContext(context: PlanContext): string {
   const lines = [`Objetivo: ${context.objective}`, ''];
   if (context.workspace) {

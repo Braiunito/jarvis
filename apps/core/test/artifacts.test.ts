@@ -13,7 +13,7 @@ import { fixedClock } from '../src/platform/clock.js';
 import { buildServices, type CoreServices } from '../src/services.js';
 import { CoreAssistantToolbox } from '../src/assistant/toolbox.js';
 import {
-  ArtifactRepository, MAX_ARTIFACT_BYTES, normalizeTable, previewOf, resolveKind,
+  ArtifactRepository, MAX_ARTIFACT_BYTES, normalizeChart, normalizeTable, previewOf, resolveKind,
   samePresentation, validateBody,
 } from '../src/chat/artifacts.js';
 import type {
@@ -711,5 +711,49 @@ describe('la llave que no vimos, y la puerta por la que volvía', () => {
     expect(validateBody('markdown', 'zeus tiene 40G libres.')).toBeNull();
     // Un número o una cadena sueltos parsean como JSON y siguen siendo texto: no se rechazan.
     expect(validateBody('markdown', '42')).toBeNull();
+  });
+});
+
+describe('un gráfico escrito en el dialecto que existe en el mundo', () => {
+  const valida = (cuerpo: string): ReturnType<typeof validateBody> =>
+    validateBody('chart', normalizeChart(cuerpo));
+
+  it('Chart.js se traduce en vez de rechazarse cuatro veces', () => {
+    // El primer intento medido en producción, literal. Le costó cuatro vueltas llegar a `slices`,
+    // y la última se quedó sin margen para redactar la respuesta.
+    const chartjs = JSON.stringify({
+      type: 'pie',
+      data: { labels: ['zeus', 'goro2'], datasets: [{ data: [5, 3] }] },
+      options: { responsive: true },
+    });
+    const traducido = JSON.parse(normalizeChart(chartjs)) as Record<string, unknown>;
+
+    expect(traducido['shape']).toBe('donut');
+    expect(traducido['slices']).toEqual([
+      { key: 'zeus', label: 'zeus', value: 5 }, { key: 'goro2', label: 'goro2', value: 3 },
+    ]);
+    expect(valida(chartjs)).toBeNull();
+  });
+
+  it('las barras también, y `bar` es `bars`', () => {
+    const chartjs = JSON.stringify({
+      type: 'bar', data: { labels: ['a', 'b'], datasets: [{ data: [1, 2] }] },
+    });
+    expect(JSON.parse(normalizeChart(chartjs))).toMatchObject({ shape: 'bars' });
+    expect(valida(chartjs)).toBeNull();
+  });
+
+  it('las porciones metidas un nivel adentro se sacan: sabía la palabra, no dónde iba', () => {
+    // El tercer intento medido: `slices` dentro de `data`.
+    const dentro = JSON.stringify({
+      shape: 'donut', data: { labels: ['zeus'], slices: [{ label: 'zeus', value: 5 }] },
+    });
+    expect(valida(dentro)).toBeNull();
+  });
+
+  it('lo que ya venía bien no se toca', () => {
+    const bueno = JSON.stringify({ shape: 'meter', label: 'Disco', value: 60, max: 100 });
+    expect(JSON.parse(normalizeChart(bueno))).toEqual(JSON.parse(bueno));
+    expect(valida(bueno)).toBeNull();
   });
 });

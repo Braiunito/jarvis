@@ -303,6 +303,13 @@ export interface AssistantToolbox {
    * se parecen demasiado.
    */
   readonly repeats: number;
+  /**
+   * Cuántas cosas colgó este turno.
+   *
+   * El core lo sabe con certeza, y por eso puede desmentir una respuesta que dice «mostrado» sin
+   * haber mostrado nada. No es una heurística sobre el texto: es el hecho.
+   */
+  readonly presented: number;
   /** Cuántas lecturas lleva el turno: el presupuesto es del core, no del modelo. */
   readonly observations: number;
   /**
