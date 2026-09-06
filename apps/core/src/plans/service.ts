@@ -15,6 +15,10 @@ import type {
 import { AUTONOMY_MODES, isTerminalStatus, JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { newApprovalId, newPlanId, newStepId } from '../platform/ids.js';
+import {
+  applyRevision, digestOf, type DraftStep, MAX_STEP_OUTPUT_CHARS, outsideEnvelope,
+  type RevisionChange, revisionOutsideEnvelope,
+} from './workflow.js';
 import type { AuditLog } from '../platform/audit.js';
 import type { AttachmentService } from '../attachments/service.js';
 import type { EvidenceService } from '../evidence/service.js';
@@ -23,7 +27,7 @@ import type { WorkspaceService } from '../workspaces/use-cases.js';
 import type { SessionService } from '../sessions/service.js';
 import type { HealthService } from '../health/service.js';
 import type {
-  AssistantModel, EvidenceRef, PlanContext, PlanHistoryEntry,
+  AssistantDecision, AssistantModel, EvidenceRef, PlanContext, PlanHistoryEntry,
 } from '../assistant/model.js';
 import { CoreAssistantToolbox, type ToolboxLimits } from '../assistant/toolbox.js';
 import type { McpService } from '../mcp/service.js';
@@ -130,6 +134,48 @@ function stepSummary(step: PlanStep): string | null {
   if (typeof output['error'] === 'string') return `falló: ${output['error']}`;
   if (typeof output['status'] === 'string') return `la aprobación quedó ${output['status']}`;
   return null;
+}
+
+/** En qué estados un plan ya no se mueve. Gobernarlo entonces no es gobernarlo, es reescribirlo. */
+const TERMINALES = new Set(['completed', 'failed', 'cancelled']);
+
+/**
+ * La salida de un paso, en texto y acotada.
+ *
+ * Se dice que se recortó en vez de recortar en silencio: un modelo que recibe medio JSON sin
+ * avisar se lo cree entero, y eso es peor que no dárselo.
+ */
+/**
+ * Los pasos estimativos del plan, y en cuál se está.
+ *
+ * El modelo necesita ver el plan **entero** para atar el paso que le toca sin reinventar el
+ * resto: sin esto sabría lo que ya pasó y lo que se le pide ahora, pero no hacia dónde va, que es
+ * justo lo que hace que un paso encaje con el siguiente en vez de repetirlo.
+ */
+function plannedFrom(steps: PlanStep[], currentStep: number): NonNullable<PlanContext['plannedSteps']> {
+  return steps
+    .filter((step) => step.kind === 'estimate')
+    .map((step) => {
+      const input = (step.input ?? {}) as { intent?: string; expects?: string; unknowns?: string[]; writes?: boolean };
+      return {
+        ordinal: step.ordinal,
+        title: step.title,
+        intent: input.intent ?? '',
+        expects: input.expects ?? '',
+        unknowns: input.unknowns ?? [],
+        writes: input.writes ?? false,
+        state: step.status === 'completed' ? 'done' as const
+          : step.ordinal === currentStep ? 'current' as const
+            : 'pending' as const,
+      };
+    });
+}
+
+function clipOutput(output: unknown): string | null {
+  if (output === null || output === undefined) return null;
+  const text = typeof output === 'string' ? output : JSON.stringify(output);
+  if (text.length <= MAX_STEP_OUTPUT_CHARS) return text;
+  return `${text.slice(0, MAX_STEP_OUTPUT_CHARS)}… (recortado, ${text.length} caracteres en total)`;
 }
 
 export interface PlanServiceDeps {
@@ -258,6 +304,225 @@ export class PlanService {
       payload: { planId: plan.id, objectiveBytes: Buffer.byteLength(objective, 'utf8') },
     });
     return plan;
+  }
+
+  /**
+   * Un workflow: el plan entero propuesto de golpe, con su perímetro, y sin avanzar todavía.
+   *
+   * Nace en `draft` y ahí se queda hasta que alguien lo firme. Ésa es la diferencia con
+   * `create()`: un plan normal nace listo para pensar el primer paso, y un workflow nace **escrito
+   * entero** para que se pueda leer antes de autorizarlo. Lo que se firma es el sobre, no la lista
+   * de pasos, porque los pasos van a cambiar por diseño —para eso son estimativos— y no se puede
+   * firmar algo que va a cambiar.
+   *
+   * Los pasos entran como `estimate`: dicen qué se quiere conseguir y qué falta por saber, y no
+   * con qué se hará. Atarlos es trabajo del turno que llegue a cada uno.
+   */
+  createWorkflow(input: {
+    workspaceId: string;
+    objective: string;
+    envelope: WorkflowEnvelope;
+    steps: ReadonlyArray<DraftStep>;
+    conversationId?: string | null;
+    autonomy?: AutonomyMode;
+    user: UserIdentity;
+  }): Plan {
+    const user = input.user;
+    this.#deps.workspaces.require(input.workspaceId);
+    if (!input.objective.trim()) throw new JarvisError('BAD_REQUEST', 'el objetivo no puede estar vacío');
+    if (input.steps.length === 0) throw new JarvisError('BAD_REQUEST', 'un workflow sin pasos no es un plan');
+
+    const at = this.#deps.clock.nowIso();
+    const planId = newPlanId();
+    const autonomy = input.autonomy ?? 'manual';
+    const write = this.#deps.db.transaction(() => {
+      this.#deps.db.prepare(`INSERT INTO plans
+        (id, workspace_id, created_by, objective, status, current_step, created_at, updated_at,
+         autonomy, conversation_id, envelope_json)
+        VALUES (?, ?, ?, ?, 'draft', 0, ?, ?, ?, ?, ?)`)
+        .run(planId, input.workspaceId, user.username, input.objective, at, at,
+          autonomy, input.conversationId ?? null, JSON.stringify(input.envelope));
+
+      input.steps.forEach((step, ordinal) => {
+        this.#deps.db.prepare(`INSERT INTO plan_steps
+          (id, plan_id, ordinal, kind, status, title, input_json, idempotency_key, attempt)
+          VALUES (?, ?, ?, 'estimate', 'draft', ?, ?, ?, 1)`)
+          .run(newStepId(), planId, ordinal, step.title,
+            JSON.stringify({
+              intent: step.intent,
+              expects: step.expects,
+              unknowns: step.unknowns ?? [],
+              writes: step.writes ?? false,
+            }),
+            `plan:${planId}:${ordinal}`);
+      });
+    });
+    write();
+
+    this.#deps.audit.record({
+      actorUser: user.username, eventType: 'workflow.drafted', workspaceId: input.workspaceId,
+      payload: {
+        planId, steps: input.steps.length, hosts: input.envelope.hosts,
+        maxRuns: input.envelope.maxRuns, writes: input.envelope.writes,
+      },
+    });
+    return this.require(planId);
+  }
+
+  /**
+   * El workflow queda firmado y pasa a poder pensar.
+   *
+   * Se comprueba que el sobre es **el mismo** que se enseñó, comparando el digest: entre que se
+   * propone y se firma cabe una revisión, y firmar un sobre para acabar ejecutando otro es
+   * exactamente lo que el digest existe para impedir.
+   */
+  activate(planId: string, user: UserIdentity, signedDigest?: string): Plan {
+    const plan = this.require(planId);
+    if (plan.status !== 'draft') {
+      throw new JarvisError('CONFLICT', `este plan ya no es un borrador: está ${plan.status}`);
+    }
+    if (!plan.envelope) throw new JarvisError('CONFLICT', 'este plan no tiene perímetro que firmar');
+
+    /*
+     * El digest se comprueba **si quien llama lo trae**.
+     *
+     * Cuando esto lo dispara una tarjeta firmada, la comprobación ya la hizo la aprobación con su
+     * propio digest, que cubre el sobre entero. Repetirla aquí no sobra pero tampoco es lo que
+     * sostiene la garantía; lo que no puede pasar es que sin digest se ejecute otro sobre, y por
+     * eso el que se guarda es el que se enseñó.
+     */
+    const digest = digestOf({ planId, objective: plan.objective, envelope: plan.envelope });
+    if (signedDigest !== undefined && digest !== signedDigest) {
+      throw new JarvisError('CONFLICT',
+        'lo que se firmó no es lo que hay: el plan cambió después de enseñarlo');
+    }
+
+    this.#setPlanStatus(planId, 'ready');
+    this.#deps.audit.record({
+      actorUser: user.username, eventType: 'workflow.activated', workspaceId: plan.workspaceId,
+      payload: { planId, digest },
+    });
+    return this.require(planId);
+  }
+
+  /**
+   * Corregir el plan en vuelo, y sólo hacia delante.
+   *
+   * Lo pide la conversación, nunca el propio plan: un plan que se corrigiera a sí mismo mientras
+   * corre no tendría a quién enseñarle el cambio. Aquí hay alguien mirando.
+   *
+   * Un workflow se firma sabiendo que los pasos van a cambiar —para eso son estimativos— así que
+   * revisarlos no invalida la firma. Lo que **no** puede hacer una revisión es ensanchar el
+   * perímetro: si deja más pasos de los autorizados o mete uno que escribe donde se firmó sólo
+   * mirar, deja de ser una corrección y pasa a ser un plan nuevo, que firma una persona.
+   *
+   * Los pasos ya hechos no se reescriben. La historia de un plan es lo que permite leer qué pasó,
+   * y uno que reescribe su propio pasado no se puede auditar.
+   */
+  revise(input: {
+    planId: string; reason: string; changes: ReadonlyArray<Record<string, unknown>>; user: UserIdentity;
+  }): { ok: true } | { ok: false; message: string } {
+    const { planId, user } = input;
+    const plan = this.require(planId);
+    const steps = this.steps(planId);
+    const desde = plan.currentStep;
+
+    /*
+     * No poder corregir se devuelve, no se lanza.
+     *
+     * Quien llama es un turno del modelo, y lo que necesita es una frase que pueda leer para
+     * intentar otra cosa. Una excepción aquí sería un camino de error para algo que no es un
+     * error: pedir una corrección imposible es una petición razonable con una respuesta clara.
+     */
+    const revision = applyRevision(steps, desde, input.changes as never);
+    if (!revision.ok) {
+      return {
+        ok: false,
+        message: revision.hint ? `${revision.message}. ${revision.hint}` : revision.message,
+      };
+    }
+
+    const fuera = revisionOutsideEnvelope(plan.envelope, revision.steps);
+    if (fuera) return { ok: false, message: fuera };
+
+    const at = this.#deps.clock.nowIso();
+    const rewrite = this.#deps.db.transaction(() => {
+      this.#deps.db
+        .prepare("DELETE FROM plan_steps WHERE plan_id = ? AND ordinal >= ? AND kind = 'estimate' AND status = 'draft'")
+        .run(planId, desde);
+      revision.steps.forEach((step, indice) => {
+        this.#deps.db.prepare(`INSERT INTO plan_steps
+          (id, plan_id, ordinal, kind, status, title, input_json, idempotency_key, attempt)
+          VALUES (?, ?, ?, 'estimate', 'draft', ?, ?, ?, 1)`)
+          .run(newStepId(), planId, desde + indice, step.title,
+            JSON.stringify({
+              intent: step.intent, expects: step.expects,
+              unknowns: step.unknowns ?? [], writes: step.writes ?? false,
+            }),
+            `plan:${planId}:rev${desde}:${indice}`);
+      });
+      this.#deps.db.prepare('UPDATE plans SET updated_at = ? WHERE id = ?').run(at, planId);
+    });
+    rewrite();
+
+    this.#deps.audit.record({
+      actorUser: user.username, eventType: 'workflow.revised', workspaceId: plan.workspaceId,
+      payload: { planId, from: desde, steps: revision.steps.length, reason: input.reason.slice(0, 300) },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Pausar, reanudar o cancelar un workflow desde fuera.
+   *
+   * Cancelar **no deshace lo hecho**: los trabajos que ya corrieron corrieron, y decir lo
+   * contrario sería mentir sobre una máquina. Lo que hace es que no se dé el paso siguiente.
+   *
+   * Pausar existe aparte de cancelar porque son dos intenciones distintas: «esto va mal, para» y
+   * «esto va bien pero ahora no». Sin la segunda, la única forma de ganar tiempo es matar el plan.
+   */
+  steer(input: {
+    planId: string; op: 'pause' | 'resume' | 'cancel'; reason: string; user: UserIdentity;
+  }): { ok: true } | { ok: false; message: string } {
+    const plan = this.require(input.planId);
+    if (TERMINALES.has(plan.status)) {
+      return { ok: false, message: `este plan ya terminó: está ${plan.status}` };
+    }
+
+    /*
+     * Pausar todavía no tiene dónde guardarse.
+     *
+     * `PLAN_STATUSES` no tiene `paused`, así que pausar exigiría inventarse un estado por el
+     * camino —dejarlo en `ready` y recordar aparte que no debe avanzar— y eso es justo como se
+     * acaba con dos ideas de en qué estado está un plan. Se dice que no se puede en vez de
+     * fingirlo: cancelar sí funciona, y es lo que de verdad hace falta para parar algo.
+     */
+    if (input.op !== 'cancel') {
+      return {
+        ok: false,
+        message: 'todavía no se puede pausar ni reanudar un plan: por ahora sólo cancelarlo, '
+          + 'y cancelar no deshace lo que ya corrió',
+      };
+    }
+
+    this.#setPlanStatus(input.planId, 'cancelled');
+    this.#deps.audit.record({
+      actorUser: input.user.username,
+      eventType: `workflow.${input.op}d`,
+      workspaceId: plan.workspaceId,
+      payload: { planId: input.planId, from: plan.status, reason: input.reason.slice(0, 300) },
+    });
+    return { ok: true };
+  }
+
+  /** Lo justo para contarlo en el hilo: qué se propuso, cuántos pasos y por dónde va. */
+  describe(planId: string): { objective: string; steps: number; status: string } | null {
+    const plan = this.#deps.db.prepare('SELECT objective, status FROM plans WHERE id = ?')
+      .get(planId) as { objective: string; status: string } | undefined;
+    if (!plan) return null;
+    const steps = this.#deps.db.prepare('SELECT COUNT(*) n FROM plan_steps WHERE plan_id = ?')
+      .get(planId) as { n: number };
+    return { objective: plan.objective, steps: steps.n, status: plan.status };
   }
 
   // ---- motor --------------------------------------------------------------
@@ -468,11 +733,48 @@ export class PlanService {
     });
 
     this.#setPlanStatus(planId, 'running');
-    let decision;
+    let decision: AssistantDecision;
     try {
       decision = await model.decide(context, toolbox);
     } catch (error) {
       return this.#finish(planId, 'failed', `el modelo falló: ${(error as Error).message}`);
+    }
+
+    /*
+     * Lo que se sale del sobre no falla ni obedece: se convierte en una tarjeta.
+     *
+     * Se transforma la decisión **antes** de que llegue a su rama, así que pasa por la misma
+     * maquinaria de aprobación que todo lo demás —su digest, su caducidad, su auditoría— en vez de
+     * por una copia parecida. Y el motivo viaja al `summary`, que es lo que va a leer la persona:
+     * quien mira la tarjeta tiene que entender qué pidió el asistente y qué autorizó él, y «fuera
+     * del sobre» no es un motivo.
+     *
+     * Sin sobre no se comprueba nada. Los planes de antes no lo tienen, y aplicarles esto o
+     * pasaría todo —y entonces no comprueba— o bloquearía todo.
+     */
+    if (decision.kind === 'run' && plan.envelope) {
+      const fuera = outsideEnvelope(
+        plan.envelope,
+        { kind: 'run', host: workspace.ref.host, permissionProfile: decision.permissionProfile },
+        { steps: steps.length, runs: steps.filter((step) => step.runId).length },
+      );
+      if (fuera) {
+        const { title, prompt, permissionProfile, rationale } = decision;
+        decision = {
+          kind: 'approval',
+          title,
+          actionType: 'run',
+          summary: `${rationale || title}. Se sale de lo aprobado: ${fuera}`,
+          permissionProfile,
+          prompt,
+        };
+        audit.record({
+          actorUser: plan.createdBy,
+          eventType: 'workflow.outside_envelope',
+          workspaceId: plan.workspaceId,
+          payload: { planId, reason: fuera.slice(0, 300) },
+        });
+      }
     }
 
     const ordinal = steps.length;
@@ -564,6 +866,28 @@ export class PlanService {
       return this.require(planId);
     }
 
+    if (decision.kind === 'workflow') {
+      /*
+       * Un plan no propone workflows: los propone una conversación, que es donde hay alguien a
+       * quien enseñárselo antes de firmarlo. Si llega aquí, se dice por qué en vez de caer por el
+       * camino del run, que ejecutaría algo que nadie aprobó.
+       */
+      return this.#finish(planId, 'failed',
+        'el modelo propuso un plan de trabajo dentro de un plan que ya está en marcha');
+    }
+
+    if (decision.kind === 'revision' || decision.kind === 'steer') {
+      /*
+       * Corregir o gobernar un workflow tampoco se hace desde dentro.
+       *
+       * Un plan que se corrigiera a sí mismo mientras corre no tendría a quién enseñarle el cambio,
+       * y gobernarse a sí mismo —pausarse, cancelarse— es pedirle que decida sobre lo que está
+       * haciendo. Las dos cosas se piden desde la conversación, que es donde hay alguien mirando.
+       */
+      return this.#finish(planId, 'failed',
+        'el modelo quiso cambiar o gobernar un plan desde dentro, y eso se hace desde la conversación');
+    }
+
     if (decision.kind === 'capability') {
       // No se ofrece en un plan y por tanto no debería llegar; si llega, se dice por qué en vez de
       // caer por el camino del run, que ejecutaría algo que nadie pidió.
@@ -628,6 +952,19 @@ export class PlanService {
       summary: stepSummary(step),
       runId: step.runId,
       errorCode: step.errorCode,
+      /*
+       * Lo que el paso dejó, y no sólo su resumen.
+       *
+       * `stepSummary` mira cuatro claves conocidas —`summary`, `answer`, `error`, `status`— y
+       * devuelve `null` para todo lo demás. En un plan normal eso bastaba: los pasos producían
+       * runs y los runs traen su resumen. En un workflow no: lo que un paso estimativo le tiene
+       * que contar al siguiente **es** su salida, y con `stepSummary` se perdía entera.
+       *
+       * Va recortado y **se dice que se recorta**, como en las herramientas: ocho pasos con la
+       * salida completa crecen rápido y lo paga el modelo en cada turno. Lo que haga falta entero
+       * es evidencia y se pide con `get_run`.
+       */
+      ...(plan.envelope ? { output: clipOutput(step.output) } : {}),
     }));
 
     // La respuesta de una persona es «pendiente» sólo mientras sea lo último que ha pasado. Después
@@ -656,6 +993,13 @@ export class PlanService {
       pendingInput,
       pendingApprovals,
       source,
+      /*
+       * El perímetro y el plan escrito, sólo si esto es un workflow.
+       *
+       * Un plan sin sobre no gana nada con esto y sí cambia lo que ve su modelo, así que se deja
+       * exactamente como estaba: lo que decide es tener sobre, no ser un plan.
+       */
+      ...(plan.envelope ? { envelope: plan.envelope, plannedSteps: plannedFrom(steps, plan.currentStep) } : {}),
       limits: {
         stepsUsed: steps.length,
         maxSteps: this.#maxSteps,
