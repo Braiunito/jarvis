@@ -234,6 +234,34 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
     expect(offered).toContain('get_health');
   });
 
+  it('con motor de planes detrás, la herramienta de workflow se le ofrece al modelo', async () => {
+    /*
+     * La prueba que faltaba, y se echó de menos en producción.
+     *
+     * El motor de workflows estaba entero y probado —15 pruebas sobre proponer, firmar, atar y
+     * corregir— y aun así el asistente **no proponía ningún plan**: `ChatService` recibía el motor
+     * y no se lo pasaba al toolbox, que es quien decide el catálogo. La herramienta no se ofrecía
+     * nunca, así que el modelo no la usaba ni pidiéndosela por su nombre.
+     *
+     * Ninguna prueba del motor podía verlo: todas llaman al motor directamente, así que prueban la
+     * pieza y jamás el camino por el que el modelo llega a ella. Ésta mira lo único que importa
+     * desde fuera: **qué se le enseña al modelo**.
+     */
+    let offered: string[] = [];
+    const local = new ScriptedBrain('local', [
+      (toolbox) => {
+        offered = toolbox.definitions().map((tool) => tool.name);
+        return { kind: 'finish', summary: 'listo' };
+      },
+    ]);
+    const { services } = track(harness({ local }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'hola', user);
+    await settled(services, conversation.id);
+
+    expect(offered).toContain('workflow');
+  });
+
   it('el primer mensaje nombra la conversación', async () => {
     const { services } = track(harness({ local: new ScriptedBrain('local', [() => ({ kind: 'finish', summary: 'ya' })]) }));
     const conversation = services.chat.create({ user });
