@@ -1625,3 +1625,49 @@ describe('WORKFLOW · las máquinas se nombran, no se adivinan', () => {
     expect(hosts.items.enum).toEqual(['zeus', 'bastion']);
   });
 });
+
+describe('WF · un plan puede dar un paso en otra máquina', () => {
+  const conFlota = (hosts: readonly string[]): CoreAssistantToolbox => new CoreAssistantToolbox({
+    workspace: openWorkspace(), sessions: services.sessions, health: services.health,
+    runs: services.runs, audit: services.audit, user, autonomy: 'unrestricted', hosts,
+  });
+
+  it('el esquema enumera la flota, que es lo único que hace que el campo se use', () => {
+    /*
+     * Sin `enum` el modelo no manda un nombre de máquina: coge lo que tiene delante, que son ids de
+     * workspace. Es el mismo fallo que arregló el sobre del workflow, y por eso se resuelve igual.
+     */
+    const definicion = conFlota(['bastion', 'goro2', 'goro3'])
+      .definitions().find((tool) => tool.name === 'create_run');
+    const host = (definicion?.inputSchema.properties as Record<string, { enum?: string[] }>)['host'];
+
+    expect(host?.enum).toEqual(['bastion', 'goro2', 'goro3']);
+    // Opcional: omitirlo significa «donde vive el plan», que es lo que se ha hecho siempre.
+    expect(definicion?.inputSchema.required).not.toContain('host');
+  });
+
+  it('sin flota declarada el campo no se ofrece, en vez de ofrecerse vacío', () => {
+    // Un `enum` vacío no describe «cualquier máquina»: describe «ninguna», y haría irrellenable
+    // un campo que hasta ahora no existía.
+    const definicion = conFlota([]).definitions().find((tool) => tool.name === 'create_run');
+    expect((definicion?.inputSchema.properties as Record<string, unknown>)['host']).toBeUndefined();
+  });
+
+  it('una máquina declarada viaja en la decisión', async () => {
+    const outcome = await conFlota(['bastion', 'goro3']).invoke('create_run', {
+      title: 'Arreglar el proxy', prompt: 'toca la conf de nginx',
+      permission_profile: 'safe', host: 'goro3',
+    });
+    expect(outcome).toMatchObject({ type: 'decision', decision: { kind: 'run', host: 'goro3' } });
+  });
+
+  it('y una que no existe se corta con la lista delante, no al ir a ejecutarla', async () => {
+    // Se corta aquí porque el modelo puede arreglarlo en la misma vuelta si sabe cuáles hay.
+    const outcome = await conFlota(['bastion', 'goro3']).invoke('create_run', {
+      title: 'Arreglar', prompt: 'algo', permission_profile: 'safe', host: 'goro9',
+    });
+    const error = (outcome as { content: { error: Record<string, string> } }).content.error;
+    expect(error['code']).toBe('BAD_INPUT');
+    expect(error['hint']).toContain('goro3');
+  });
+});

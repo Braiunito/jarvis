@@ -623,6 +623,39 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
  * Sin flota configurada se queda como estaba —cadenas libres—, porque un `enum` vacío no describe
  * «cualquier máquina», describe «ninguna», y eso haría irrellenable el campo.
  */
+/**
+ * `create_run` con la flota dentro, sin sacarla de `TOOL_DEFINITIONS`.
+ *
+ * Se parchea el esquema en vez de construir la herramienta aparte —como sí hace `workflow`— porque
+ * moverla de la lista le restaría uno a `own` y habría que sumárselo a `extras`: es exactamente el
+ * descuadre que tuvo `open_workspace`, que se ofrecía sin descontarse. Con el margen del tope de
+ * 128 en **1**, ese error hoy apaga el modo directo de la casa entera.
+ *
+ * El campo es opcional a propósito y su descripción lo dice: omitirlo significa «donde vive el
+ * plan», que es lo normal y lo que se ha hecho siempre. Sin `enum` no se mandaría nunca —el modelo
+ * no adivina nombres de máquinas, coge los ids que tiene delante— y con él no se puede mandar una
+ * que no existe.
+ */
+function withHosts(tool: ToolDefinition, hosts: readonly string[]): ToolDefinition {
+  if (tool.name !== 'create_run' || !hosts.length) return tool;
+  return {
+    ...tool,
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: {
+        ...tool.inputSchema.properties,
+        host: {
+          type: 'string',
+          enum: [...hosts],
+          description: 'En qué máquina, si no es donde vive este plan. Omítelo salvo que el paso '
+            + 'tenga que ocurrir en otra: lo normal es que sea la misma. Sólo valen las máquinas '
+            + 'que el sobre autoriza.',
+        },
+      },
+    },
+  };
+}
+
 export function workflowTool(hosts: readonly string[] = []): ToolDefinition {
   return Object.freeze<ToolDefinition>({
   name: 'workflow',
@@ -930,7 +963,8 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       .filter((tool) => scoped || !WORKSPACE_TOOL_NAMES.has(tool.name))
       // Cuenta en `directCapacity` aunque aquí no se ofrezca: el cupo se calcula en el caso
       // peor, y creerse con un hueco de más se paga en un 400 el día que el catálogo crezca.
-      .filter((tool) => tool.name !== PRESENT_TOOL_NAME || Boolean(deps.artifacts));
+      .filter((tool) => tool.name !== PRESENT_TOOL_NAME || Boolean(deps.artifacts))
+      .map((tool) => withHosts(tool, deps.hosts ?? []));
     /*
      * Directo si cabe entero, router si no.
      *
@@ -2252,6 +2286,17 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     }
     const title = clip(asString(input['title']) ?? 'paso', 120).text;
     const rationale = clip(asString(input['rationale']), 300).text;
+    /*
+     * Una máquina que no existe no es un paso en otra máquina: es un paso que no se puede ejecutar.
+     *
+     * Se corta aquí y con la lista delante, en vez de dejar que falle al crear el run, porque el
+     * modelo puede arreglarlo en la misma vuelta si sabe cuáles hay.
+     */
+    const host = asString(input['host']);
+    if (host && !(this.#deps.hosts ?? []).includes(host)) {
+      return toolError('BAD_INPUT', `no alcanzo la máquina ${host}`,
+        `las que hay son ${(this.#deps.hosts ?? []).join(', ')}`);
+    }
 
     /*
      * La escalera (ADR-010).
@@ -2287,7 +2332,11 @@ export class CoreAssistantToolbox implements AssistantToolbox {
 
     return {
       type: 'decision',
-      decision: { kind: 'run', title, prompt, permissionProfile: profile, rationale },
+      decision: {
+        kind: 'run', title, prompt, permissionProfile: profile, rationale,
+        // Sólo si viene: omitirlo significa «donde vive el plan», que es lo de siempre.
+        ...(host ? { host } : {}),
+      },
     };
   }
 
