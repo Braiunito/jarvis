@@ -462,6 +462,29 @@ export class ChatService {
     });
   }
 
+  /**
+   * El turno agotó sus intentos y nadie va a contestar.
+   *
+   * Lo llama el supervisor cuando el trabajo se declara `failed`. Escribe en el hilo porque es el
+   * único sitio donde quien preguntó lo va a ver: el estado del trabajo vive en otra tabla y en una
+   * pantalla de salud. Y deja la conversación en `idle`, no en `failed`: sigue siendo usable, y lo
+   * que se rompió fue un turno.
+   */
+  turnGaveUp(conversationId: string, reason: string): void {
+    const conversation = this.#repository.find(conversationId);
+    if (!conversation) return;
+    // Sólo si de verdad se quedó sin contestar: un reintento que acabó bien no deja nada escrito.
+    const job = this.#deps.jobs?.alive('conversation', conversationId, CHAT_TURN_JOB);
+    if (job) return;
+    this.#repository.append(conversationId, {
+      role: 'event',
+      text: `No pude contestar a esto y me quedé sin intentos (${clipText(reason, 160)}). `
+        + 'Vuelve a preguntármelo si sigue haciendo falta.',
+    });
+    this.#repository.setStatus(conversationId, 'idle', 'local');
+    this.bus.notify(conversationId);
+  }
+
   // ---- el turno -----------------------------------------------------------
 
   /**

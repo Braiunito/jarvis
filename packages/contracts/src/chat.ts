@@ -183,6 +183,15 @@ export const Conversation = Type.Object({
   /** Con qué cerebro se está hablando ahora mismo. La escalada lo cambia para un turno. */
   source: ModelSourceSchema,
   messageCount: Type.Integer({ minimum: 0 }),
+  /**
+   * Quién habló el último.
+   *
+   * Va el rol y no un «sin contestar» calculado: un booleano fija en el contrato una regla que
+   * mañana puede cambiar, y el rol es un hecho que sigue valiendo aunque la regla cambie. Con él,
+   * la lista puede enseñar **antes de entrar** que una pregunta se quedó sin respuesta — hoy eso
+   * sólo se sabe abriendo la conversación, y quien no la abre no se entera nunca.
+   */
+  lastMessageRole: Type.Union([Type.Union(CHAT_ROLES.map((role) => Type.Literal(role))), Type.Null()]),
   createdAt: Iso8601,
   updatedAt: Iso8601,
   lastMessageAt: Type.Union([Iso8601, Type.Null()]),

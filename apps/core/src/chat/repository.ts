@@ -17,6 +17,7 @@ interface ConversationRow {
   autonomy: string; status: string; source: string;
   created_at: string; updated_at: string; last_message_at: string | null;
   message_count?: number;
+  last_message_role?: string | null;
 }
 
 interface MessageRow {
@@ -35,6 +36,7 @@ const toConversation = (row: ConversationRow): Conversation => ({
   status: row.status as ConversationStatus,
   source: row.source as ModelSource,
   messageCount: row.message_count ?? 0,
+  lastMessageRole: (row.last_message_role as Conversation['lastMessageRole']) ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   lastMessageAt: row.last_message_at,
@@ -102,7 +104,8 @@ export class ChatRepository {
 
   find(id: string): Conversation | null {
     const row = this.#db.prepare(`
-      SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count
+      SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count,
+        (SELECT m.role FROM chat_messages m WHERE m.conversation_id = c.id ORDER BY m.seq DESC LIMIT 1) AS last_message_role
       FROM conversations c WHERE c.id = ?`).get(id) as ConversationRow | undefined;
     return row ? toConversation(row) : null;
   }
@@ -127,7 +130,8 @@ export class ChatRepository {
     if (workspaceId) { where.push('c.workspace_id = ?'); params.push(workspaceId); }
     if (user) { where.push('c.created_by = ?'); params.push(user.username); }
     const rows = this.#db.prepare(`
-      SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count
+      SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count,
+        (SELECT m.role FROM chat_messages m WHERE m.conversation_id = c.id ORDER BY m.seq DESC LIMIT 1) AS last_message_role
       FROM conversations c
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY c.updated_at DESC LIMIT ?`)

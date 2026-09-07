@@ -405,7 +405,22 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     jobs,
     clock,
     handlers: { 'chat.turn': (job) => chat.resume(job.resourceId) },
-    onError: (error, job) => console.warn(`[jarvis] el turno de ${job.resourceId} falló: ${error.message}`),
+    onError: (error, job) => {
+      console.warn(`[jarvis] el turno de ${job.resourceId} falló: ${error.message}`);
+      /*
+       * Un turno que agota sus intentos tiene que decirlo **en el hilo**.
+       *
+       * Hasta ahora el trabajo pasaba a `failed` y la conversación se quedaba tal cual: el único
+       * sitio de la casa donde constaba que alguien preguntó y nadie contestó era un `/api/health`
+       * que no mira nadie. Medido: dos turnos perdidos en 24 h y ninguna conversación marcada.
+       *
+       * La conversación **no** pasa a `failed`: sigue siendo usable y lo que murió es el turno, no
+       * ella. Lo que hacía falta era que se viera, y un evento en el hilo lo hace por los dos
+       * lados: se lee al abrirla, y deja el último mensaje en `event`, con lo que la lista puede
+       * enseñarlo antes de entrar.
+       */
+      if (job.kind === 'chat.turn') chat.turnGaveUp(job.resourceId, error.message);
+    },
   });
   const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
 
