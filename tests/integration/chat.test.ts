@@ -262,6 +262,49 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
     expect(offered).toContain('workflow');
   });
 
+  it('firmar la tarjeta de un workflow lo pone en marcha, que es para lo que se firma', async () => {
+    /*
+     * Observado en producción por jarvis-f9 firmando una tarjeta de verdad: la aprobación volvía
+     * `consumed`, y dos minutos después el plan seguía en `draft` con 0 de 5 pasos atados.
+     *
+     * `#executeApproval` no tenía rama para `workflow`, así que la tarjeta caía en la de «un run
+     * autorizado» e intentaba lanzar un run con `prompt` vacío — en el destino de un workflow no
+     * hay `prompt`, hay `planId`, `objective` y `envelope`.
+     *
+     * Estuvo tapado porque un plan en `draft` avanzaba solo: funcionaba por accidente y **sin
+     * firma**. Al cerrar aquello quedó al descubierto que la activación por firma no estaba escrita.
+     * Ninguna prueba firmaba una tarjeta de tipo `workflow`: se cubrían run, escalada y capacidad.
+     */
+    const local = new ScriptedBrain('local', [
+      () => ({
+        kind: 'workflow',
+        objective: 'comparar el disco de las tres máquinas',
+        steps: [{ title: 'Mirar disco', intent: 'leer el disco de cada host', expects: 'una tabla' }],
+        highestPermissionProfile: 'safe',
+        rationale: 'hacen falta tres lecturas',
+      }),
+      () => ({ kind: 'finish', summary: 'listo' }),
+    ]);
+    const { services } = track(harness({ local }));
+
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'compara el disco de las tres máquinas', user);
+    await settled(services, conversation.id);
+
+    const [tarjeta] = services.chat.pendingApprovals(conversation.id);
+    expect(tarjeta?.actionType).toBe('workflow');
+    const planId = String((tarjeta!.target as Record<string, unknown>)['planId']);
+    expect(services.plans.require(planId).status).toBe('draft');
+
+    await services.chat.resolveApproval(tarjeta!.id, 'approved', user);
+    await settled(services, conversation.id);
+
+    // Firmar es lo que lo arranca. Antes se consumía la tarjeta y el plan se quedaba en borrador.
+    expect(services.plans.require(planId).status).not.toBe('draft');
+    const eventos = services.chat.messages(conversation.id).filter((m) => m.role === 'event');
+    expect(eventos.some((m) => m.text.includes('en marcha'))).toBe(true);
+  });
+
   it('el primer mensaje nombra la conversación', async () => {
     const { services } = track(harness({ local: new ScriptedBrain('local', [() => ({ kind: 'finish', summary: 'ya' })]) }));
     const conversation = services.chat.create({ user });

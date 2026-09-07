@@ -1011,6 +1011,46 @@ export class ChatService {
       return;
     }
 
+    if (approval.actionType === 'workflow') {
+      /*
+       * Firmar la tarjeta es lo que arranca el plan, y esa rama no existía.
+       *
+       * La tarjeta se creaba, se firmaba y se consumía —`status: consumed`— y luego caía al final,
+       * en «un run autorizado», que hace `runs.create` con `String(target['prompt'] ?? '')`. En el
+       * destino de un workflow no hay `prompt`: hay `planId`, `objective` y `envelope`. Así que
+       * cada firma intentaba lanzar un run con prompt vacío y el plan se quedaba en `draft` para
+       * siempre. Observado en producción por jarvis-f9 firmando una tarjeta de verdad.
+       *
+       * Estuvo tapado porque hasta hace unas horas un plan en `draft` avanzaba solo: funcionaba por
+       * accidente, y además **sin firma**. Al cerrar aquello quedó al descubierto que la activación
+       * por firma no estaba escrita. Dos fallos que se anulaban, y el que tapaba era el peligroso.
+       */
+      const planId = String(target['planId'] ?? '');
+      const engine = this.#deps.plans;
+      if (!engine || !planId) {
+        this.#repository.append(conversationId, {
+          role: 'event', text: 'Autorizado, pero el plan ya no existe: no se arrancó nada.',
+        });
+        this.#repository.setStatus(conversationId, 'idle');
+        this.bus.notify(conversationId);
+        return;
+      }
+      try {
+        // Sin digest: la aprobación ya comprobó el suyo al consumirse, y cubre el sobre entero.
+        engine.activate(planId, user);
+        this.#repository.append(conversationId, {
+          role: 'event', text: 'Autorizado. El plan queda en marcha.',
+        });
+      } catch (error) {
+        this.#repository.append(conversationId, {
+          role: 'event', text: `No se pudo arrancar el plan: ${(error as Error).message}`,
+        });
+      }
+      this.#repository.setStatus(conversationId, 'idle');
+      this.bus.notify(conversationId);
+      return;
+    }
+
     if (approval.actionType === 'capability') {
       await this.#runCapability(
         conversationId,
