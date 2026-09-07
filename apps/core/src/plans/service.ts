@@ -651,6 +651,19 @@ export class PlanService {
      * entera.
      */
     if (plan.status === 'draft') return plan;
+    /*
+     * Y un plan pausado tampoco piensa, que es lo que significa estar pausado.
+     *
+     * El corte de arriba tenía `completed`, `failed` y `cancelled`, y `paused` se quedó fuera. Como
+     * al supervisor le basta con que el plan no esté terminado para empujarlo, **una pausa no
+     * paraba nada**: ni la que pide una persona con `steer pause` ni la que pone el motor al cerrar
+     * un plan a medias. Visto en producción el 2026-09-07 — un plan quedó pausado a las 12:04:07 y
+     * a las 12:05:50 seguía decidiendo, pidiendo salir a la nube.
+     *
+     * Se sale de aquí con `steer resume`, que lo devuelve a `ready`: reanudar es un acto, no una
+     * consecuencia de que alguien vuelva a empujar.
+     */
+    if (plan.status === 'paused') return plan;
 
     const steps = this.steps(planId);
     /*

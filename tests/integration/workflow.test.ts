@@ -562,6 +562,31 @@ describe('WF · cerrar un plan a medias no destruye lo hecho', () => {
     expect(services.plans.require(plan.id).status).toBe('completed');
   });
 
+  it('un plan pausado no piensa aunque lo empujen, y al reanudarlo sigue donde estaba', async () => {
+    /*
+     * Estar pausado significa no avanzar; si no, la pausa es decorativa. El corte del motor tenía
+     * `completed`, `failed` y `cancelled`, y como al supervisor le basta con que el plan no esté
+     * terminado para empujarlo, ni la pausa de una persona ni la del propio motor paraban nada.
+     * Visto en producción: pausado a las 12:04:07 y decidiendo otra vez a las 12:05:50.
+     */
+    const model = new PlanBrain([
+      () => ({ kind: 'finish', summary: 'con el primero basta' }),
+      () => ({ kind: 'finish', summary: 'esto no debería llegar a pasar' }),
+    ]);
+    const { services, plan } = enMarcha(model);
+
+    await services.plans.advance(plan.id, user);
+    expect(services.plans.require(plan.id).status).toBe('paused');
+
+    // Se le empuja tres veces, como haría el supervisor: no se le pregunta nada al modelo.
+    const antes = model.calls;
+    await services.plans.advance(plan.id, user);
+    await services.plans.advance(plan.id, user);
+    await services.plans.advance(plan.id, user);
+    expect(model.calls).toBe(antes);
+    expect(services.plans.require(plan.id).status).toBe('paused');
+  });
+
   it('cerrar cuando ya no queda nada por dar termina el plan, como siempre', async () => {
     /*
      * La guarda no puede comerse el final bueno: cuando el `finish` ata el último paso, el plan
