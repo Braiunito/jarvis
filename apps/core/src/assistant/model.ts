@@ -1230,6 +1230,16 @@ export function renderContext(context: PlanContext): string {
 
   if (context.house) {
     lines.push('', 'En Jarvis ahora mismo:');
+    /*
+     * Las máquinas primero, porque es lo que no puede deducir.
+     *
+     * Un plan cuyo objetivo decía «coordinar acciones en bastion y goro2» nació con el sobre sin
+     * ninguna máquina autorizada: no las nombró ni yendo el objetivo de ellas, porque nadie le
+     * había dicho cuáles hay. Un workspace o un trabajo los ve al consultarlos; la flota, no.
+     */
+    if (context.house.hosts.length) {
+      lines.push(`· máquinas que alcanzo: ${context.house.hosts.join(', ')}`);
+    }
     for (const workspace of context.house.workspaces) {
       lines.push(`· workspace ${workspace.id} — ${workspace.title ?? 'sin título'}`
         + ` (${workspace.provider} en ${workspace.host})`);

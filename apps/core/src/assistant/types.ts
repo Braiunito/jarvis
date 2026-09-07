@@ -98,6 +98,15 @@ export interface PlanContext {
    * que la pregunta va de eso.
    */
   house?: {
+    /**
+     * Las máquinas que este core alcanza, por su nombre.
+     *
+     * Sin esto el modelo **no sabe qué máquinas hay**, y se nota donde más duele: un plan cuyo
+     * objetivo era «coordinar acciones en bastion y goro2» nació con el sobre vacío de hosts, así
+     * que no autorizaba ninguna. No las nombra ni cuando el objetivo va de ellas, porque no puede
+     * nombrar lo que no le han dicho.
+     */
+    hosts: readonly string[];
     workspaces: Array<{ id: string; title: string | null; host: string; provider: Provider }>;
     runs: Array<{ runId: string; status: string; title: string | null }>;
     /**

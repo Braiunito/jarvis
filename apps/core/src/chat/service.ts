@@ -534,6 +534,28 @@ export class ChatService {
     this.bus.notify(conversationId);
   }
 
+  /**
+   * Que un plan cuente en el hilo lo que va haciendo.
+   *
+   * Existe porque el motor de planes **no puede escribir en la conversación**: guarda su
+   * `conversation_id` para despachar aprobaciones, y nada más. Así que un plan atado a un hilo
+   * avanzaba, preguntaba, lanzaba trabajo y terminaba **en silencio absoluto**.
+   *
+   * Lo que costó, medido: un plan pidió una respuesta humana a las 10:45 y esa pregunta nunca se
+   * escribió. Lo último que se leyó fue «Autorizado. El plan queda en marcha», así que dos minutos
+   * después Braian escribió «Autorice el plan» — esperando algo que no iba a llegar.
+   *
+   * Es un método público del chat y no un repositorio aparte a propósito: escribir en una
+   * conversación lo hace quien la posee. Dos caminos de escritura al mismo hilo acaban divergiendo
+   * en el `notify`, en el estado o en el orden, y el segundo es siempre el que nadie mira.
+   */
+  narrate(conversationId: string, text: string): void {
+    if (!this.#deps.db.open) return;
+    if (!this.#repository.find(conversationId)) return;
+    this.#repository.append(conversationId, { role: 'event', text: clipText(text, 2000) });
+    this.bus.notify(conversationId);
+  }
+
   // ---- el turno -----------------------------------------------------------
 
   /**
@@ -1538,6 +1560,7 @@ export class ChatService {
    * dice algo y no informa de nada.
    */
   #house(): PlanContext['house'] | null {
+    const hosts = this.#deps.hosts ?? [];
     const workspaces = this.#deps.workspaces.recent(4).map((workspace) => ({
       id: workspace.id,
       title: workspace.title,
@@ -1565,8 +1588,8 @@ export class ChatService {
       step: plan.step,
       steps: plan.steps,
     }));
-    return workspaces.length || runs.length || workflows.length
-      ? { workspaces, runs, workflows }
+    return hosts.length || workspaces.length || runs.length || workflows.length
+      ? { hosts, workspaces, runs, workflows }
       : null;
   }
 

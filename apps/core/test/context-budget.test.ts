@@ -15,6 +15,9 @@ import { renderContext } from '../src/assistant/model.js';
 const relleno = (n: number, letra: string): string => letra.repeat(n);
 
 const casa = {
+  // Las seis de esta casa: el peor caso incluye decirle qué máquinas alcanza, que es lo que no
+  // puede deducir de ninguna consulta.
+  hosts: ['bastion', 'vultr', 'bevrim', 'goro1', 'goro2', 'goro3'],
   workspaces: Array.from({ length: 4 }, (_, i) => ({
     id: `w${i}`.padEnd(17, 'x'), title: relleno(60, 'W'), host: 'zeus', provider: 'claude',
   })),
