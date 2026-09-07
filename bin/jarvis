@@ -56,13 +56,32 @@ case "${1:-}" in
   config) compose config ;;
   smoke)
     shift
-    compose exec -T gateway node -e "
+    # Se reintenta porque `up` vuelve antes de que el gateway sirva.
+    #
+    # Visto: `up` termina, el humo corre y contesta `fetch failed`; veinte segundos después los tres
+    # dan 200 sin haber tocado nada. Un humo que grita cuando no pasa nada se aprende a ignorar, y
+    # entonces tampoco se lee el día que grita de verdad — hoy ha fallado en las dos direcciones, así
+    # que las dos se arreglan. No es esperar por esperar: es distinguir «arrancando» de «roto».
+    intentos=0
+    until compose exec -T gateway node -e "
       fetch('http://127.0.0.1:8080/healthz')
         .then(async (r) => { console.log('gateway', r.status, await r.text()); })
         .then(() => fetch('http://core:8770/internal/health'))
         .then(async (r) => { console.log('core   ', r.status, await r.text()); process.exit(r.ok ? 0 : 1); })
         .catch((e) => { console.error(e.message); process.exit(1); });
-    " || exit 1
+    "; do
+      intentos=$((intentos + 1))
+      if [[ $intentos -ge 10 ]]; then
+        echo "el stack no contesta desde dentro después de $intentos intentos"
+        exit 1
+      fi
+      sleep 3
+    done
+    if [[ $intentos -gt 0 ]]; then
+      # Se dice que hubo que esperar: un verde que tardó no es lo mismo que uno inmediato, y quien
+      # lo lee tiene que poder notar el día que el arranque empiece a tardar de más.
+      echo "        (contestó al intento $((intentos + 1)); estaba arrancando)"
+    fi
 
     # Y el borde, que es lo que ninguna de las dos comprobaciones de arriba puede ver.
     #
@@ -85,8 +104,13 @@ case "${1:-}" in
     # `curl` ya escribe `000` cuando no llega a conectar, así que el respaldo es sólo para el caso
     # de que no exista el binario: encadenar los dos imprimía «borde 000000», y un aviso que parece
     # roto se ignora igual que uno que no está.
-    codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$origen/healthz" 2>/dev/null)"
-    codigo="${codigo:-000}"
+    # Mismo criterio que arriba: nginx puede tardar en volver a encontrar al gateway recreado.
+    for intento in 1 2 3 4 5; do
+      codigo="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$origen/healthz" 2>/dev/null)"
+      codigo="${codigo:-000}"
+      if [[ "$codigo" == "200" ]]; then break; fi
+      if [[ $intento -lt 5 ]]; then sleep 3; fi
+    done
     if [[ "$codigo" == "200" ]]; then
       echo "borde   200 $origen"
     else
