@@ -196,6 +196,19 @@ export interface PlanServiceDeps {
   canEscalate?: boolean;
   starterCapabilities?: readonly string[];
   audit: AuditLog;
+  /**
+   * Cómo cuenta el plan lo que hace, en la conversación de la que salió.
+   *
+   * Un plan avanza por su cuenta y en otro proceso que el turno que lo propuso, así que sin esto
+   * **no se entera nadie**: preguntaba, lanzaba trabajo y terminaba en silencio. Medido en el hilo
+   * `c94zth2lpnktkrqx8`, donde el plan se quedó esperando una respuesta cuya pregunta no llegó a
+   * escribirse: lo último que se leía era «el plan queda en marcha», y la persona escribió «autoricé
+   * el plan» dos minutos después porque no tenía forma de saber que le tocaba a ella.
+   *
+   * Va como función y no como el servicio de chat entero a propósito: el motor de planes no tiene
+   * por qué conocer las conversaciones, sólo tiene que poder contar lo que hace.
+   */
+  narrate?: (conversationId: string, text: string) => void;
   approvalTtlMs?: number;
   maxSteps?: number;
   /** Cuántas consultas puede encadenar el modelo antes de tener que decidir algo. */
@@ -966,6 +979,8 @@ export class PlanService {
         .run(stepId, planId, ordinal, decision.title,
           JSON.stringify(withOffer({ question: decision.question })), idempotencyKey);
       this.#setPlanStatus(planId, 'waiting_input');
+      // Sin esto el plan se queda esperando una respuesta que nadie sabe que tiene que dar.
+      this.#narrate(plan, `El plan pregunta, y hasta que no le contestes no sigue: ${decision.question}`);
       return this.require(planId);
     }
 
@@ -997,6 +1012,9 @@ export class PlanService {
           JSON.stringify(withOffer({ prompt: decision.prompt, permissionProfile: decision.permissionProfile })),
           approvalId, idempotencyKey);
       this.#setPlanStatus(planId, 'waiting_approval');
+      // La tarjeta de un paso cuelga del plan, no de la conversación, así que sin decirlo aquí no
+      // se ve en el hilo: el plan parece parado cuando en realidad está esperando una firma.
+      this.#narrate(plan, `El plan espera que firmes algo antes de seguir: ${decision.summary}`);
       this.#deps.audit.record({
         actorUser: plan.createdBy, eventType: 'approval.requested', workspaceId: plan.workspaceId,
         payload: { planId, approvalId, actionType: decision.actionType, permissionProfile: decision.permissionProfile },
@@ -1020,6 +1038,7 @@ export class PlanService {
         .run(stepId, planId, ordinal, 'Salir a la nube',
           JSON.stringify(withOffer({ reason: decision.reason })), approvalId, idempotencyKey);
       this.#setPlanStatus(planId, 'waiting_approval');
+      this.#narrate(plan, `El plan pide permiso para salir a la nube: ${decision.reason}`);
       audit.record({
         actorUser: plan.createdBy, eventType: 'assistant.escalation_requested', workspaceId: plan.workspaceId,
         payload: { planId, approvalId, reason: decision.reason.slice(0, 300) },
@@ -1077,6 +1096,7 @@ export class PlanService {
       db.prepare("UPDATE plan_steps SET run_id = ?, status = 'waiting_run' WHERE id = ?")
         .run(created.run.id, stepId);
       this.#setPlanStatus(planId, 'waiting_run');
+      this.#narrate(plan, `El plan ha lanzado un trabajo: ${decision.title}`);
     } catch (error) {
       const message = (error as Error).message;
       db.prepare("UPDATE plan_steps SET status = 'failed', error_code = ?, finished_at = ? WHERE id = ?")
@@ -1265,10 +1285,26 @@ export class PlanService {
       .run(status, JSON.stringify(output), this.#deps.clock.nowIso(), stepId);
   }
 
+  /** Lo cuenta en su conversación, si vino de una. Un plan de la casa no tiene a quién contárselo. */
+  #narrate(plan: Plan, text: string): void {
+    if (!plan.conversationId || !this.#deps.narrate) return;
+    try {
+      this.#deps.narrate(plan.conversationId, text);
+    } catch {
+      // Contar es un extra: que falle no puede tumbar el paso que sí se dio.
+    }
+  }
+
   #finish(planId: string, status: PlanStatus, summary: string): Plan {
     const at = this.#deps.clock.nowIso();
     this.#deps.db.prepare('UPDATE plans SET status = ?, summary = ?, finished_at = ?, updated_at = ? WHERE id = ?')
       .run(status, summary, at, at, planId);
-    return this.require(planId);
+    const plan = this.require(planId);
+    const como = status === 'completed' ? 'El plan ha terminado'
+      : status === 'paused' ? 'El plan queda pausado'
+        : status === 'cancelled' ? 'El plan se ha cancelado'
+          : 'El plan se ha parado';
+    this.#narrate(plan, `${como}: ${summary}`);
+    return plan;
   }
 }

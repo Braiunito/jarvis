@@ -243,6 +243,97 @@ describe('WF · los topes se gastan a lo largo del plan, no dentro de un turno',
   });
 });
 
+describe('WF · un plan cuenta en su hilo lo que hace', () => {
+  /*
+   * El bug que se vio en producción: se aprueba el plan y no se vuelve a saber de él.
+   *
+   * El plan `pfeoyeyawaqhzlsvx` se quedó en `waiting_input` con su paso atado a una pregunta —«¿qué
+   * permisos de escritura…?»— que **nunca se escribió en el hilo**. Lo último que se leía era «el
+   * plan queda en marcha», así que la persona escribió «autoricé el plan» dos minutos después: no
+   * tenía forma de saber que le tocaba a ella. El motor avanza en otro momento que el turno que lo
+   * propuso, y hasta ahora no tenía por dónde contarlo.
+   */
+  const harnessChat = (model: PlanBrain): CoreServices => {
+    const services = buildServices({
+      db: openDatabase({ path: ':memory:' }),
+      index: new FakeSessionIndex([indexRow()]) as never,
+      model: new HybridModel({ local: model, cloud: model }),
+      config: {
+        hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-workflow-spool',
+        sshCommand: fakeSshPath(), knownHostsFile: '',
+      },
+    });
+    open.push(services);
+    return services;
+  };
+
+  const propone = (): AssistantDecision => ({
+    kind: 'workflow',
+    objective: 'averiguar por qué el pool se queda sin conexiones',
+    steps: [
+      { title: 'Mirar el log', intent: 'ver qué dice el log', expects: 'la hora del primer fallo' },
+      { title: 'Comprobar el límite', intent: 'ver el pool_size', expects: 'el número' },
+    ],
+    hosts: ['bastion'],
+    highestPermissionProfile: 'safe',
+    rationale: 'con dos pasos se sabe si es el pool o la red',
+  });
+
+  it('la pregunta de un plan llega al hilo del que salió', async () => {
+    const services = harnessChat(new PlanBrain([
+      () => propone(),
+      () => ({ kind: 'ask', title: 'Falta un dato', question: '¿qué pool_size esperabas?' }),
+    ]));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'mira por qué se queda sin conexiones', user);
+    await services.chat.settled(conversation.id);
+
+    const [tarjeta] = services.chat.pendingApprovals(conversation.id);
+    const planId = String((tarjeta!.target as { planId?: string }).planId);
+    await services.chat.resolveApproval(tarjeta!.id, 'approved', user);
+    await services.plans.advance(planId, user);
+
+    expect(services.plans.require(planId).status).toBe('waiting_input');
+    // Y la persona puede enterarse, que es de lo que iba todo esto.
+    const dicho = services.chat.messages(conversation.id).map((message) => message.text ?? '').join('\n');
+    expect(dicho).toContain('¿qué pool_size esperabas?');
+  });
+
+  it('y cuando termina, también lo dice', async () => {
+    const services = harnessChat(new PlanBrain([
+      () => propone(),
+      () => ({ kind: 'finish', summary: 'era el pool_size, estaba en 5' }),
+    ]));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'mira por qué se queda sin conexiones', user);
+    await services.chat.settled(conversation.id);
+
+    const [tarjeta] = services.chat.pendingApprovals(conversation.id);
+    const planId = String((tarjeta!.target as { planId?: string }).planId);
+    await services.chat.resolveApproval(tarjeta!.id, 'approved', user);
+    await services.plans.advance(planId, user);
+
+    const dicho = services.chat.messages(conversation.id).map((message) => message.text ?? '').join('\n');
+    expect(dicho).toContain('era el pool_size');
+  });
+
+  it('un plan de la casa no tiene a quién contárselo, y no se rompe por eso', async () => {
+    // Sin conversación detrás no hay hilo donde escribir: el plan sigue funcionando igual.
+    const services = harness(new PlanBrain([() => ({ kind: 'finish', summary: 'ya está' })]));
+    const plan = services.plans.createWorkflow({
+      workspaceId: null,
+      objective: 'mirar la casa',
+      envelope: sobre({ hosts: [] }),
+      steps: [{ title: 'Mirar', intent: 'ver', expects: 'algo' }],
+      user,
+    });
+    services.plans.activate(plan.id, user);
+    await services.plans.advance(plan.id, user);
+
+    expect(services.plans.require(plan.id).status).toBe('completed');
+  });
+});
+
 describe('WF · cerrar un plan a medias no destruye lo hecho', () => {
   const enMarcha = (model: PlanBrain, envelope = sobre()) => {
     const services = harness(model);

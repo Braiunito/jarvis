@@ -357,6 +357,22 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     mcp,
     canEscalate: hybrid?.canEscalate === true,
     starterCapabilities: config.mcpStarter,
+    /*
+     * Lo que el plan hace se cuenta en la conversación de la que salió.
+     *
+     * El motor avanza por su cuenta y en otro momento que el turno que lo propuso, así que sin esto
+     * pregunta, lanza trabajo y termina **en silencio**: en el hilo `c94zth2lpnktkrqx8` un plan se
+     * quedó esperando una respuesta cuya pregunta nunca se escribió, y la persona acabó diciendo
+     * «autoricé el plan» porque no tenía forma de saber que le tocaba a ella.
+     *
+     * Va como función y no como el servicio entero: el motor de planes no tiene por qué conocer las
+     * conversaciones, sólo tiene que poder contar lo que hace. Y escribir en el hilo lo hace quien
+     * lo posee —`chat.narrate`, que se defiende de la base cerrada y de la conversación que ya no
+     * está—, en vez de un segundo camino de escritura que acabaría divergiendo en el `notify` o en
+     * el orden. `chat` se resuelve al llamarla, no al definirla, así que se puede cablear aquí
+     * aunque se construya debajo.
+     */
+    narrate: (conversationId, text) => chat.narrate(conversationId, text),
   });
 
   /**
