@@ -365,13 +365,15 @@ const asProfile = (value: unknown, fallback: PermissionProfile): PermissionProfi
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
   {
     name: 'search_sessions',
-    description: 'Busca sesiones de agente indexadas en la flota (Claude Code, Codex, OpenCode). '
-      + 'Sirve para localizar trabajo anterior relacionado con el objetivo antes de repetirlo. '
-      + 'Es solo lectura y puede devolver datos viejos: la respuesta dice cuándo se miró.',
+    description: 'Las sesiones de agente que hay en la flota (Claude Code, Codex, OpenCode). '
+      + 'Con `q` busca trabajo anterior sobre un tema; **sin `q` te dice qué hay abierto y dónde**, '
+      + 'que es lo que hay que mirar antes de abrir una sesión nueva: si ya hay una trabajando en '
+      + 'esa máquina y esa carpeta, tiene el contexto y la nueva no. La respuesta trae además '
+      + 'cuántas hay por máquina. Es solo lectura y puede devolver datos viejos: dice cuándo se miró.',
     inputSchema: {
       type: 'object',
       properties: {
-        q: { type: 'string', description: 'Texto a buscar en título, ruta o primeras líneas.' },
+        q: { type: 'string', description: 'Texto a buscar en título, ruta o primeras líneas. Omítelo para ver qué hay.' },
         host: { type: 'string', description: 'Limitar a una máquina.' },
         provider: { type: 'string', enum: [...PROVIDERS] },
         limit: { type: 'integer', description: 'Cuántas sesiones traer. Se acota por arriba.' },
@@ -1612,11 +1614,22 @@ export class CoreAssistantToolbox implements AssistantToolbox {
         workspaceId: session.workspaceId,
       });
     }
+    /*
+     * Cuántas hay por máquina, que es la pregunta que precede a «¿abro una nueva?».
+     *
+     * Se cuenta sobre lo que trae el índice y no sobre lo recortado: si de goro2 hay nueve y sólo
+     * caben tres en la respuesta, decir «tres» invita a abrir otra creyendo que casi no hay.
+     */
+    const porMaquina: Record<string, number> = {};
+    for (const session of result.sessions) {
+      porMaquina[session.ref.host] = (porMaquina[session.ref.host] ?? 0) + 1;
+    }
     return {
       type: 'observation',
       content: {
         ok: true,
         sessions,
+        byHost: porMaquina,
         returned: sessions.length,
         omitted: Math.max(0, result.sessions.length - sessions.length),
         // Un índice viejo sigue sirviendo si se dice que es viejo.

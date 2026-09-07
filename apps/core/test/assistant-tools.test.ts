@@ -1671,3 +1671,26 @@ describe('WF · un plan puede dar un paso en otra máquina', () => {
     expect(error['hint']).toContain('goro3');
   });
 });
+
+describe('antes de abrir una sesión nueva, qué hay', () => {
+  it('la búsqueda sin texto dice cuántas sesiones hay por máquina', async () => {
+    /*
+     * Braian decidió que el asistente alcance otras máquinas por sesiones y trabajos, no por un MCP
+     * en cada una. Para eso tiene que poder **elegir una sesión que ya existe** en vez de abrir
+     * otra: la que ya está trabajando en esa carpeta tiene el contexto —lo que se probó, lo que
+     * falló— y la nueva empieza de cero. `search_sessions` buscaba por texto y no servía de
+     * inventario; ahora lo dice en su descripción y lo trae en la respuesta.
+     *
+     * El recuento va sobre lo que trae el índice y no sobre lo recortado: si de una máquina hay
+     * nueve y sólo caben tres, decir «tres» invita a abrir otra creyendo que casi no hay.
+     */
+    const caja = toolboxFor(openWorkspace());
+    const resultado = content(await caja.invoke('search_sessions', {}));
+
+    expect(resultado['ok']).toBe(true);
+    expect(resultado['byHost']).toBeTypeOf('object');
+    const porMaquina = resultado['byHost'] as Record<string, number>;
+    const total = Object.values(porMaquina).reduce((suma, n) => suma + n, 0);
+    expect(total).toBeGreaterThanOrEqual((resultado['sessions'] as unknown[]).length);
+  });
+});

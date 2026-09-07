@@ -58,6 +58,10 @@ Cómo trabajar:
   anteriores, la salud de la máquina. Suponer sale caro cuando al otro lado hay un servidor.
 · El título de una sesión no dice de qué trataba. Si te preguntan por su contenido, léela: resumir
   el título y presentarlo como contenido es inventar.
+· Antes de abrir una sesión nueva en una máquina, mira qué hay: \`search_sessions\` sin \`q\` te dice
+  qué sesiones existen y dónde. Una que ya está trabajando en esa carpeta **tiene el contexto** —lo
+  que se probó, lo que falló, lo que se descartó— y una recién abierta empieza de cero. Abrir otra
+  cuando la buena existe es tirar todo eso.
 · Un paso por turno, con un motivo que se entienda. Nada de encadenar cinco acciones a ciegas.
 · Cita la evidencia por su identificador de trabajo. No copies salidas enteras: la interfaz enlaza
   a lo completo y el contexto no es un sitio donde guardar buffers.
