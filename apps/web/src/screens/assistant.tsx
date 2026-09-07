@@ -514,6 +514,20 @@ function AutonomyChip({ value, modes, onChange, pending }: {
 }
 
 /**
+ * Si esta conversación es una pregunta que nadie contestó.
+ *
+ * En reposo y con la última palabra sin ser del asistente. `waiting_approval` y `thinking` se caen
+ * solos por el primer término, que es lo que los distingue de esto: uno espera algo tuyo y el otro
+ * está trabajando.
+ *
+ * Va aparte y con nombre para poder probarla: dentro del componente sólo se podría comprobar
+ * montando la pantalla entera contra una API, y lo que hay que sujetar aquí es la regla, no el
+ * pintado.
+ */
+export const sinContestar = (status: string, last: { role: string } | null): boolean =>
+  status === 'idle' && last !== null && last.role !== 'assistant';
+
+/**
  * Lo que ocupa el catálogo, dicho para quien mira.
  *
  * Bytes porque los bytes se miden; los tokens van detrás, redondeados y con su «unos» delante,
@@ -537,7 +551,9 @@ const catalogWeight = (bytes: number): string => {
  * el índice y seis hosts en una palabra es un indicador que no se puede comprobar; aquí cada cosa
  * se cuenta con su número, y el que esté mal se lee.
  */
-function StatusLine({ hosts, capabilities, thinking, effort, failed, lost, onRetry }: {
+function StatusLine({
+  hosts, capabilities, thinking, effort, failed, lost, unanswered, onRetry, onAskAgain,
+}: {
   hosts: { reachable: boolean }[] | undefined;
   capabilities: ChatCapabilities | undefined;
   thinking: boolean;
@@ -545,6 +561,10 @@ function StatusLine({ hosts, capabilities, thinking, effort, failed, lost, onRet
   effort: string | null;
   /** El turno se cayó. Antes esto no se distinguía de «en reposo». */
   failed: boolean;
+  /** Nadie contestó y la conversación no lo dice: lo último del hilo es tuyo. */
+  unanswered: boolean;
+  /** Devolver la última pregunta al compositor, sin mandarla. */
+  onAskAgain: () => void;
   /** Volver a abrir el stream cuando se dio por vencido. */
   onRetry: () => void;
   /** El stream se dio por vencido: no va a volver solo. */
@@ -561,6 +581,26 @@ function StatusLine({ hosts, capabilities, thinking, effort, failed, lost, onRet
       <span className="chat-status danger">
         <span className="chat-status-dot" aria-hidden="true" />
         <span className="truncate">el turno falló</span>
+      </span>
+    );
+  }
+
+  /*
+   * Nadie contestó, y hasta ahora eso se veía igual que una conversación terminada.
+   *
+   * Va después de `failed` y antes de todo lo demás porque es más raro y más grave: `failed` al
+   * menos lo dice. La salida no manda nada sola —devuelve tu pregunta al compositor y la mandas
+   * tú—: reenviar por tu cuenta una pregunta que ya gastó un turno del modelo es una decisión de
+   * quien paga, no de la pantalla.
+   */
+  if (unanswered) {
+    return (
+      <span className="chat-status warn">
+        <span className="chat-status-dot" aria-hidden="true" />
+        <span className="truncate">se quedó sin contestar</span>
+        <button type="button" className="btn small chat-status-retry" onClick={onAskAgain}>
+          Volver a preguntar
+        </button>
       </span>
     );
   }
@@ -743,6 +783,20 @@ export function AssistantScreen(): JSX.Element {
 
   const conversation = detail.data?.conversation;
   const status = stream.status ?? conversation?.status ?? 'idle';
+  /*
+   * Una pregunta que se quedó sin contestar, y que en pantalla no se distingue de una contestada.
+   *
+   * El turno se encola como trabajo y puede agotar sus intentos **sin** que la conversación pase a
+   * `failed`: medido en producción, la salud avisaba de dos turnos perdidos mientras la única
+   * conversación marcada como fallida era de tres días antes. O sea que el único sitio donde eso
+   * se veía era un `/api/health` que no mira nadie, y aquí el hilo se quedaba en reposo con la
+   * última palabra siendo tuya, exactamente igual que una conversación terminada.
+   *
+   * Se deduce del hilo en vez de esperar un campo nuevo: si está en reposo y lo último no lo dijo
+   * el asistente, nadie contestó. `waiting_approval` y `thinking` quedan fuera solos, que es lo que
+   * los distingue de esto.
+   */
+  const unanswered = sinContestar(status, messages[messages.length - 1] ?? null);
   const autonomy = (stream.autonomy ?? conversation?.autonomy ?? 'manual') as AutonomyMode;
   const approvals = detail.data?.approvals ?? [];
   const capabilities = list.data?.capabilities;
@@ -994,6 +1048,11 @@ export function AssistantScreen(): JSX.Element {
                 thinking={thinking}
                 effort={stream.effort}
                 failed={status === 'failed'}
+                unanswered={unanswered}
+                onAskAgain={() => {
+                  const pregunta = [...messages].reverse().find((m) => m.role === 'user');
+                  if (pregunta?.text) setDraft(pregunta.text);
+                }}
                 lost={stream.lost}
                 onRetry={stream.retry}
               />
