@@ -523,6 +523,9 @@ export class AnthropicModel implements AssistantModel {
   async decide(context: PlanContext, toolbox: AssistantToolbox): Promise<AssistantDecision> {
     const messages: AnthropicMessage[] = [{ role: 'user', content: renderContext(context) }];
 
+    /** Si ya se le dijo que el plan firmado va por la mitad. Una sola vuelta, como en el otro camino. */
+    let avisadoDelPlan = false;
+
     // El presupuesto cuenta las vueltas que consultan, no las que enseñan. Ver el mismo bloque en
     // el adaptador de abajo: presentar no va a ninguna máquina y no puede costar lo que ir.
     let spent = 0;
@@ -567,6 +570,18 @@ export class AnthropicModel implements AssistantModel {
       if (!uses.length) {
         // Sin llamada a herramienta no hay decisión que persistir; lo dicho se cierra como síntesis.
         const text = cleanSummary(blocks.find((block) => block.type === 'text')?.text ?? '');
+        /*
+         * Salvo que el plan firmado vaya por la mitad: entonces se le devuelve una vuelta con lo
+         * que queda. La guarda está en los dos caminos a propósito — el mismo fallo corregido en un
+         * proveedor y no en el otro ya ha pasado aquí antes, con los `tool_result` de Claude.
+         */
+        const aMedias = avisadoDelPlan ? null : planPendiente(context);
+        if (aMedias && text) {
+          avisadoDelPlan = true;
+          messages.push({ role: 'assistant', content: blocks as unknown as Array<Record<string, unknown>> });
+          messages.push({ role: 'user', content: [{ type: 'text', text: planSinTerminar(aMedias) }] });
+          continue;
+        }
         return { kind: 'finish', summary: (text || 'el modelo no propuso ningún paso').slice(0, 4000) };
       }
 
@@ -777,6 +792,8 @@ export class OpenAiCompatibleModel implements AssistantModel {
     ];
     /** Si ya se le tuvo que pedir que contestara. Se hace una vez por turno, no en bucle. */
     let nudged = false;
+    /** Si ya se le dijo que el plan firmado va por la mitad. Una vuelta, como las otras dos. */
+    let avisadoDelPlan = false;
     /** Si ya se le desmintió una afirmación de haber enseñado algo. Bandera aparte de `nudged`. */
     let desmentido = false;
     /** Lo último que llegó a escribir, para no perderlo si la vuelta siguiente viene muda. */
@@ -877,6 +894,28 @@ export class OpenAiCompatibleModel implements AssistantModel {
             ultimoTexto = text;
             messages.push({ role: 'assistant', content: message.content ?? null });
             messages.push({ role: 'user', content: NOTHING_WAS_SHOWN });
+            continue;
+          }
+          /*
+           * Ni se cierra un plan firmado que va por la mitad.
+           *
+           * Misma forma que la de arriba —una afirmación contra un hecho que el core conoce con
+           * certeza— y misma economía: una sola vuelta, y si insiste se cierra con lo que dijo. El
+           * hecho aquí son los pasos que siguen sin atar, que el core tiene delante en
+           * `plannedSteps`.
+           *
+           * Medido en producción el 2026-09-07: un workflow de siete pasos hizo el primero, escribió
+           * en su propia síntesis cuál era el siguiente y cerró el plan con seis sin tocar. Tenía el
+           * plan en el prompt: lo que faltaba no era el dato, era que terminar tuviera una
+           * condición. `finish` no se puede quitar del catálogo —no es una herramienta, es lo que
+           * pasa cuando contesta con texto—, así que lo que se puede es no aceptarla a la primera.
+           */
+          const aMedias = avisadoDelPlan ? null : planPendiente(context);
+          if (aMedias) {
+            avisadoDelPlan = true;
+            ultimoTexto = text;
+            messages.push({ role: 'assistant', content: message.content ?? null });
+            messages.push({ role: 'user', content: planSinTerminar(aMedias) });
             continue;
           }
           return { kind: 'finish', summary: text.slice(0, 4000) };
@@ -1141,6 +1180,24 @@ function claimsPresented(text: string): boolean {
  * vuelca. La otra —que entonces hay que presentarlo— no. Así que se le dice cuál de las dos
  * salidas tomar, no que lo intente otra vez.
  */
+/**
+ * Cuántos pasos del plan firmado siguen sin atar, y cuál toca.
+ *
+ * Sólo tiene sentido en un workflow: `plannedSteps` llega cuando el plan tiene sobre firmado. El
+ * último pendiente **no** cuenta como plan a medias, porque cerrar el plan atando el último paso
+ * como síntesis es precisamente cómo termina bien un workflow.
+ */
+function planPendiente(context: PlanContext): { quedan: number; siguiente: string } | null {
+  const pendientes = (context.plannedSteps ?? []).filter((step) => step.state !== 'done');
+  if (pendientes.length <= 1) return null;
+  return { quedan: pendientes.length, siguiente: pendientes[0]?.title ?? '' };
+}
+
+const planSinTerminar = ({ quedan, siguiente }: { quedan: number; siguiente: string }): string =>
+  `Estás cerrando un plan que se firmó entero y quedan ${quedan} pasos sin dar; el siguiente es `
+  + `«${siguiente}». Terminar ahora cierra el plan y esos pasos no se hacen: no quedan pendientes `
+  + 'para luego. Haz el siguiente paso, o di explícitamente por qué el resto ya no hace falta.';
+
 const NOTHING_WAS_SHOWN = 'Tu respuesta dice que has mostrado o generado algo y este turno no ha '
   + 'colgado nada: no existe. Elige una de las dos: llama a `present` con el contenido, o escribe '
   + 'el contenido en tu respuesta. Lo que no vale es decir que está cuando no está.';
