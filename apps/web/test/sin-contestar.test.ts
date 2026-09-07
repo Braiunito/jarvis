@@ -22,6 +22,15 @@ describe('una pregunta sin contestar', () => {
     expect(sinContestar('idle', mensaje('tool'))).toBe(true);
   });
 
+  it('un evento del hilo no cuenta, porque los buenos y los malos comparten rol', () => {
+    /*
+     * «No pude contestar y me quedé sin intentos» y «Plan corregido: …» son los dos `event`. El
+     * primero es esto y el segundo es un turno que acabó bien, así que desde el rol no se
+     * distinguen — y el que muere ya se explica solo con sus palabras en el hilo.
+     */
+    expect(sinContestar('idle', mensaje('event'))).toBe(false);
+  });
+
   it('si el asistente habló el último, está contestada', () => {
     expect(sinContestar('idle', mensaje('assistant'))).toBe(false);
   });

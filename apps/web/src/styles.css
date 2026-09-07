@@ -1886,6 +1886,9 @@ a:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
+/* No es un aviso rojo: es un dato de la fila, y el rojo en una lista se lee como «rota». */
+.chat-rail-mudo { color: var(--warn); }
+
 .chat-capabilities {
   margin-top: auto;
   padding-top: 10px;

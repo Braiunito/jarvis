@@ -516,16 +516,25 @@ function AutonomyChip({ value, modes, onChange, pending }: {
 /**
  * Si esta conversación es una pregunta que nadie contestó.
  *
- * En reposo y con la última palabra sin ser del asistente. `waiting_approval` y `thinking` se caen
+ * En reposo y con lo último siendo **tuyo o una traza**: preguntaste, quizá se llegó a consultar
+ * algo, y no hay respuesta ni nada que explique por qué. `waiting_approval` y `thinking` se caen
  * solos por el primer término, que es lo que los distingue de esto: uno espera algo tuyo y el otro
  * está trabajando.
+ *
+ * **`event` queda fuera, y no por descuido.** Un evento del hilo puede ser «no pude contestar y me
+ * quedé sin intentos» —que sí es esto— pero también «Plan corregido: …», que es un turno que acabó
+ * bien. Comparten rol, así que desde aquí no se distinguen, y marcar un plan corregido como
+ * «sin contestar» sería enseñar una avería donde no la hay. Cuando el turno muere, además, el core
+ * escribe ese evento con sus palabras justo donde estás leyendo: repetirlo en la línea de estado no
+ * añadiría nada. Lo que esta regla cubre es lo que **no** deja rastro: el hilo que se queda en tu
+ * pregunta y en silencio.
  *
  * Va aparte y con nombre para poder probarla: dentro del componente sólo se podría comprobar
  * montando la pantalla entera contra una API, y lo que hay que sujetar aquí es la regla, no el
  * pintado.
  */
 export const sinContestar = (status: string, last: { role: string } | null): boolean =>
-  status === 'idle' && last !== null && last.role !== 'assistant';
+  status === 'idle' && (last?.role === 'user' || last?.role === 'tool');
 
 /**
  * Lo que ocupa el catálogo, dicho para quien mira.
@@ -921,6 +930,17 @@ export function AssistantScreen(): JSX.Element {
                 <span className="tiny faint">
                   {relativeTime(item.lastMessageAt ?? item.createdAt)}
                   {item.status === 'waiting_approval' ? ' · espera tu permiso' : ''}
+                  {/*
+                    * Y la que se quedó sin contestar, que es la que hay que ver **sin entrar**.
+                    *
+                    * Dentro del hilo lo dice la línea de estado, pero quien no abre esa
+                    * conversación no se entera nunca: en la lista se veía igual que una terminada.
+                    * Se usa el rol del último mensaje —un hecho— en vez de un booleano calculado
+                    * en el servidor, y con la misma regla que dentro para que las dos pantallas no
+                    * puedan contradecirse.
+                    */}
+                  {sinContestar(item.status, item.lastMessageRole ? { role: item.lastMessageRole } : null)
+                    ? <span className="chat-rail-mudo"> · sin contestar</span> : ''}
                 </span>
               </a>
             </li>
