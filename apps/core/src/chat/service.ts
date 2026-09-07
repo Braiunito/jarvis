@@ -240,6 +240,20 @@ export class ChatService {
     const at = this.#deps.clock.nowIso();
 
     /*
+     * Y se sueltan los hilos que esperan una firma que ya no puede llegar.
+     *
+     * `reconcile` barría `thinking` y no `waiting_approval`, así que una conversación cuya tarjeta
+     * caducó mientras el core estaba apagado se quedaba esperando para siempre y sin que nadie
+     * escribiera por qué. Aquí se hace al arrancar; el otro camino —que caduque en marcha— lo
+     * atiende el turno.
+     */
+    for (const fila of this.#deps.db.prepare(
+      "SELECT id FROM conversations WHERE status = 'waiting_approval'",
+    ).all() as Array<{ id: string }>) {
+      this.#releaseIfExpired(fila.id);
+    }
+
+    /*
      * Qué turnos se pueden rehacer, y es una minoría.
      *
      * Un turno escribe **según ocurre**: lo primero que deja en el hilo es la consulta a una
@@ -401,10 +415,45 @@ export class ChatService {
   }
 
   /** Las aprobaciones vivas de una conversación: lo que está esperando a que alguien decida. */
+  /**
+   * Las aprobaciones vivas: pendientes **y sin caducar**.
+   *
+   * Faltaba lo segundo, y por eso la pantalla seguía enseñando tarjetas muertas con «caduca en 0
+   * min»: al pulsarlas devolvían `APPROVAL_EXPIRED` y dejaban el hilo bloqueado (R-01). Una tarjeta
+   * que ya no se puede firmar no es algo que esté esperando a nadie.
+   */
   pendingApprovals(conversationId: string): Approval[] {
     return (this.#deps.db.prepare(
-      "SELECT * FROM approvals WHERE conversation_id = ? AND status = 'pending' ORDER BY requested_at",
-    ).all(conversationId) as Array<Record<string, unknown>>).map((row) => this.#toApproval(row));
+      `SELECT * FROM approvals WHERE conversation_id = ? AND status = 'pending' AND expires_at > ?
+       ORDER BY requested_at`,
+    ).all(conversationId, this.#deps.clock.nowIso()) as Array<Record<string, unknown>>)
+      .map((row) => this.#toApproval(row));
+  }
+
+  /**
+   * Suelta una conversación que se quedó esperando una firma que ya no puede llegar.
+   *
+   * Devuelve si hizo falta soltarla. Se llama desde el turno y desde `reconcile`, porque el hilo se
+   * puede quedar así de dos maneras: la tarjeta caduca mientras nadie mira, o el proceso se reinicia
+   * con ella ya caducada.
+   */
+  #releaseIfExpired(conversationId: string): boolean {
+    const at = this.#deps.clock.nowIso();
+    const muertas = this.#deps.db.prepare(
+      "UPDATE approvals SET status = 'expired' WHERE conversation_id = ? AND status = 'pending' AND expires_at <= ?",
+    ).run(conversationId, at).changes;
+    if (this.pendingApprovals(conversationId).length > 0) return false;
+    const conversation = this.#repository.find(conversationId);
+    if (!conversation || conversation.status !== 'waiting_approval') return false;
+    if (muertas > 0) {
+      this.#repository.append(conversationId, {
+        role: 'event',
+        text: 'La aprobación caducó sin respuesta. Vuelve a pedírmelo si sigue haciendo falta.',
+      });
+    }
+    this.#repository.setStatus(conversationId, 'idle', 'local');
+    this.bus.notify(conversationId);
+    return true;
   }
 
   // ---- creación y ajustes -------------------------------------------------
@@ -603,7 +652,15 @@ export class ChatService {
     const model = this.#deps.model;
     if (!conversation || !model) return;
     // Un hilo esperando una aprobación no piensa: lo que falta es una decisión de la persona.
-    if (conversation.status === 'waiting_approval') return;
+    /*
+     * Se decide por si queda una firma viva, no por lo que diga la fila.
+     *
+     * `waiting_approval` con la tarjeta ya caducada dejaba la conversación muerta **para siempre**:
+     * cada mensaje nuevo se guardaba y el turno salía sin pensar, así que la persona veía su
+     * pregunta y ninguna respuesta, sin explicación. La caducidad se anotaba en la aprobación y
+     * nadie la trasladaba al hilo.
+     */
+    if (conversation.status === 'waiting_approval' && !this.#releaseIfExpired(id)) return;
 
     const source: ModelSource = conversation.source === 'cloud' && model.canEscalate
       ? 'cloud'
@@ -1000,6 +1057,9 @@ export class ChatService {
     }
     if (Date.parse(approval.expiresAt) <= clock.nowMs()) {
       db.prepare("UPDATE approvals SET status = 'expired' WHERE id = ?").run(approvalId);
+      // Se suelta el hilo **antes** de lanzar: si no, quien pulsó «Autorizar» se lleva el error y
+      // la conversación se queda esperando una firma que ya no puede llegar.
+      this.#releaseIfExpired(approval.conversationId);
       throw new JarvisError('APPROVAL_EXPIRED', 'la aprobación caducó sin respuesta');
     }
     /*

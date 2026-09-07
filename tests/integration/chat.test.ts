@@ -119,7 +119,7 @@ interface Harness {
   index: FakeSessionIndex;
 }
 
-function harness({ local, cloud, writable = false, directCapabilities = false, index }: {
+function harness({ local, cloud, writable = false, directCapabilities = false, index, approvalTtlMs }: {
   local: ScriptedBrain;
   cloud?: ScriptedBrain;
   writable?: boolean;
@@ -139,6 +139,8 @@ function harness({ local, cloud, writable = false, directCapabilities = false, i
    * propias pruebas más abajo.
    */
   directCapabilities?: boolean;
+  /** Para probar la caducidad sin esperar ocho horas ni falsear el reloj del proceso. */
+  approvalTtlMs?: number;
 }): Harness {
   const nube = cloud ?? new ScriptedBrain('nube', []);
   const mcp = fakeMcp({ writable });
@@ -154,6 +156,7 @@ function harness({ local, cloud, writable = false, directCapabilities = false, i
       // justo cuándo se lanza y cuándo no.
       sshCommand: fakeSshPath(), knownHostsFile: '',
       chatDirectCapabilities: directCapabilities,
+      ...(approvalTtlMs === undefined ? {} : { approvalTtlMs }),
     },
   });
   return { services, local, cloud: nube, restarts: mcp.restarts, index: sessionIndex };
@@ -371,6 +374,62 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
     // Y una pregunta nueva sin respuesta sí lo está, aunque el turno no llegue a arrancar.
     services.chat.send(conversation.id, 'y el disco', user);
     expect(services.chat.list({ user })[0]?.pendingAnswer).toBe(true);
+  });
+
+  it('R-01 · una tarjeta caducada no deja el hilo esperando para siempre', async () => {
+    /*
+     * La caducidad se anotaba en la aprobación y nadie la trasladaba al hilo: la fila se quedaba en
+     * `waiting_approval` **sin ninguna aprobación viva**, y a partir de ahí cada mensaje nuevo se
+     * guardaba y el turno salía sin pensar. La persona veía su pregunta y ninguna respuesta, sin
+     * explicación y para siempre.
+     */
+    const local = new ScriptedBrain('local', [
+      () => ({
+        kind: 'capability', title: 'memoria', capability: 'zeus.memory_info', args: {},
+        summary: 'mirar la memoria', effectsDeclared: true,
+      }),
+      () => ({ kind: 'finish', summary: 'ahora sí: la memoria va bien' }),
+    ]);
+    // Un milisegundo de vida: la tarjeta nace caducada.
+    const { services } = track(harness({ local, approvalTtlMs: 1 }));
+
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'mira la memoria', user);
+    await settled(services, conversation.id);
+    expect(services.chat.require(conversation.id).status).toBe('waiting_approval');
+
+    // Una tarjeta que ya no se puede firmar no está esperando a nadie: no se enseña (L-12).
+    expect(services.chat.pendingApprovals(conversation.id)).toHaveLength(0);
+
+    // Y el hilo sigue vivo: la siguiente pregunta se contesta.
+    services.chat.send(conversation.id, 'y entonces?', user);
+    await settled(services, conversation.id);
+
+    expect(services.chat.require(conversation.id).status).toBe('idle');
+    const mensajes = services.chat.messages(conversation.id);
+    expect(mensajes.some((m) => m.role === 'event' && m.text.includes('caducó'))).toBe(true);
+    expect(mensajes.at(-1)?.text).toContain('la memoria va bien');
+  });
+
+  it('R-01 · y al arrancar se suelta el hilo que caducó con el core apagado', async () => {
+    // El otro camino: `reconcile` barría `thinking` y no `waiting_approval`, así que una tarjeta
+    // que caducó mientras el core estaba parado dejaba el hilo esperando sin que nadie lo dijera.
+    const local = new ScriptedBrain('local', [
+      () => ({
+        kind: 'capability', title: 'memoria', capability: 'zeus.memory_info', args: {},
+        summary: 'mirar la memoria', effectsDeclared: true,
+      }),
+    ]);
+    const { services } = track(harness({ local, approvalTtlMs: 1 }));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'mira la memoria', user);
+    await settled(services, conversation.id);
+
+    services.chat.reconcile();
+
+    expect(services.chat.require(conversation.id).status).toBe('idle');
+    expect(services.chat.messages(conversation.id).some(
+      (m) => m.role === 'event' && m.text.includes('caducó'))).toBe(true);
   });
 
   it('el primer mensaje nombra la conversación', async () => {
