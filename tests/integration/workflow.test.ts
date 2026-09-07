@@ -242,6 +242,64 @@ describe('WF · los topes se gastan a lo largo del plan, no dentro de un turno',
   });
 });
 
+describe('WF · el plan escrito no gasta el tope de pasos', () => {
+  it('un workflow firmado a su medida cabe en su propio sobre desde el primer paso', async () => {
+    /*
+     * El caso que el modelo de verdad escribe **siempre** y que aquí no se probaba nunca.
+     *
+     * En producción `maxSteps` sale igual al número de pasos —seis pasos, `maxSteps: 6`—, así que
+     * un workflow nace pegado a su propio tope. Las pruebas de arriba usan un sobre holgado
+     * (`maxSteps: 6` para dos pasos) y por eso el borde no se cruza nunca: el sesgo no está en el
+     * código, está en que el sobre de la prueba es más generoso que el real.
+     *
+     * Lo que se firma son los pasos que se van a hacer. Que estén escritos por delante no puede
+     * gastarlos: si contase el plan escrito, el primer paso de todo workflow pediría tarjeta y el
+     * sobre no autorizaría nada — sería una firma que no sirve para nada.
+     */
+    const model = new PlanBrain([
+      () => ({ kind: 'run', title: 'Primero', prompt: 'mira el log', permissionProfile: 'safe', rationale: 'hace falta' }),
+    ]);
+    const services = harness(model);
+    const { plan } = draftWorkflow(services, sobre({ maxSteps: 2 }));
+    const digest = digestOf({ planId: plan.id, objective: plan.objective, envelope: plan.envelope! });
+    services.plans.activate(plan.id, user, digest);
+
+    await services.plans.advance(plan.id, user);
+
+    const paso = services.plans.steps(plan.id)[0];
+    const motivo = paso?.approvalId ? services.plans.approval(paso.approvalId)?.summary ?? '' : '';
+    expect(motivo).not.toContain('Se sale de lo aprobado');
+    expect(paso?.kind).toBe('run');
+  });
+
+  it('y el tope se cruza cuando el plan ya gastó los pasos que se firmaron', async () => {
+    /*
+     * La otra mitad: el tope tiene que seguir mordiendo, y morder por los pasos **hechos**.
+     *
+     * Un paso firmado y dos escritos: el primero cabe, el segundo ya no. Que estuviera escrito no
+     * le da derecho a hacerse — lo que autoriza es el tope, no el papel.
+     */
+    const model = new PlanBrain([
+      () => ({ kind: 'run', title: 'Primero', prompt: 'mira el log', permissionProfile: 'safe', rationale: 'hace falta' }),
+      () => ({ kind: 'run', title: 'Segundo', prompt: 'mira el otro', permissionProfile: 'safe', rationale: 'y esto' }),
+    ]);
+    const services = harness(model);
+    const { plan } = draftWorkflow(services, sobre({ maxSteps: 1, maxRuns: 9 }));
+    const digest = digestOf({ planId: plan.id, objective: plan.objective, envelope: plan.envelope! });
+    services.plans.activate(plan.id, user, digest);
+
+    await services.plans.advance(plan.id, user);
+    expect(services.plans.steps(plan.id)[0]?.kind).toBe('run');
+
+    terminaElTrabajo(services, plan.id);
+    await services.plans.advance(plan.id, user);
+
+    const segundo = services.plans.steps(plan.id)[1];
+    expect(segundo?.kind).toBe('approval');
+    expect(services.plans.approval(segundo!.approvalId!)?.summary).toContain('el paso 2');
+  });
+});
+
 describe('WF · atar: el paso estimativo se convierte en el que se hace', () => {
   const enMarcha = (model: PlanBrain, envelope = sobre()) => {
     const services = harness(model);

@@ -865,7 +865,22 @@ export class PlanService {
       const fuera = outsideEnvelope(
         plan.envelope,
         { kind: 'run', host: workspace?.ref.host ?? null, permissionProfile: decision.permissionProfile },
-        { steps: steps.length, runs: steps.filter((step) => step.runId).length },
+        /*
+         * Lo gastado son los pasos **hechos**, no los escritos.
+         *
+         * En un workflow los pasos existen desde antes de empezar: son estimativos en borrador
+         * esperando a que se les ate una decisión. Contarlos como gastados hacía que un plan de
+         * seis pasos firmado con `maxSteps: 6` —que es exactamente lo que escribe el modelo, el
+         * tope sale igual al número de pasos— se saliera del sobre **en el primer paso**, y
+         * entonces la firma no autoriza nada: cada paso vuelve a pedir tarjeta.
+         *
+         * No se veía porque las pruebas usaban un sobre holgado (`maxSteps: 6` para dos pasos), y
+         * un sobre holgado no cruza el borde nunca.
+         */
+        {
+          steps: steps.filter((step) => !(step.kind === 'estimate' && step.status === 'draft')).length,
+          runs: steps.filter((step) => step.runId).length,
+        },
       );
       if (fuera) {
         const { title, prompt, permissionProfile, rationale } = decision;
