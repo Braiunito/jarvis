@@ -838,6 +838,24 @@ describe('no se publica una respuesta que dice haber enseñado algo que no está
     expect((decision as { summary: string }).summary).not.toContain('no llegó a proponer');
   });
 
+  it('la conjugación no es una salida: «Presento» se desmiente igual que «Mostrado»', async () => {
+    /*
+     * Medido en producción con el desmentido ya desplegado: contestó «**Presento** el contenido de
+     * /etc/os-release en formato código JSON» sin colgar nada, y pasó. La lista enumeraba formas
+     * —`presenté`, `presentado`— y la `o` del presente se caía por el hueco.
+     *
+     * Enumerar formas no cierra nada en castellano: la siguiente está a un tiempo verbal. Lo que se
+     * mira ahora es la **raíz**, que es donde el idioma no cambia.
+     */
+    for (const frase of ['Presento el contenido.', 'Muestro el fichero.', 'Te enseño la tabla.',
+      'Genero el informe.', 'Adjunto el bloque.']) {
+      const { model, vueltas } = conModelo([frase, 'PRETTY_NAME="Ubuntu 24.04".']);
+      const decision = await model.decide(contexto(), toolbox());
+      expect(vueltas(), frase).toBe(2);
+      expect((decision as { summary: string }).summary).toContain('Ubuntu');
+    }
+  });
+
   it('una acción de otro no se desmiente: es mejor dejar pasar una mentira que negar una verdad', async () => {
     // «el agente ha generado tres ficheros» es una respuesta legítima. Desmentirla gasta el turno y
     // reescribe algo que estaba bien.

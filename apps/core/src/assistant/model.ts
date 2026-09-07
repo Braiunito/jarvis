@@ -1092,7 +1092,24 @@ export class OpenAiCompatibleModel implements AssistantModel {
  * Se busca al **cerrar el turno**, y sólo cuando el core sabe que no se colgó nada. No es adivinar
  * lo que quiso decir: es comprobar una afirmación concreta contra un hecho que tenemos delante.
  */
-const CLAIM_WORDS = /\b(mostrad[oa]s?|enseñad[oa]s?|generad[oa]s?|adjuntad[oa]s?|presentad[oa]s?|most(ré|re)|enseñ(é|e)|gener(é|e)|te dejo|aqu[íi] tienes|arriba tienes)\b/i;
+/**
+ * Los verbos de «te lo he enseñado», por su **raíz** y no por su conjugación.
+ *
+ * La lista anterior enumeraba formas —`mostrado`, `mostré`, `presenté`— y el modelo se escapó por
+ * el hueco escribiendo «**Presento** el contenido…»: `present(é|e)` pedía una `é` o una `e` y la
+ * `o` del presente de indicativo no estaba. Añadir `presento` habría cerrado ese caso y dejado la
+ * puerta donde estaba, que es lo que yo mismo dije con `headers`: **una lista de formas no es el
+ * arreglo**.
+ *
+ * Lo que sí cierra la familia de las conjugaciones es mirar donde el castellano no cambia: la raíz.
+ * `mostr`/`muestr` —el cambio de raíz de la primera persona—, `enseñ`, `present`, `gener`, `adjunt`
+ * cubren todos los tiempos y personas de esos cinco verbos de una vez.
+ *
+ * Y sigue siendo detección de prosa, con lo que eso vale: lo único que decide es **si se afirmó**.
+ * El hecho —que no se colgó nada— lo pone `toolbox.presented`, y por eso una afirmación falsa se
+ * desmiente con certeza y no con una impresión.
+ */
+const CLAIM_WORDS = /\b(mostr|muestr|enseñ|present|gener|adjunt)[aáeéio]\w*|\b(te dejo|aqu[íi] tienes|arriba tienes)\b/i;
 /** Un tercero haciendo la acción: «el agente **ha** generado», «Salud **ha** mostrado». */
 const THIRD_PARTY = /\b(ha|han|hab[íi]a|hab[íi]an)\b/i;
 
