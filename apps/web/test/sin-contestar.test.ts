@@ -8,18 +8,45 @@
  * uno terminado— y lo único que lo decía era un `/api/health` que no mira nadie.
  */
 import { describe, expect, it } from 'vitest';
-import { sinContestar } from '../src/screens/assistant.jsx';
+import { pendienteDeRespuesta, sinContestar } from '../src/screens/assistant.jsx';
 
-const mensaje = (role: string): { role: string } => ({ role });
+const hilo = (...roles: string[]): { role: string }[] => roles.map((role) => ({ role }));
+
+describe('queda una pregunta esperando', () => {
+  it('preguntaste y no hay nada del asistente después', () => {
+    expect(pendienteDeRespuesta(hilo('user'))).toBe(true);
+    expect(pendienteDeRespuesta(hilo('user', 'tool', 'tool'))).toBe(true);
+  });
+
+  it('contestada, aunque encima caiga un evento', () => {
+    // «Plan corregido: …» es un `event` y es un turno que acabó bien: no reabre nada.
+    expect(pendienteDeRespuesta(hilo('user', 'assistant', 'event'))).toBe(false);
+  });
+
+  it('el turno que murió hablando también está pendiente, y ahí el rol no lo diría', () => {
+    // El core deja «me quedé sin intentos» como `event`: mismo rol que el de arriba, sentido opuesto.
+    expect(pendienteDeRespuesta(hilo('user', 'assistant', 'user', 'event'))).toBe(true);
+  });
+
+  it('una pregunta nueva después de una contestada vuelve a estar pendiente', () => {
+    expect(pendienteDeRespuesta(hilo('user', 'assistant', 'user'))).toBe(true);
+  });
+
+  it('un hilo sin preguntas no espera nada', () => {
+    expect(pendienteDeRespuesta([])).toBe(false);
+    expect(pendienteDeRespuesta(hilo('event'))).toBe(false);
+  });
+});
+
 
 describe('una pregunta sin contestar', () => {
   it('en reposo y con la última palabra tuya, nadie contestó', () => {
-    expect(sinContestar('idle', mensaje('user'))).toBe(true);
+    expect(sinContestar('idle', true)).toBe(true);
   });
 
   it('un turno que murió a mitad tampoco contestó, aunque dejara trazas', () => {
     // Se quedó una observación de herramienta como último mensaje: hubo trabajo y no hubo respuesta.
-    expect(sinContestar('idle', mensaje('tool'))).toBe(true);
+    expect(sinContestar('idle', true)).toBe(true);
   });
 
   it('un evento del hilo no cuenta, porque los buenos y los malos comparten rol', () => {
@@ -28,22 +55,22 @@ describe('una pregunta sin contestar', () => {
      * primero es esto y el segundo es un turno que acabó bien, así que desde el rol no se
      * distinguen — y el que muere ya se explica solo con sus palabras en el hilo.
      */
-    expect(sinContestar('idle', mensaje('event'))).toBe(false);
+    expect(sinContestar('idle', false)).toBe(false);
   });
 
   it('si el asistente habló el último, está contestada', () => {
-    expect(sinContestar('idle', mensaje('assistant'))).toBe(false);
+    expect(sinContestar('idle', false)).toBe(false);
   });
 
   it('esperar permiso no es quedarse sin contestar: espera algo tuyo', () => {
-    expect(sinContestar('waiting_approval', mensaje('user'))).toBe(false);
+    expect(sinContestar('waiting_approval', true)).toBe(false);
   });
 
   it('mientras piensa, tampoco: todavía está en ello', () => {
-    expect(sinContestar('thinking', mensaje('user'))).toBe(false);
+    expect(sinContestar('thinking', true)).toBe(false);
   });
 
   it('una conversación vacía no es una pregunta sin contestar', () => {
-    expect(sinContestar('idle', null)).toBe(false);
+    expect(sinContestar('idle', false)).toBe(false);
   });
 });

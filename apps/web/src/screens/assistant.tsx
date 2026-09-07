@@ -514,27 +514,41 @@ function AutonomyChip({ value, modes, onChange, pending }: {
 }
 
 /**
+ * Si queda una pregunta esperando respuesta: no hay nada del asistente después de lo último tuyo.
+ *
+ * Es la misma definición que calcula el core en `pendingAnswer`, escrita aquí porque **dentro del
+ * hilo el campo llega viejo**. La conversación se pide una vez al abrirla y el stream sólo la
+ * invalida cuando llega una aprobación, así que la respuesta que acabas de ver aparecer no
+ * refresca ese booleano: la línea diría «se quedó sin contestar» debajo de una respuesta recién
+ * escrita. Los mensajes, en cambio, están aquí y al día.
+ *
+ * En la lista es al revés —no hay mensajes— y ahí manda el campo del core. Misma definición en los
+ * dos sitios, cada uno calculado con lo más fresco que tiene delante.
+ */
+export const pendienteDeRespuesta = (messages: { role: string }[]): boolean => {
+  const ultimaTuya = messages.map((m) => m.role).lastIndexOf('user');
+  if (ultimaTuya === -1) return false;
+  return !messages.slice(ultimaTuya + 1).some((m) => m.role === 'assistant');
+};
+
+/**
  * Si esta conversación es una pregunta que nadie contestó.
  *
- * En reposo y con lo último siendo **tuyo o una traza**: preguntaste, quizá se llegó a consultar
- * algo, y no hay respuesta ni nada que explique por qué. `waiting_approval` y `thinking` se caen
- * solos por el primer término, que es lo que los distingue de esto: uno espera algo tuyo y el otro
- * está trabajando.
+ * En reposo y con una pregunta pendiente. `waiting_approval` y `thinking` se caen solos por el
+ * primer término, que es lo que los distingue de esto: uno espera algo tuyo y el otro está
+ * trabajando.
  *
- * **`event` queda fuera, y no por descuido.** Un evento del hilo puede ser «no pude contestar y me
- * quedé sin intentos» —que sí es esto— pero también «Plan corregido: …», que es un turno que acabó
- * bien. Comparten rol, así que desde aquí no se distinguen, y marcar un plan corregido como
- * «sin contestar» sería enseñar una avería donde no la hay. Cuando el turno muere, además, el core
- * escribe ese evento con sus palabras justo donde estás leyendo: repetirlo en la línea de estado no
- * añadiría nada. Lo que esta regla cubre es lo que **no** deja rastro: el hilo que se queda en tu
- * pregunta y en silencio.
+ * El «pendiente» no se mira por el rol del último mensaje, y no por descuido: un `event` del hilo
+ * puede ser «no pude contestar y me quedé sin intentos» —que sí es esto— o «Plan corregido: …»,
+ * que es un turno que acabó bien. Diecisiete sitios escriben `event` y dicen cosas opuestas, así
+ * que ese rol no decide nada. Lo que decide es si hay respuesta después de la pregunta.
  *
  * Va aparte y con nombre para poder probarla: dentro del componente sólo se podría comprobar
  * montando la pantalla entera contra una API, y lo que hay que sujetar aquí es la regla, no el
  * pintado.
  */
-export const sinContestar = (status: string, last: { role: string } | null): boolean =>
-  status === 'idle' && (last?.role === 'user' || last?.role === 'tool');
+export const sinContestar = (status: string, pendiente: boolean): boolean =>
+  status === 'idle' && pendiente;
 
 /**
  * Lo que ocupa el catálogo, dicho para quien mira.
@@ -805,7 +819,7 @@ export function AssistantScreen(): JSX.Element {
    * el asistente, nadie contestó. `waiting_approval` y `thinking` quedan fuera solos, que es lo que
    * los distingue de esto.
    */
-  const unanswered = sinContestar(status, messages[messages.length - 1] ?? null);
+  const unanswered = sinContestar(status, pendienteDeRespuesta(messages));
   const autonomy = (stream.autonomy ?? conversation?.autonomy ?? 'manual') as AutonomyMode;
   const approvals = detail.data?.approvals ?? [];
   const capabilities = list.data?.capabilities;
@@ -939,7 +953,7 @@ export function AssistantScreen(): JSX.Element {
                     * en el servidor, y con la misma regla que dentro para que las dos pantallas no
                     * puedan contradecirse.
                     */}
-                  {sinContestar(item.status, item.lastMessageRole ? { role: item.lastMessageRole } : null)
+                  {sinContestar(item.status, item.pendingAnswer)
                     ? <span className="chat-rail-mudo"> · sin contestar</span> : ''}
                 </span>
               </a>
