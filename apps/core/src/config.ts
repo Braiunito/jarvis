@@ -102,6 +102,22 @@ export function buildConfig(env: NodeJS.ProcessEnv = process.env) {
     eventSummaryChars: Number(env['JARVIS_EVENT_SUMMARY_CHARS'] || 200),
     retentionIntervalMs: Number(env['JARVIS_RETENTION_INTERVAL_MS'] || 6 * 60 * 60 * 1000),
 
+    /**
+     * Cuánto vive una tarjeta sin contestar.
+     *
+     * Era el único plazo de la casa sin variable —los otros cuatro la tienen— y el valor estaba
+     * escrito dos veces, en el chat y en los planes, con un `?? 30 * 60 * 1000` que nadie pasaba.
+     *
+     * Ocho horas y no media, y el motivo no es comodidad: cuando caduca una tarjeta a mitad de un
+     * plan, **el plan entero se termina** y los pasos ya hechos se pierden. Media hora convierte en
+     * habitual el caso de «lo propuso por la noche y lo vi por la mañana», que en un asistente de
+     * casa es lo normal y no lo raro. Ocho horas cubren una jornada sin llegar a que una tarjeta
+     * sobreviva a la situación que la motivó.
+     *
+     * El número es una mitigación, no el arreglo: lo que de verdad duele es perder el trabajo hecho,
+     * y eso se arregla en el motor, no aquí.
+     */
+    approvalTtlMs: Number(env['JARVIS_APPROVAL_TTL_MS'] || 8 * 60 * 60 * 1000),
     capabilityTtlMs: Number(env['JARVIS_CAPABILITY_TTL_MS'] || 10 * 60 * 1000),
     usageTtlMs: Number(env['JARVIS_USAGE_TTL_MS'] || 5 * 60 * 1000),
     usageProbeTimeoutMs: Number(env['JARVIS_USAGE_PROBE_TIMEOUT_MS'] || 20_000),

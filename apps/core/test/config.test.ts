@@ -66,6 +66,16 @@ describe('CONFIG · una errata no puede abrir una puerta', () => {
     }
   });
 
+  it('los plazos se pueden cambiar sin tocar código, y el de las tarjetas también', () => {
+    /*
+     * Era el único plazo de la casa sin variable: estaba escrito dos veces —chat y planes— con un
+     * `?? 30 * 60 * 1000` que nadie pasaba. Y no es un detalle de configuración: cuando una tarjeta
+     * caduca a mitad de un plan, el plan **entero** se termina y los pasos hechos se pierden.
+     */
+    expect(con().approvalTtlMs).toBe(8 * 60 * 60 * 1000);
+    expect(con({ JARVIS_APPROVAL_TTL_MS: '600000' }).approvalTtlMs).toBe(600_000);
+  });
+
   it('sin hosts declarados sólo se alcanza el bastión, nunca la flota entera', () => {
     // Una allowlist vacía que significara «todos» convertiría una variable olvidada en ejecución
     // remota arbitraria. Se comprueba aquí porque es la misma clase de decisión.

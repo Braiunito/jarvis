@@ -350,6 +350,9 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const plans = new PlanService({
     db, clock, runs, workspaces, sessions, health, model, audit, attachments, evidence,
     maxToolCalls: config.assistantMaxToolCalls,
+    // El mismo plazo que el chat, y de la misma variable: dos servicios que crean tarjetas con
+    // caducidades distintas serían dos productos.
+    approvalTtlMs: config.approvalTtlMs,
     // En un plan el MCP es de sólo lectura: su motor sólo sabe ejecutar runs (ADR-009).
     mcp,
     canEscalate: hybrid?.canEscalate === true,
@@ -376,6 +379,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     maxToolCalls: config.chatMaxToolCalls,
     maxTurnMs: config.chatMaxTurnMs,
     allowHtmlArtifacts: config.allowHtmlArtifacts,
+    approvalTtlMs: config.approvalTtlMs,
     directCapabilities: config.chatDirectCapabilities,
     allowUnrestricted: config.chatAllowUnrestricted,
     maxTools: config.chatMaxTools,
