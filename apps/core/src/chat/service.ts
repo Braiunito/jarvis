@@ -48,7 +48,19 @@ import { ChatRepository, type NewMessage } from './repository.js';
 import { ChatEventBus } from './events-bus.js';
 
 /** Lo que se guarda de un resultado de herramienta en el hilo. Lo completo ya está en su sitio. */
-/** Lo que cabe en un workflow. Doce pasos es lo que el motor de planes sabe llevar. */
+/**
+ * Lo que cabe en un workflow. Doce pasos es lo que el motor de planes sabe llevar.
+ *
+ * Y es además **el único techo del contexto de un plan**, cosa que no se ve desde aquí:
+ * `buildEnvelope` firma `maxSteps: draft.steps.length`, así que el sobre vale siempre lo que el
+ * modelo haya escrito, y `renderContext` pinta un renglón por paso previsto más el resumen de cada
+ * paso dado (recortado a `MAX_STEP_OUTPUT_CHARS`). Medido: un plan avanzado de doce ocupa ~5.100
+ * tokens de prompt en cada turno.
+ *
+ * O sea que subir este número no alarga sólo el plan: **alarga el prompt de todos sus turnos**, en
+ * línea recta y sin que nada avise. Si se sube, hay que darle al contexto un tope propio en vez de
+ * dejar que lo herede de aquí. La medida está en `test/context-budget.test.ts`.
+ */
 const DEFAULT_MAX_WORKFLOW_STEPS = 12;
 
 const TOOL_ECHO_CHARS = 1200;
