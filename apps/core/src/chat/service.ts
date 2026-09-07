@@ -638,8 +638,22 @@ export class ChatService {
       // El esfuerzo era del turno: cuando acaba, deja de haber uno. Se limpia aquí, que es el
       // único sitio donde se sabe que no queda nada encadenado detrás.
       this.#effort.delete(id);
-      // El turno acabó —bien o mal—, así que lo que se pidió ya no está pendiente. Se cierra aquí
-      // y no dentro de `#turn` porque aquí es donde se sabe que no queda nada encadenado detrás.
+      /*
+       * Si la base ya está cerrada, no hay nada que cerrar.
+       *
+       * Esto corre **después** de que el turno termine, y para entonces el proceso puede estar
+       * apagándose: `close()` cierra la base y este callback llegaba detrás con un
+       * `The database connection is not open` **sin capturar**. En Node eso no es un aviso, es el
+       * proceso muriendo, porque desde la 15 el default de `--unhandled-rejections` es `throw`.
+       *
+       * Se pregunta a la base y no a una bandera propia: una bandera hay que acordarse de ponerla
+       * en cada camino de cierre, y `db.open` es la verdad. Y no pasa nada por no marcar el trabajo:
+       * queda en `running`, que es exactamente lo que `reconcile()` barre al arrancar.
+       *
+       * En pruebas lo dispara el `afterEach` que cierra los servicios; en producción, apagar el core
+       * con un turno a medias — o sea, cada despliegue.
+       */
+      if (!this.#deps.db.open) return;
       const alive = this.#deps.jobs?.alive('conversation', id, CHAT_TURN_JOB);
       if (alive) this.#deps.jobs?.finish(alive.id, this.#deps.clock.nowIso());
     };

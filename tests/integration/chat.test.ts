@@ -139,7 +139,14 @@ function harness({ local, cloud, writable = false, directCapabilities = false, i
    * propias pruebas más abajo.
    */
   directCapabilities?: boolean;
-  /** Para probar la caducidad sin esperar ocho horas ni falsear el reloj del proceso. */
+  /**
+   * Para probar la caducidad sin esperar ocho horas ni falsear el reloj del proceso.
+   *
+   * En negativo la tarjeta **nace caducada**, que es el estado que se quiere probar. Con `1` la
+   * prueba dependía de que pasara un milisegundo entre crearla y mirarla: fallaba 7 de cada 10
+   * veces, y con la máquina rápida siempre. Un plazo que depende de lo que tarde el proceso no es
+   * un plazo, es una carrera.
+   */
   approvalTtlMs?: number;
 }): Harness {
   const nube = cloud ?? new ScriptedBrain('nube', []);
@@ -390,8 +397,8 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
       }),
       () => ({ kind: 'finish', summary: 'ahora sí: la memoria va bien' }),
     ]);
-    // Un milisegundo de vida: la tarjeta nace caducada.
-    const { services } = track(harness({ local, approvalTtlMs: 1 }));
+    // Nace caducada: el plazo en negativo hace el estado determinista, sin depender del reloj.
+    const { services } = track(harness({ local, approvalTtlMs: -1000 }));
 
     const conversation = services.chat.create({ user });
     services.chat.send(conversation.id, 'mira la memoria', user);
@@ -420,7 +427,7 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
         summary: 'mirar la memoria', effectsDeclared: true,
       }),
     ]);
-    const { services } = track(harness({ local, approvalTtlMs: 1 }));
+    const { services } = track(harness({ local, approvalTtlMs: -1000 }));
     const conversation = services.chat.create({ user });
     services.chat.send(conversation.id, 'mira la memoria', user);
     await settled(services, conversation.id);
