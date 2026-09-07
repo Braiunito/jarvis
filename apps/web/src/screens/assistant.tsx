@@ -610,26 +610,6 @@ function StatusLine({
   }
 
   /*
-   * Nadie contestó, y hasta ahora eso se veía igual que una conversación terminada.
-   *
-   * Va después de `failed` y antes de todo lo demás porque es más raro y más grave: `failed` al
-   * menos lo dice. La salida no manda nada sola —devuelve tu pregunta al compositor y la mandas
-   * tú—: reenviar por tu cuenta una pregunta que ya gastó un turno del modelo es una decisión de
-   * quien paga, no de la pantalla.
-   */
-  if (unanswered) {
-    return (
-      <span className="chat-status warn">
-        <span className="chat-status-dot" aria-hidden="true" />
-        <span className="truncate">se quedó sin contestar</span>
-        <button type="button" className="btn small chat-status-retry" onClick={onAskAgain}>
-          Volver a preguntar
-        </button>
-      </span>
-    );
-  }
-
-  /*
    * Y perder el stream tampoco: sin esto, el hilo se queda callado y parece que nadie contesta.
    * Sólo cuando se ha dado por vencido —una reconexión de un segundo no es noticia—.
    */
@@ -729,6 +709,26 @@ function StatusLine({
         </span>
       ) : null}
       {aviso ? <strong className="chat-status-warn">{aviso}</strong> : null}
+      {/*
+        * Nadie contestó, dicho **junto** a lo demás y no en su lugar.
+        *
+        * Empezó siendo un estado propio que sustituía la línea entera, y eso escondía las máquinas
+        * y el modelo justo en el turno en que más se quieren mirar: si nadie contestó, lo primero
+        * que uno se pregunta es si hay modelo y si responden las máquinas. Lo destapó un e2e —el
+        * guion acaba proponiendo trabajo y la conversación se queda sin respuesta de verdad—, o
+        * sea que el caso raro que yo creía teórico es el normal en las pruebas.
+        *
+        * La salida no manda nada sola: devuelve tu pregunta al compositor y la mandas tú. Reenviar
+        * por tu cuenta algo que ya gastó un turno del modelo es una decisión de quien paga.
+        */}
+      {unanswered ? (
+        <>
+          <strong className="chat-status-warn">sin contestar</strong>
+          <button type="button" className="btn small chat-status-retry" onClick={onAskAgain}>
+            Volver a preguntar
+          </button>
+        </>
+      ) : null}
     </span>
   );
 }
