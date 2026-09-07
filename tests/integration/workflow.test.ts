@@ -243,6 +243,123 @@ describe('WF · los topes se gastan a lo largo del plan, no dentro de un turno',
   });
 });
 
+describe('WF · un plan puede repartir trabajo entre máquinas', () => {
+  /*
+   * Para esto existe un plan de varios pasos, y hasta ahora no se podía.
+   *
+   * Los dos sitios donde el motor creaba un run usaban el workspace del plan, así que todos los
+   * trabajos caían en la misma máquina y el `hosts` **en plural** del sobre prometía algo que nadie
+   * podía cumplir. Lo que eso impedía es el caso real de la casa: un agente investiga en una
+   * máquina, encuentra la causa y dice «no tengo acceso a la otra, que lo haga quien lo tenga», y
+   * una persona hace de puente. Ese puente es lo que el plan tiene que saber hacer solo.
+   */
+  const casa = (model: PlanBrain): CoreServices => {
+    const services = buildServices({
+      db: openDatabase({ path: ':memory:' }),
+      index: new FakeSessionIndex([indexRow()]) as never,
+      model: model as never,
+      config: {
+        hosts: ['bastion', 'goro2'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-workflow-spool',
+        sshCommand: fakeSshPath(), knownHostsFile: '',
+      },
+    });
+    open.push(services);
+    return services;
+  };
+
+  const enDos = (services: CoreServices) => {
+    const workspace = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-1' } }, user,
+    ).workspace;
+    const plan = services.plans.createWorkflow({
+      workspaceId: workspace.id,
+      objective: 'averiguar por qué el login entra en bucle',
+      envelope: sobre({ hosts: ['bastion', 'goro2'], maxRuns: 4 }),
+      steps: [
+        { title: 'Investigar en bastion', intent: 'leer el código', expects: 'la causa' },
+        { title: 'Arreglar en goro2', intent: 'aplicar el arreglo', expects: 'el diff' },
+      ],
+      user,
+    });
+    const digest = digestOf({ planId: plan.id, objective: plan.objective, envelope: plan.envelope! });
+    services.plans.activate(plan.id, user, digest);
+    return plan;
+  };
+
+  const dondeCorrio = (services: CoreServices, ordinal: number): string | null => {
+    const step = services.plans.steps(services.plans.listActive()[0]!.id)[ordinal];
+    if (!step?.runId) return null;
+    const run = services.runs.require(step.runId);
+    return services.workspaces.find(run.workspaceId)?.ref.host ?? null;
+  };
+
+  it('el segundo paso trabaja en otra máquina, y se le abre sesión si no la había', async () => {
+    const services = casa(new PlanBrain([
+      () => ({ kind: 'run', title: 'Investigar', prompt: 'lee el código', permissionProfile: 'safe', rationale: 'hace falta' }),
+      () => ({ kind: 'run', title: 'Arreglar', prompt: 'aplica el arreglo', permissionProfile: 'safe', rationale: 'y ahora allí', host: 'goro2' }),
+    ]));
+    const plan = enDos(services);
+
+    await services.plans.advance(plan.id, user);
+    terminaElTrabajo(services, plan.id);
+    await services.plans.advance(plan.id, user);
+
+    expect(dondeCorrio(services, 0)).toBe('bastion');
+    // Y el segundo se fue a la otra máquina, con sesión abierta para él.
+    expect(dondeCorrio(services, 1)).toBe('goro2');
+  });
+
+  it('una máquina que no se firmó no se toca: se pregunta', async () => {
+    const services = casa(new PlanBrain([
+      () => ({ kind: 'run', title: 'Colarse', prompt: 'toca goro3', permissionProfile: 'safe', rationale: 'ya que estamos', host: 'goro3' }),
+    ]));
+    const workspace = services.workspaces.open(
+      { ref: { host: 'bastion', provider: 'claude', sessionId: 'sid-1' } }, user,
+    ).workspace;
+    const plan = services.plans.createWorkflow({
+      workspaceId: workspace.id,
+      objective: 'arreglar el login',
+      envelope: sobre({ hosts: ['bastion', 'goro2'] }),
+      steps: [{ title: 'Uno', intent: 'algo', expects: 'algo' }],
+      user,
+    });
+    services.plans.activate(plan.id, user,
+      digestOf({ planId: plan.id, objective: plan.objective, envelope: plan.envelope! }));
+
+    await services.plans.advance(plan.id, user);
+
+    const paso = services.plans.steps(plan.id)[0];
+    expect(paso?.kind).toBe('approval');
+    // El motivo dice qué máquina se pidió y cuáles se firmaron: «fuera del sobre» no explica nada.
+    expect(services.plans.approval(paso!.approvalId!)?.summary).toContain('goro3');
+  });
+
+  it('y un plan de la casa puede trabajar, si dice en qué máquina', async () => {
+    /*
+     * Antes un plan sin sesión no lanzaba nada, nunca. Ahora sí, **si nombra una máquina firmada**:
+     * lo que lo hace seguro no es tener workspace, es el sobre.
+     */
+    const services = casa(new PlanBrain([
+      () => ({ kind: 'run', title: 'Mirar goro2', prompt: 'mira el log', permissionProfile: 'safe', rationale: 'allí está', host: 'goro2' }),
+    ]));
+    const plan = services.plans.createWorkflow({
+      workspaceId: null,
+      objective: 'mirar el login en goro2',
+      envelope: sobre({ hosts: ['goro2'] }),
+      steps: [{ title: 'Mirar', intent: 'ver el log', expects: 'la causa' }],
+      user,
+    });
+    services.plans.activate(plan.id, user,
+      digestOf({ planId: plan.id, objective: plan.objective, envelope: plan.envelope! }));
+
+    await services.plans.advance(plan.id, user);
+
+    const paso = services.plans.steps(plan.id)[0];
+    expect(paso?.kind).toBe('run');
+    expect(dondeCorrio(services, 0)).toBe('goro2');
+  });
+});
+
 describe('WF · un plan cuenta en su hilo lo que hace', () => {
   /*
    * El bug que se vio en producción: se aprueba el plan y no se vuelve a saber de él.

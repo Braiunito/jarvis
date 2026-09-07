@@ -198,7 +198,23 @@ export interface EvidenceRef {
  * tras un reinicio, si hay que observar lo que ya pasó o ejecutar algo nuevo.
  */
 export type AssistantDecision =
-  | { kind: 'run'; title: string; prompt: string; permissionProfile: PermissionProfile; rationale: string }
+  /**
+   * Lanzar trabajo, y **en qué máquina**.
+   *
+   * `host` es opcional y sin él se trabaja donde vive el plan, que es lo que siempre se ha hecho.
+   * Existe porque un plan firma un sobre con `hosts` **en plural** y hasta ahora no podía usar más
+   * de una: todos sus trabajos iban al workspace del plan, así que la comprobación de host contra
+   * el sobre no podía fallar nunca — comparaba el host consigo mismo.
+   *
+   * Lo que eso impedía es justo para lo que existe un workflow: investigar en una máquina y
+   * arreglar en otra. Visto en la casa, resuelto a mano — un agente diagnostica en goro2, dice «no
+   * tengo acceso a goro3, hay que pasárselo a quien lo tenga», y la persona hace de puente. Ese
+   * puente es el producto.
+   */
+  | {
+    kind: 'run'; title: string; prompt: string; permissionProfile: PermissionProfile; rationale: string;
+    host?: string;
+  }
   | { kind: 'approval'; title: string; actionType: string; summary: string; permissionProfile: PermissionProfile; prompt: string }
   | { kind: 'ask'; title: string; question: string }
   /**

@@ -759,7 +759,11 @@ export class PlanService {
       }
 
       // Aprobada: se consume y se lanza el run que autorizaba, con la clave del paso.
-      const input = step.input as { prompt: string; permissionProfile: PlanStep['kind'] extends never ? never : 'safe' | 'auto' | 'yolo' };
+      const input = step.input as {
+        prompt: string;
+        permissionProfile: 'safe' | 'auto' | 'yolo';
+        workspaceId?: string;
+      };
       const consumed = db.prepare("UPDATE approvals SET status = 'consumed', consumed_at = ? WHERE id = ? AND status = 'approved'")
         .run(clock.nowIso(), approval.id);
       if (consumed.changes === 0) {
@@ -768,7 +772,9 @@ export class PlanService {
         return false;
       }
       const created = await runs.create({
-        workspaceId: plan.workspaceId,
+        // Donde diga el paso: una firma que se dio para `goro3` no puede acabar corriendo en la
+        // máquina del plan. Los pasos de antes no lo guardan, y para ésos sigue siendo la del plan.
+        workspaceId: input.workspaceId ?? plan.workspaceId,
         prompt: input.prompt,
         permissionProfile: input.permissionProfile,
         idempotencyKey: step.idempotencyKey,
@@ -858,9 +864,20 @@ export class PlanService {
      * modelo lo pide— y no al crear el plan, porque un workflow de la casa es perfectamente
      * legítimo mientras se limite a mirar; lo que no puede es acabar lanzando un trabajo.
      */
-    const sinSesion = 'este plan no está atado a ninguna sesión, así que no puede lanzar trabajo: '
-      + 'lo que necesite una máquina concreta hay que pedirlo desde un workspace';
-    if (decision.kind === 'run' && !workspace) return this.#finish(planId, 'failed', sinSesion);
+    const sinSesion = 'este plan no está atado a ninguna sesión y el paso no dice en qué máquina '
+      + 'trabajar, así que no hay dónde lanzarlo: nómbrala, o propónlo desde un workspace';
+    /*
+     * Dónde se trabaja lo decide el paso, y sólo si no lo dice, el plan.
+     *
+     * Antes un plan sin sesión no podía lanzar nada nunca. Ahora sí puede, **si nombra una máquina**
+     * —y lo que lo hace seguro no es esta línea sino el sobre: un host que no esté firmado se
+     * convierte en tarjeta unas líneas más abajo—. Es lo que permite que un plan de la casa reparta
+     * trabajo entre máquinas, que es para lo que se pide un plan de varios pasos.
+     */
+    const destino = decision.kind === 'run'
+      ? this.#workspaceFor(plan, decision.host, user)
+      : workspace;
+    if (decision.kind === 'run' && !destino) return this.#finish(planId, 'failed', sinSesion);
 
     /*
      * Lo que se sale del sobre no falla ni obedece: se convierte en una tarjeta.
@@ -877,7 +894,14 @@ export class PlanService {
     if (decision.kind === 'run' && plan.envelope) {
       const fuera = outsideEnvelope(
         plan.envelope,
-        { kind: 'run', host: workspace?.ref.host ?? null, permissionProfile: decision.permissionProfile },
+        /*
+         * El host que se comprueba es **el del paso**, no el del plan, y eso es lo que hace que esta
+         * guarda sirva de algo. Mientras el trabajo iba siempre al workspace del plan, el host era
+         * una constante: la comprobación se decidía una vez y no podía cazar un paso desviado
+         * porque ningún paso podía desviarse. Ahora que un paso elige máquina, esta línea es lo
+         * único que impide que vaya a una que nadie firmó. Que no se «simplifique» de vuelta.
+         */
+        { kind: 'run', host: destino?.ref.host ?? null, permissionProfile: decision.permissionProfile },
         /*
          * Lo gastado son los pasos **hechos**, no los escritos.
          *
@@ -988,12 +1012,14 @@ export class PlanService {
       // La comprobación va aquí y no arriba porque así es el propio flujo el que garantiza que hay
       // sesión, en vez de un `!` que dice «confía en mí» sobre una guarda que está treinta líneas
       // más arriba y que alguien puede mover.
-      if (!workspace) return this.#finish(planId, 'failed', sinSesion);
+      if (!destino) return this.#finish(planId, 'failed', sinSesion);
       const approvalId = newApprovalId();
       const target = {
-        workspaceId: plan.workspaceId,
-        host: workspace.ref.host,
-        provider: workspace.ref.provider,
+        // La máquina que se firma es donde de verdad va a correr, que ya no tiene por qué ser la
+        // del plan. Si el digest guardara la del plan, se firmaría una cosa y se haría otra.
+        workspaceId: destino.id,
+        host: destino.ref.host,
+        provider: destino.ref.provider,
         permissionProfile: decision.permissionProfile,
         prompt: decision.prompt,
       };
@@ -1009,7 +1035,10 @@ export class PlanService {
         (id, plan_id, ordinal, kind, status, title, input_json, approval_id, idempotency_key, attempt)
         VALUES (?, ?, ?, 'approval', 'waiting_approval', ?, ?, ?, ?, 1)`)
         .run(stepId, planId, ordinal, decision.title,
-          JSON.stringify(withOffer({ prompt: decision.prompt, permissionProfile: decision.permissionProfile })),
+          JSON.stringify(withOffer({
+            prompt: decision.prompt, permissionProfile: decision.permissionProfile,
+            workspaceId: destino.id,
+          })),
           approvalId, idempotencyKey);
       this.#setPlanStatus(planId, 'waiting_approval');
       // La tarjeta de un paso cuelga del plan, no de la conversación, así que sin decirlo aquí no
@@ -1088,7 +1117,7 @@ export class PlanService {
 
     try {
       const created = await runs.create({
-        workspaceId: plan.workspaceId,
+        workspaceId: destino!.id,
         prompt: decision.prompt,
         permissionProfile: decision.permissionProfile,
         idempotencyKey,
@@ -1283,6 +1312,29 @@ export class PlanService {
   #completeStep(stepId: string, status: PlanStatus, output: unknown): void {
     this.#deps.db.prepare('UPDATE plan_steps SET status = ?, output_json = ?, finished_at = ? WHERE id = ?')
       .run(status, JSON.stringify(output), this.#deps.clock.nowIso(), stepId);
+  }
+
+  /**
+   * En qué máquina se hace el trabajo que el modelo acaba de pedir.
+   *
+   * Hasta ahora era siempre la del plan, y eso hacía imposible lo único para lo que existe un plan
+   * de varios pasos: **investigar en una máquina y arreglar en otra**. El sobre firma `hosts` en
+   * plural desde el primer día, así que prometía algo que el motor no sabía cumplir; y como el host
+   * del run salía del workspace del plan, la comprobación contra el sobre comparaba el host consigo
+   * mismo y no podía fallar nunca.
+   *
+   * El orden es: la del plan si no se pide otra, una sesión ya abierta en la que se pide, y si no
+   * hay ninguna, se abre. Lo último es deliberado —es lo que permite repartir trabajo por la casa
+   * sin que alguien vaya abriendo sesiones a mano— y lo que lo hace seguro es el sobre: una máquina
+   * que no esté firmada se convierte en tarjeta antes de llegar aquí.
+   */
+  #workspaceFor(plan: Plan, host: string | undefined, user: UserIdentity): Workspace | null {
+    const { workspaces } = this.#deps;
+    const propio = plan.workspaceId ? workspaces.find(plan.workspaceId) : null;
+    if (!host || propio?.ref.host === host) return propio;
+    const abierto = workspaces.recent(50).find((candidate) => candidate.ref.host === host);
+    if (abierto) return abierto;
+    return workspaces.startSession({ host, provider: propio?.ref.provider ?? 'claude' }, user);
   }
 
   /** Lo cuenta en su conversación, si vino de una. Un plan de la casa no tiene a quién contárselo. */
