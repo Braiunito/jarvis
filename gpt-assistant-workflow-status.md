@@ -63,7 +63,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 
 | Id | P | Qué | Dónde | Quién | Estado |
 |---|---|---|---|---|---|
-| R-01 | P1 | Aprobación caducada → conversación bloqueada para siempre | `chat/service.ts` | core | [ ] |
+| R-01 | P1 | Aprobación caducada → conversación bloqueada para siempre | `chat/service.ts` | core | [x] |
 | R-02 | P0 | Un permiso de escalada vale más de un turno en la nube | `chat/service.ts` | core | [x] |
 | R-03 | P0 | El digest de la aprobación nunca se comprueba | `chat/service.ts`, `plans/service.ts` | core | [x] |
 | R-04 | P0 | Un artifact HTML puede salir a la red (iframe anidado, navegación a pelo) | `chat/routes.ts` | core | [x] |
@@ -82,7 +82,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 | R-17 | P2 | Un artifact estructurado grande se recorta a bytes y deja de ser JSON | `chat/artifacts.ts` | core | [ ] |
 | L-01 | P0 | `JARVIS_CHAT_DEFAULT_AUTONOMY` mal escrito abre la puerta (fail-open) | `config.ts`, `toolbox.ts` | core | [x] |
 | L-02 | P0 | `resolveApproval` no es atómica; un `approved` sin consumir bloquea | `chat/service.ts` | core | [ ] |
-| L-03 | P1 | Cualquier usuario ve, borra y firma las conversaciones de los demás | `chat/service.ts`, rutas | core | [ ] |
+| L-03 | P1 | Cualquier usuario ve, borra y firma las conversaciones de los demás | `chat/service.ts`, rutas | core | [x] |
 | L-04 | P1 | La conversación no puede parar los trabajos que ella lanzó | `chat/service.ts`, `toolbox.ts` | core | [ ] |
 | L-05 | P1 | Errores de herramienta MCP se venden como «reintenta» → bucles | `mcp/service.ts` | core | [x] |
 | L-06 | P1 | Los intentos de escritura MCP fallidos no se auditan | `mcp/service.ts` | core | [x] |
@@ -116,6 +116,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
 - **Cómo hacerlo sin fallo**:
   1. En `resolveApproval`, al detectar caducidad: `append({role:'event', text:'La aprobación caducó sin respuesta. Vuelve a pedírmelo si sigue haciendo falta.'})`, `setStatus(id,'idle','local')`, `bus.notify(id)`, y **después** lanzar el error.
   2. En `#turn`, sustituir la guarda por «¿hay aprobación `pending` con `expires_at > now`?». Si sólo hay caducadas, marcarlas `expired`, escribir el evento y seguir pensando.
+- **Cerrado** · `19488ca`. `#releaseIfExpired` corre en `send()`, en `#turn` y en `reconcile()`: marca `expired` lo que caducó, escribe el evento en el hilo y devuelve la conversación a `idle`. La guarda de `#turn` ya no mira el estado de la fila sino si queda una aprobación viva. Y el plazo dejó de estar escrito dos veces en el código: es `JARVIS_APPROVAL_TTL_MS`, 8 h por defecto, porque a los 30 min una tarjeta caducaba a mitad de un plan y se llevaba el plan entero. Mi primera prueba de esto era una carrera —`approvalTtlMs: 1`, roja 7 de 10 veces medidas—; ahora el TTL es negativo y la tarjeta nace caducada.
   3. En `reconcile()`, además de `thinking`, barrer `waiting_approval` sin aprobación viva → `idle` + evento.
   4. `pendingApprovals()` filtra `expires_at > ?` (o marca `expired` al leer), para que la interfaz no pinte cartas muertas (ver L-12).
 - **Prueba que lo cierra**: `tests/integration/chat.test.ts`: escalar → avanzar reloj 31 min →
@@ -420,6 +421,7 @@ otro encargo. Lo que ya hubieran cerrado de aquí se da por bueno y se acredita.
   aprobaciones sólo para `requested_by` (o admins por `JARVIS_ADMINS`). Mismo trato en planes y en
   `/api/approvals/:id`.
 - **Prueba**: integración con dos identidades.
+- **Cerrado** · `047ee1b`. `list({user})` filtra por `created_by` con el `where` construido a mano —no un `LIKE` sobre todo—, `require(id, user)` contesta **`NOT_FOUND` y no `FORBIDDEN`**: «no es tuya» confirma que existe, y con ids correlativos eso es un inventario. Mismo trato en `delete`, `setAutonomy` y `resolveApproval`, que además exige `requested_by`.
 
 ### L-04 · P1 · La conversación no puede parar los trabajos que ella misma lanzó
 
