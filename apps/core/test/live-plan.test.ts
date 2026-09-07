@@ -66,11 +66,40 @@ describe('PLAN VIVO · una conversación dice lo que tiene esperando', () => {
     expect(livePlanOf(db, 'c2')?.question).toBeNull();
   });
 
-  it('uno terminado no se enseña: ya no espera a nadie', () => {
-    plan('p3', 'c3', 'completed');
-    step('p3', 0, 'completed', 'Hecho');
+  it('el que espera una firma también se ve, que es cuando más espera', () => {
+    plan('p5', 'c5', 'waiting_approval');
+    step('p5', 0, 'waiting_approval', 'Borrar los logs viejos');
 
-    expect(livePlanOf(db, 'c3')).toBeNull();
+    /*
+     * Se quedó fuera de la primera versión, que enumeraba los vivos a mano. El detalle dejaba de
+     * enseñar el plan **justo** cuando esperaba que alguien firmara — el mismo agujero que se cerró
+     * con `draft`, en otro estado y sin que nada avisara.
+     */
+    expect(livePlanOf(db, 'c5')?.status).toBe('waiting_approval');
+  });
+
+  it('y el que espera a que termine su trabajo, también: si no, parpadea', () => {
+    plan('p6', 'c6', 'waiting_run');
+    step('p6', 0, 'running', 'Mirando el disco');
+
+    /*
+     * Éste no espera a una persona, así que se podría discutir. Pero `running` sí se enseña, y
+     * `waiting_run` es su continuación: dejarlo fuera haría que el plan **apareciera y desapareciera**
+     * del hilo según lo que estuviera haciendo por dentro, que se lee peor que verlo siempre.
+     * Cuál se enseña es del contrato; cómo de urgente se pinta lo dice `question`.
+     */
+    expect(livePlanOf(db, 'c6')?.status).toBe('waiting_run');
+    expect(livePlanOf(db, 'c6')?.question).toBeNull();
+  });
+
+  it('los tres terminados no se enseñan: ya no esperan a nadie', () => {
+    // Los tres, porque son los que la consulta enumera: si alguien añade un cuarto terminal y no lo
+    // pone ahí, esta prueba no lo caza — pero al menos fija que estos tres están cubiertos.
+    for (const [i, estado] of ['completed', 'failed', 'cancelled'].entries()) {
+      plan(`p3${i}`, `c3${i}`, estado);
+      step(`p3${i}`, 0, estado, 'Hecho');
+      expect(livePlanOf(db, `c3${i}`)).toBeNull();
+    }
   });
 
   it('el plan de otra conversación no se cuela en la tuya', () => {

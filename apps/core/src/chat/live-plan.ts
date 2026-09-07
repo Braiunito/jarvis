@@ -28,15 +28,25 @@ export interface LivePlan {
 }
 
 /*
- * `draft` cuenta, y es lo que costó descubrir: un plan sin firmar **también** está esperando a la
- * persona, sólo que la tarjeta. Dejarlo fuera repetiría el fallo en otra forma — la conversación no
- * diría que hay algo pendiente justo cuando lo que falta es que alguien lo apruebe.
+ * Se enumeran los **terminados**, no los vivos, y eso es el arreglo de verdad.
+ *
+ * La primera versión listaba los vivos a mano y se dejó fuera `waiting_approval` y `waiting_run`.
+ * `waiting_approval` es justo el estado en que un plan espera una firma, así que el detalle dejaba
+ * de enseñarlo **precisamente cuando más esperaba a alguien** — el mismo agujero que se cerró al
+ * meter `draft`, otra vez y en otro estado.
+ *
+ * Una lista de vivos envejece cada vez que se añade un estado, y envejece **callando**: el plan
+ * simplemente desaparece. Una lista de terminados es estable, y cuando alguien añada un estado
+ * nuevo el fallo por defecto será enseñar de más en vez de esconder — que es la dirección correcta
+ * para algo que existe porque una persona se quedó esperando sin saberlo.
+ *
+ * `draft` entra por esa misma puerta: un plan sin firmar espera la tarjeta, pero espera a alguien.
  */
-const VIVOS = ['draft', 'ready', 'running', 'waiting_input', 'paused'];
+const TERMINADOS = ['completed', 'failed', 'cancelled'];
 
 /** Lo que la conversación tiene en marcha, o `null` si no tiene nada. */
 export function livePlanOf(db: Db, conversationId: string): LivePlan | null {
-  const marcadores = VIVOS.map(() => '?').join(',');
+  const marcadores = TERMINADOS.map(() => '?').join(',');
   const row = db.prepare(
     `SELECT p.id, p.status, p.objective, p.current_step,
             (SELECT count(*) FROM plan_steps s WHERE s.plan_id = p.id) AS steps,
@@ -44,9 +54,9 @@ export function livePlanOf(db: Db, conversationId: string): LivePlan | null {
               WHERE s.plan_id = p.id AND s.status = 'waiting_input'
               ORDER BY s.ordinal LIMIT 1) AS question
      FROM plans p
-     WHERE p.conversation_id = ? AND p.status IN (${marcadores})
+     WHERE p.conversation_id = ? AND p.status NOT IN (${marcadores})
      ORDER BY p.updated_at DESC LIMIT 1`,
-  ).get(conversationId, ...VIVOS) as {
+  ).get(conversationId, ...TERMINADOS) as {
     id: string; status: string; objective: string; current_step: number;
     steps: number; question: string | null;
   } | undefined;
