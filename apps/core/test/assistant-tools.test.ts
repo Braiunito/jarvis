@@ -1282,6 +1282,44 @@ describe('SES · lo que cabe bajo el tope después de añadir open_workspace', (
     expect(conversacion(cabe, { workspace }).definitions().length).toBeLessThanOrEqual(128);
   });
 
+  it('pasado el borde el repliegue es entero: ninguna capacidad se pierde en silencio', () => {
+    /*
+     * Lo que estaba probado era **dónde** está el borde. Lo que no: qué pasa al cruzarlo.
+     *
+     * El repliegue tiene que ser completo —cero directas y las tres del router puestas—, porque un
+     * repliegue a medias sería lo peor de los dos mundos: un catálogo recortado sin decirlo, que es
+     * exactamente lo que el comentario de `config.ts` promete que no pasa («nunca recortado: un
+     * catálogo al que le faltan cosas sin decirlo engaña»). Esa promesa no la sujetaba nada.
+     */
+    const workspace = openWorkspace();
+    const cabe = borde({ workspace, comoEnCasa: true });
+    const pasado = conversacion(cabe + 1, { workspace, comoEnCasa: true });
+
+    expect(pasado.directCapabilities).toBe(0);
+    const ofrecidas = pasado.definitions().map((tool) => tool.name);
+    expect(ofrecidas).toContain('list_capabilities');
+    expect(ofrecidas).toContain('search_capabilities');
+    expect(ofrecidas).toContain('use_capability');
+    // Y ninguna capacidad suelta colada entre las propias.
+    expect(ofrecidas.filter((name) => name.startsWith('mcp__'))).toHaveLength(0);
+    // Sigue cabiendo, que es para lo que existe el router.
+    expect(pasado.definitions().length).toBeLessThanOrEqual(128);
+  });
+
+  it('y con el margen que hay hoy, la siguiente herramienta propia lo cruza', () => {
+    /*
+     * El número medido, no el del documento: **15 propias, cupo 109, margen 1.**
+     *
+     * Se fija el margen y no el cupo porque lo que importa no es el número sino lo cerca que está:
+     * la próxima herramienta propia que alguien añada apaga el modo directo para la casa entera, en
+     * silencio y sin desplegar nada. Si esto se pone rojo por arriba, es que hay sitio otra vez; si
+     * se pone rojo por abajo, es que ya se cruzó.
+     */
+    const enCasa = borde({ comoEnCasa: true });
+    expect(enCasa - 108).toBeLessThanOrEqual(2);
+    expect(enCasa).toBeGreaterThanOrEqual(108);
+  });
+
   it('en la configuración de la casa el margen es más estrecho, y es el que manda', () => {
     /*
      * Con las escrituras de capacidad y la escalada puestas —como está producción— se ofrecen dos

@@ -33,12 +33,10 @@ jobs:
       - name: build de la consola
         run: npm run -w @jarvis/web build
 
-      - name: versiones efectivas
-        run: |
-          node -e "console.log(JSON.stringify({
-            node: process.version,
-            sqlite: new (require('better-sqlite3'))(':memory:').prepare('select sqlite_version() v').get().v,
-          }, null, 2))" | tee build-info.json
+      - name: qué se ha construido
+        # El mismo dato que había aquí en línea, más el commit y si el árbol estaba sucio. Vive en
+        # `scripts/build-info.mjs` porque `package.json` ya lo declaraba y el fichero no existía.
+        run: npm run build:info | tee build-info.json
 
       - uses: actions/upload-artifact@v4
         with:
