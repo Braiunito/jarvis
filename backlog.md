@@ -1818,3 +1818,41 @@ un mensaje sale más caro que la nota. Queda esto como puente.
 La regla que sale de las dos: **en un árbol compartido, un fichero sin comitear es de todos, y
 `HEAD` no es tuyo**. Comitear pronto y por rutas evita la primera; comprobar `git log -1` antes de
 enmendar evita la segunda.
+
+### [ ] WF-01 · Un workflow firmado de siete pasos ejecuta uno y se declara completo
+
+Medido contra producción el 2026-09-07 con modelo real, plan `poamjnrb2pmzraiba`. La tarjeta se
+firma, el plan arranca, ata su primer paso y hace trabajo de verdad —inventario de `/var/log` en
+zeus, 287M en total y 269M en `journal`, con lo que no pudo leer dicho por su nombre—. Y ahí
+termina: ata el ordinal 0 como `synthesis/completed` y cierra el plan con los seis pasos restantes
+en `estimate/draft`, intactos.
+
+No fue por falta de contexto. El modelo tenía el plan delante —«El plan que se aprobó (ata el
+marcado con →, no propongas otro)», los siete títulos, el 0 marcado— y su propia síntesis acaba
+diciendo *«Siguiente paso recomendado (con aprobación): 2. Auditar tareas nocturnas»*. Sabía cuál
+era el siguiente, lo escribió, y emitió `finish` en el mismo turno.
+
+Lo que falta no es el dato sino la condición: el prompt dice **cuál** atar y no dice **cuándo se
+puede acabar**. `finish` está disponible en todos los turnos sin nada que lo desaconseje mientras
+queden pasos firmados sin atar.
+
+Dos salidas, de menor a mayor coste:
+
+1. En `assistant/model.ts`, que la línea del plan diga con número cuántos quedan y qué cuesta
+   terminar: «quedan 6 de 7 por atar; `finish` cierra el plan entero».
+2. En el motor, que un `finish` que deja pasos firmados sin atar se rechace **una vez** y se le
+   devuelva el motivo. Necesita contador para no arriesgar un bucle, así que no se escribe sin
+   medir antes.
+
+Consecuencia colateral: mientras un plan dure un solo turno, **`revise()` no se puede medir con
+modelo real**, porque no hay ventana en la que corregir un plan en marcha.
+
+### [ ] WF-02 · Una tarjeta caducada a mitad de plan se lleva por delante los pasos hechos
+
+`plans/service.ts` cierra el plan con `failed` y «la aprobación caducó sin respuesta» cuando la
+aprobación de un paso vence. El cierre es limpio —no deja el plan colgado— pero es total: un plan
+de siete pasos que pide una firma en el cuarto pierde los tres hechos.
+
+`f41471e` subió el TTL a ocho horas con `JARVIS_APPROVAL_TTL_MS`, y está bien escrito como lo que
+es: una mitigación. Con ocho horas pasa menos; sigue pasando. Lo que corresponde es dejar el plan
+en `paused` con lo hecho intacto y volver a pedir la firma, en vez de terminarlo.
