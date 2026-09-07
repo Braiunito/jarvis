@@ -53,6 +53,8 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
     const limit = Number.parseInt(query.limit ?? '', 10);
     return reply.send({
       conversations: services.chat.list({
+        // Cada uno ve las suyas. El gateway ya sabe quién es; el dominio no lo miraba.
+        user: identityOf(request),
         ...(query.workspaceId ? { workspaceId: query.workspaceId } : {}),
         ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.min(limit, 100) } : {}),
       }),
@@ -64,8 +66,9 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
     const { id } = request.params as { id: string };
     const afterSeq = Number.parseInt((request.query as { afterSeq?: string } | undefined)?.afterSeq ?? '', 10);
     return reply.send({
-      conversation: services.chat.require(id),
-      messages: services.chat.messages(id, Number.isFinite(afterSeq) ? { afterSeq } : {}),
+      conversation: services.chat.require(id, identityOf(request)),
+      messages: services.chat.messages(id,
+        { user: identityOf(request), ...(Number.isFinite(afterSeq) ? { afterSeq } : {}) }),
       approvals: services.chat.pendingApprovals(id),
       // Los `inline` son parte de la respuesta: si no llegan con ella, la primera pintada tiene
       // un hueco. Los `panel` y `modal` se piden al abrirlos, que es cuando se miran.
@@ -233,7 +236,9 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
  * notificación no pierde un mensaje.
  */
 function streamChat(request: FastifyRequest, reply: FastifyReply, services: CoreServices, id: string): void {
-  const conversation = services.chat.require(id);
+  // El stream sirve lo mismo que `GET /api/chat/:id`: si aquélla comprueba el dueño y ésta no,
+  // la comprobación no existe — sólo cambia por qué puerta se entra.
+  const conversation = services.chat.require(id, identityOf(request));
 
   const header = request.headers['last-event-id'];
   const fromQuery = (request.query as { lastEventId?: string } | undefined)?.lastEventId;

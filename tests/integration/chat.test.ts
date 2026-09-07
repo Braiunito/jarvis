@@ -305,6 +305,44 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
     expect(eventos.some((m) => m.text.includes('en marcha'))).toBe(true);
   });
 
+  it('L-03 · las conversaciones de otro no se ven, no se borran y no se firman', async () => {
+    /*
+     * El gateway distingue usuarios y la auditoría también; el dominio no miraba `created_by`. Con
+     * dos cuentas, cualquiera leía, borraba y **firmaba** las conversaciones de la otra — y firmar
+     * es ejecutar algo en nombre de alguien, que la auditoría apuntaría a nombre de quien firmó.
+     *
+     * Se contesta `NOT_FOUND` y no `FORBIDDEN` a propósito: «no es tuya» confirma que existe.
+     */
+    const otra = { userId: 'u2', username: 'otra' };
+    const local = new ScriptedBrain('local', [
+      () => ({
+        kind: 'capability', title: 'memoria', capability: 'zeus.memory_info', args: {},
+        summary: 'mirar la memoria', effectsDeclared: true,
+      }),
+    ]);
+    const { services } = track(harness({ local }));
+
+    const mia = services.chat.create({ user });
+    services.chat.send(mia.id, 'mira la memoria', user);
+    await settled(services, mia.id);
+
+    // No aparece en su lista, y pedirla por su id dice que no existe.
+    expect(services.chat.list({ user: otra })).toHaveLength(0);
+    expect(services.chat.list({ user })).toHaveLength(1);
+    expect(() => services.chat.require(mia.id, otra)).toThrow(/unknown conversation/);
+    expect(() => services.chat.messages(mia.id, { user: otra })).toThrow(/unknown conversation/);
+    expect(() => services.chat.send(mia.id, 'hola', otra)).toThrow(/unknown conversation/);
+    expect(() => services.chat.delete(mia.id, otra)).toThrow(/unknown conversation/);
+    expect(() => services.chat.setAutonomy(mia.id, 'auto', otra)).toThrow(/unknown conversation/);
+
+    // Y la tarjeta la firma quien la pidió.
+    const [tarjeta] = services.chat.pendingApprovals(mia.id);
+    await expect(services.chat.resolveApproval(tarjeta!.id, 'approved', otra))
+      .rejects.toThrow(/unknown approval/);
+    // Sigue viva para su dueño: rechazar a un tercero no puede consumirla.
+    expect(services.chat.pendingApprovals(mia.id)).toHaveLength(1);
+  });
+
   it('el primer mensaje nombra la conversación', async () => {
     const { services } = track(harness({ local: new ScriptedBrain('local', [() => ({ kind: 'finish', summary: 'ya' })]) }));
     const conversation = services.chat.create({ user });

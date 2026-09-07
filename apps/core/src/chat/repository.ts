@@ -113,16 +113,25 @@ export class ChatRepository {
     return conversation;
   }
 
-  list({ limit = 30, workspaceId }: { limit?: number; workspaceId?: string } = {}): Conversation[] {
-    const rows = workspaceId
-      ? this.#db.prepare(`
-          SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count
-          FROM conversations c WHERE c.workspace_id = ? ORDER BY c.updated_at DESC LIMIT ?`)
-        .all(workspaceId, limit) as ConversationRow[]
-      : this.#db.prepare(`
-          SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count
-          FROM conversations c ORDER BY c.updated_at DESC LIMIT ?`)
-        .all(limit) as ConversationRow[];
+  /**
+   * Las conversaciones, filtradas por quien pregunta si se dice quién es.
+   *
+   * El filtro se arma en vez de escribir cuatro consultas: eran dos ramas y con el dueño serían
+   * cuatro, que es donde una se queda sin el `WHERE` y nadie lo nota hasta que hay dos cuentas.
+   */
+  list({ limit = 30, workspaceId, user }: {
+    limit?: number; workspaceId?: string; user?: { username: string };
+  } = {}): Conversation[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (workspaceId) { where.push('c.workspace_id = ?'); params.push(workspaceId); }
+    if (user) { where.push('c.created_by = ?'); params.push(user.username); }
+    const rows = this.#db.prepare(`
+      SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count
+      FROM conversations c
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY c.updated_at DESC LIMIT ?`)
+      .all(...params, limit) as ConversationRow[];
     return rows.map(toConversation);
   }
 

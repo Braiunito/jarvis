@@ -371,22 +371,32 @@ export class ChatService {
     return this.#deps.allowUnrestricted ? [...AUTONOMY_MODES] : ['manual', 'auto'];
   }
 
-  list(options: { limit?: number; workspaceId?: string } = {}): Conversation[] {
+  list(options: { limit?: number; workspaceId?: string; user?: UserIdentity } = {}): Conversation[] {
     return this.#repository.list(options);
   }
 
   find(id: string): Conversation | null { return this.#repository.find(id); }
 
-  require(id: string): Conversation {
+  /**
+   * La conversación, si es de quien pregunta.
+   *
+   * El gateway distingue usuarios y la auditoría también, pero el dominio no miraba `created_by`:
+   * con dos cuentas, cualquiera leía, borraba y **firmaba** las conversaciones de la otra. En una
+   * casa de un usuario no se nota; en cuanto haya dos, es que no hay separación ninguna.
+   *
+   * Se contesta `NOT_FOUND` y no `FORBIDDEN` a propósito: «no es tuya» confirma que existe, y con
+   * identificadores que se pueden enumerar eso ya es contar algo de otro.
+   */
+  require(id: string, user?: UserIdentity): Conversation {
     const conversation = this.#repository.find(id);
-    if (!conversation) {
+    if (!conversation || (user && conversation.createdBy !== user.username)) {
       throw new JarvisError('NOT_FOUND', `unknown conversation ${id}`, { scope: { conversationId: id } });
     }
     return conversation;
   }
 
-  messages(id: string, options: { afterSeq?: number } = {}): ChatMessage[] {
-    this.require(id);
+  messages(id: string, options: { afterSeq?: number; user?: UserIdentity } = {}): ChatMessage[] {
+    this.require(id, options.user);
     return this.#repository.messages(id, options);
   }
 
@@ -429,7 +439,7 @@ export class ChatService {
   }
 
   setAutonomy(id: string, autonomy: AutonomyMode, user: UserIdentity): Conversation {
-    const conversation = this.require(id);
+    const conversation = this.require(id, user);
     this.#repository.setAutonomy(id, autonomy);
     // Cambiar cuánta cuerda tiene el asistente es una decisión, y queda escrita como tal.
     this.#deps.audit.record({
@@ -443,7 +453,7 @@ export class ChatService {
   }
 
   delete(id: string, user: UserIdentity): void {
-    const conversation = this.require(id);
+    const conversation = this.require(id, user);
     this.#repository.delete(id);
     this.#deps.audit.record({
       actorUser: user.username, eventType: 'chat.deleted',
@@ -461,7 +471,7 @@ export class ChatService {
    * Es la misma forma que tiene crear un run: lo que tarda no se espera dentro de la petición.
    */
   send(id: string, text: string, user: UserIdentity): ChatMessage {
-    const conversation = this.require(id);
+    const conversation = this.require(id, user);
     const body = text.trim();
     if (!body) throw new JarvisError('BAD_REQUEST', 'el mensaje no puede estar vacío');
     if (!this.#deps.model) {
@@ -950,6 +960,16 @@ export class ChatService {
     const approval = this.#toApproval(row);
     if (!approval.conversationId) {
       throw new JarvisError('BAD_REQUEST', 'esa aprobación no es de una conversación');
+    }
+    /*
+     * Firma quien la pidió.
+     *
+     * Es la comprobación que más falta hacía de las cinco: leer la conversación de otro es una
+     * indiscreción, pero **firmar su tarjeta es ejecutar algo en su nombre** — y la auditoría lo
+     * apuntaría a nombre de quien firmó, con lo que ni siquiera quedaría raro al leerlo.
+     */
+    if (approval.requestedBy !== user.username) {
+      throw new JarvisError('NOT_FOUND', `unknown approval ${approvalId}`);
     }
     if (approval.status !== 'pending') {
       throw new JarvisError(approval.status === 'consumed' ? 'APPROVAL_CONSUMED' : 'CONFLICT',
