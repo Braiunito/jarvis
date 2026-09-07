@@ -937,6 +937,25 @@ export class PlanService {
         VALUES (?, ?, ?, 'synthesis', 'completed', ?, ?, ?, ?, 1, ?)`)
         .run(stepId, planId, ordinal, 'Síntesis', JSON.stringify({}),
           JSON.stringify(withOffer({ summary: decision.summary, evidence })), idempotencyKey, at);
+      /*
+       * Cerrar un plan a medias no destruye lo hecho: lo deja **pausado**.
+       *
+       * Esto no depende de con qué frecuencia el modelo cierre antes de tiempo —el aviso del turno
+       * reduce esas veces pero no las quita, medido: una de dos—. Es que cuando pasa, el plan se
+       * marcaba `completed` y los pasos firmados que quedaban se perdían sin recurso: para seguir
+       * había que proponer el plan entero otra vez y repetir lo ya hecho.
+       *
+       * `paused` conserva la síntesis y los pasos, y se reanuda con `steer`. Y no se aplica al
+       * cierre legítimo: si lo que queda es sólo el paso que esta misma síntesis ata, el plan
+       * termina completo, que es como acaba bien un workflow.
+       */
+      const sinAtar = steps.filter((step) => step.kind === 'estimate' && step.status === 'draft'
+        && step.id !== atar?.id).length;
+      if (sinAtar > 0) {
+        return this.#finish(planId, 'paused',
+          `${decision.summary}\n\n(El plan se cerró con ${sinAtar} paso(s) firmados sin dar, así que`
+          + ' queda pausado en vez de terminado: lo hecho se conserva y se puede reanudar.)');
+      }
       return this.#finish(planId, 'completed', decision.summary);
     }
 

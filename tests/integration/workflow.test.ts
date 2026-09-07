@@ -243,6 +243,66 @@ describe('WF · los topes se gastan a lo largo del plan, no dentro de un turno',
   });
 });
 
+describe('WF · cerrar un plan a medias no destruye lo hecho', () => {
+  const enMarcha = (model: PlanBrain, envelope = sobre()) => {
+    const services = harness(model);
+    const { plan } = draftWorkflow(services, envelope);
+    const digest = digestOf({ planId: plan.id, objective: plan.objective, envelope: plan.envelope! });
+    services.plans.activate(plan.id, user, digest);
+    return { services, plan };
+  };
+
+  it('un finish que deja pasos firmados sin dar deja el plan pausado, no terminado', async () => {
+    /*
+     * Medido contra producción: el modelo cierra el plan tras el primer paso parte de las veces,
+     * incluso con el aviso del turno delante. Lo que se arregla aquí no es esa frecuencia —eso es
+     * conducta del modelo— sino lo que costaba: el plan quedaba `completed` y los pasos firmados
+     * que quedaban se perdían, así que para seguir había que reproponerlo entero y repetir lo hecho.
+     */
+    const { services, plan } = enMarcha(new PlanBrain([() => ({ kind: 'finish', summary: 'con el primero basta' })]));
+    await services.plans.advance(plan.id, user);
+
+    const despues = services.plans.require(plan.id);
+    expect(despues.status).toBe('paused');
+    expect(despues.summary).toContain('con el primero basta');
+    // Y lo que queda sigue ahí: eso es lo que permite reanudar en vez de reproponer.
+    const pasos = services.plans.steps(plan.id);
+    expect(pasos.find((step) => step.kind === 'synthesis')).toBeDefined();
+    expect(pasos.filter((step) => step.kind === 'estimate' && step.status === 'draft')).toHaveLength(1);
+  });
+
+  it('y se reanuda con lo hecho intacto', async () => {
+    const { services, plan } = enMarcha(new PlanBrain([
+      () => ({ kind: 'finish', summary: 'con el primero basta' }),
+      () => ({ kind: 'finish', summary: 'ahora sí, todo mirado' }),
+    ]));
+    await services.plans.advance(plan.id, user);
+    expect(services.plans.require(plan.id).status).toBe('paused');
+
+    services.plans.steer({ planId: plan.id, op: 'resume', reason: 'sigue, que falta uno', user });
+    await services.plans.advance(plan.id, user);
+
+    // El segundo cierre ya no deja nada sin dar, así que ahora sí termina.
+    expect(services.plans.require(plan.id).status).toBe('completed');
+  });
+
+  it('cerrar cuando ya no queda nada por dar termina el plan, como siempre', async () => {
+    /*
+     * La guarda no puede comerse el final bueno: cuando el `finish` ata el último paso, el plan
+     * está completo. Sin esta distinción ningún workflow acabaría nunca en `completed`.
+     */
+    const { services, plan } = enMarcha(new PlanBrain([
+      () => ({ kind: 'run', title: 'Primero', prompt: 'mira el log', permissionProfile: 'safe', rationale: 'hace falta' }),
+      () => ({ kind: 'finish', summary: 'ya está todo' }),
+    ]));
+    await services.plans.advance(plan.id, user);
+    terminaElTrabajo(services, plan.id);
+    await services.plans.advance(plan.id, user);
+
+    expect(services.plans.require(plan.id).status).toBe('completed');
+  });
+});
+
 describe('WF · firmar la tarjeta es lo único que pone un workflow en marcha', () => {
   /*
    * El puente entre la conversación y el motor, que no lo probaba nadie.
