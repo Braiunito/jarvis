@@ -1534,8 +1534,16 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     if (propia) return propia;
     const nearby = await this.#deps.mcp?.search(bare.replace(/[._]+/g, ' '), 3) ?? [];
     if (!nearby.length) {
+      /*
+       * La pista dice **cómo** llamarla, no sólo cuál.
+       *
+       * Decía «mira list_capabilities antes de llamar», y jarvis-76 lo vio hacer justo eso por la
+       * puerta equivocada: la llamada siguiente fue `request_capability {name: 'list_capabilities'}`.
+       * Siguió el consejo. Nombrar una herramienta dentro del error de otra se lee como «pídela»
+       * cuando la puerta en la que estás es precisamente la de pedir cosas.
+       */
       return toolError('NOT_FOUND', `no existe la capacidad ${name}`,
-        'mira list_capabilities antes de llamar: los nombres son exactos');
+        'llama tú a list_capabilities —es herramienta tuya, no se pide— y coge el nombre exacto de ahí');
     }
     return {
       type: 'observation',
