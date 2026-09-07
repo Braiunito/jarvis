@@ -309,6 +309,48 @@ describe('WF · un plan puede repartir trabajo entre máquinas', () => {
     expect(dondeCorrio(services, 1)).toBe('goro2');
   });
 
+  it('y elige con qué agente: un Codex donde sólo había un Claude', async () => {
+    /*
+     * La casa tiene Claude, Codex y OpenCode, y cuál conviene depende del trabajo. El motor abría
+     * siempre Claude, así que «lánzame un Codex en goro2» no se podía pedir aunque estuviera
+     * instalado. Y una sesión abierta con otro agente no sirve: es otra herramienta.
+     */
+    const services = casa(new PlanBrain([
+      () => ({
+        kind: 'run', title: 'Arreglar con Codex', prompt: 'aplica el arreglo',
+        permissionProfile: 'safe', rationale: 'aquí va mejor Codex', host: 'goro2', provider: 'codex',
+      }),
+    ]));
+    const plan = enDos(services);
+
+    await services.plans.advance(plan.id, user);
+
+    const step = services.plans.steps(plan.id)[0];
+    const run = services.runs.require(step!.runId!);
+    const donde = services.workspaces.find(run.workspaceId);
+    expect(donde?.ref.host).toBe('goro2');
+    expect(donde?.ref.provider).toBe('codex');
+  });
+
+  it('y puede trabajar en su propia máquina, que es una más', async () => {
+    // `bastion` es donde vive Jarvis, y no es un caso especial: si está en el sobre, se le lanza
+    // trabajo como a cualquier otra.
+    const services = casa(new PlanBrain([
+      () => ({
+        kind: 'run', title: 'Mirar aquí mismo', prompt: 'mira el log de casa',
+        permissionProfile: 'safe', rationale: 'está aquí', host: 'bastion', provider: 'opencode',
+      }),
+    ]));
+    const plan = enDos(services);
+
+    await services.plans.advance(plan.id, user);
+
+    const step = services.plans.steps(plan.id)[0];
+    const donde = services.workspaces.find(services.runs.require(step!.runId!).workspaceId);
+    expect(donde?.ref.host).toBe('bastion');
+    expect(donde?.ref.provider).toBe('opencode');
+  });
+
   it('una máquina que no se firmó no se toca: se pregunta', async () => {
     const services = casa(new PlanBrain([
       () => ({ kind: 'run', title: 'Colarse', prompt: 'toca goro3', permissionProfile: 'safe', rationale: 'ya que estamos', host: 'goro3' }),

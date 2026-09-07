@@ -24,6 +24,7 @@ import type { AttachmentService } from '../attachments/service.js';
 import type { EvidenceService } from '../evidence/service.js';
 import type { RunService } from '../runs/service.js';
 import type { WorkspaceService } from '../workspaces/use-cases.js';
+import type { Provider } from '@jarvis/contracts';
 import type { SessionService } from '../sessions/service.js';
 import type { HealthService } from '../health/service.js';
 import type {
@@ -875,7 +876,7 @@ export class PlanService {
      * trabajo entre máquinas, que es para lo que se pide un plan de varios pasos.
      */
     const destino = decision.kind === 'run'
-      ? this.#workspaceFor(plan, decision.host, user)
+      ? this.#workspaceFor(plan, { host: decision.host, provider: decision.provider }, user)
       : workspace;
     if (decision.kind === 'run' && !destino) return this.#finish(planId, 'failed', sinSesion);
 
@@ -1323,18 +1324,36 @@ export class PlanService {
    * del run salía del workspace del plan, la comprobación contra el sobre comparaba el host consigo
    * mismo y no podía fallar nunca.
    *
-   * El orden es: la del plan si no se pide otra, una sesión ya abierta en la que se pide, y si no
-   * hay ninguna, se abre. Lo último es deliberado —es lo que permite repartir trabajo por la casa
-   * sin que alguien vaya abriendo sesiones a mano— y lo que lo hace seguro es el sobre: una máquina
-   * que no esté firmada se convierte en tarjeta antes de llegar aquí.
+   * El orden es: la del plan si no se pide nada, una sesión ya abierta con esa máquina y ese agente,
+   * y si no hay ninguna, se abre. Lo último es deliberado —es lo que permite repartir trabajo por la
+   * casa sin que alguien vaya abriendo sesiones a mano— y lo que lo hace seguro es el sobre: una
+   * máquina que no esté firmada se convierte en tarjeta antes de llegar aquí.
+   *
+   * El agente también se elige, y por el mismo motivo: la casa tiene Claude, Codex y OpenCode, y
+   * cuál conviene depende del trabajo. Antes se abría siempre Claude, así que «lánzame un Codex en
+   * goro3» no se podía pedir aunque estuviera instalado. Y `bastion` es una máquina como las demás:
+   * el asistente puede lanzar trabajo dentro de la suya propia.
    */
-  #workspaceFor(plan: Plan, host: string | undefined, user: UserIdentity): Workspace | null {
+  #workspaceFor(
+    plan: Plan,
+    { host, provider }: { host?: string | undefined; provider?: Provider | undefined },
+    user: UserIdentity,
+  ): Workspace | null {
     const { workspaces } = this.#deps;
     const propio = plan.workspaceId ? workspaces.find(plan.workspaceId) : null;
-    if (!host || propio?.ref.host === host) return propio;
-    const abierto = workspaces.recent(50).find((candidate) => candidate.ref.host === host);
-    if (abierto) return abierto;
-    return workspaces.startSession({ host, provider: propio?.ref.provider ?? 'claude' }, user);
+    if (!host && !provider) return propio;
+    const máquina = host ?? propio?.ref.host;
+    if (!máquina) return null;
+    const agente = provider ?? propio?.ref.provider ?? 'claude';
+    if (propio && propio.ref.host === máquina && propio.ref.provider === agente) return propio;
+    /*
+     * Una sesión que ya esté abierta ahí con ese agente, antes que una nueva: lo que hay abierto
+     * lleva contexto dentro, y ese contexto es justo lo que hace que un diagnóstico salga en
+     * minutos en vez de empezar de cero.
+     */
+    const abierto = workspaces.recent(50)
+      .find((candidate) => candidate.ref.host === máquina && candidate.ref.provider === agente);
+    return abierto ?? workspaces.startSession({ host: máquina, provider: agente }, user);
   }
 
   /** Lo cuenta en su conversación, si vino de una. Un plan de la casa no tiene a quién contárselo. */

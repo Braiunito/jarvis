@@ -214,6 +214,15 @@ export type AssistantDecision =
   | {
     kind: 'run'; title: string; prompt: string; permissionProfile: PermissionProfile; rationale: string;
     host?: string;
+    /**
+     * Y con qué agente. Omitirlo hereda el del plan, o Claude si el plan no tiene ninguno.
+     *
+     * Va al lado de `host` porque son la misma decisión: dónde y con qué. Un plan que investiga en
+     * una máquina y arregla en otra puede necesitar además herramientas distintas en cada una, y
+     * hasta ahora el motor abría siempre Claude — así que «lánzame un Codex en goro3» no se podía
+     * pedir aunque la casa lo tuviera.
+     */
+    provider?: Provider;
   }
   | { kind: 'approval'; title: string; actionType: string; summary: string; permissionProfile: PermissionProfile; prompt: string }
   | { kind: 'ask'; title: string; question: string }
