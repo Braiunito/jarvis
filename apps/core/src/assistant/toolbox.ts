@@ -1504,6 +1504,22 @@ export class CoreAssistantToolbox implements AssistantToolbox {
   }
 
   /**
+   * Si lo que pide como capacidad del sistema es una herramienta que ya tiene delante.
+   *
+   * Dos de aquellas cinco invenciones ante un «Hola» fueron eso, y cinco de las quince llamadas
+   * fallidas que midió jarvis-76 también: pedir permiso para `search_sessions` o `get_health`,
+   * que están en su catálogo del turno. No es inventarse una capacidad; es leer «pide permiso
+   * para algo con efectos» como «pídeme lo que no encuentro». Contestar «no existe» sería falso
+   * además de inútil.
+   */
+  #ownToolNamed(name: string): ToolOutcome | null {
+    const bare = bareCapability(name);
+    if (!this.#available.some((tool) => tool.name === bare)) return null;
+    return toolError('BAD_INPUT', `${bare} es una herramienta tuya, no una capacidad del sistema`,
+      `llámala directamente como ${bare}, sin pasar por use_capability ni request_capability`);
+  }
+
+  /**
    * Que una capacidad no exista se contesta con las que sí, no con un consejo.
    *
    * Visto en producción ante un simple «Hola»: cinco `request_capability` seguidas con nombres
@@ -1514,17 +1530,8 @@ export class CoreAssistantToolbox implements AssistantToolbox {
    */
   async #noSuchCapability(name: string): Promise<ToolOutcome> {
     const bare = bareCapability(name);
-    /*
-     * Y si lo que pidió es una herramienta suya, se le dice.
-     *
-     * La quinta de aquellas cinco fue `server.search_capabilities`: pidió como capacidad del sistema
-     * **una herramienta que ya tiene delante**. Contestarle que no existe es falso y no deshace la
-     * confusión; lo que hay que decirle es que la llame directamente.
-     */
-    if (this.#available.some((tool) => tool.name === bare)) {
-      return toolError('BAD_INPUT', `${bare} es una herramienta tuya, no una capacidad del sistema`,
-        `llámala directamente como ${bare}, sin pasar por use_capability ni request_capability`);
-    }
+    const propia = this.#ownToolNamed(name);
+    if (propia) return propia;
     const nearby = await this.#deps.mcp?.search(bare.replace(/[._]+/g, ' '), 3) ?? [];
     if (!nearby.length) {
       return toolError('NOT_FOUND', `no existe la capacidad ${name}`,
@@ -2390,34 +2397,50 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       return toolError('UNAVAILABLE', 'este core no tiene capacidades de sistema conectadas');
     }
     const name = asString(input['name']);
-    const summary = asString(input['summary']);
-    if (!name || !summary) {
-      /*
-       * Se dice **cuál** falta, no que faltan dos.
-       *
-       * Es la regla de `validateTable` —«se avisa de la columna que falta, no de que no valida»—
-       * aplicada aquí, y no es cosmética: visto en producción, el modelo mandó `name` correcto sin
-       * `summary`, leyó «faltan name o summary», no supo cuál arreglar y **repitió la llamada
-       * idéntica**. Dos huecos del turno por un mensaje que no señalaba.
-       */
-      const falta = !name && !summary ? 'name y summary' : (!name ? 'name' : 'summary');
-      return toolError('BAD_INPUT', `falta ${falta}`,
-        !name
-          ? 'el nombre exacto de la capacidad, tal como lo devuelve list_capabilities'
-          : 'el resumen es lo que la persona lee antes de autorizar; sin él no hay nada que decidir');
+    if (!name) {
+      return toolError('BAD_INPUT', 'falta name',
+        'el nombre exacto de la capacidad, tal como lo devuelve list_capabilities');
     }
-    const args = (input['args'] && typeof input['args'] === 'object' && !Array.isArray(input['args']))
-      ? input['args'] as Record<string, unknown>
-      : {};
 
-    // Que exista se comprueba **antes** de enseñar la tarjeta: hacer que alguien autorice algo que
-    // luego no se puede ejecutar gasta su atención, que es lo único que no se puede reintentar.
+    /*
+     * El nombre se examina **antes** de exigir el resumen, y ese orden es el arreglo.
+     *
+     * Medido por jarvis-76 en seis corridas contra producción: veinte llamadas a esta puerta,
+     * quince fallidas, **las quince por esquema**. Y lo que estaba mal era casi siempre el nombre:
+     * `search_sessions` cuatro veces y `get_health` una —herramientas que ya tiene delante— y el
+     * resto inventadas (`zeus.http_probe`, `CLAUDE_CAPABILITY`, `None`). Todas venían además sin
+     * `summary`, así que validando por orden de campo lo único que oían era «falta summary»: un
+     * consejo cierto sobre el campo equivocado, que le manda a redactar el resumen de algo que no
+     * existe o que no necesita permiso. Se puede decir cuál de los dos campos falla y aun así
+     * señalar al que no importa.
+     *
+     * Que la capacidad exista ya se comprobaba antes de enseñar la tarjeta —autorizar lo
+     * inejecutable gasta la atención de una persona, que es lo único que no se puede reintentar—;
+     * lo que faltaba era comprobarlo antes **también que el resumen**. `describe` se sirve del
+     * catálogo en memoria, así que adelantarlo no cuesta una vuelta de red.
+     */
+    const propia = this.#ownToolNamed(name);
+    if (propia) return propia;
+
     const [capability] = await mcp.describe([name]);
     if (!capability) return this.#noSuchCapability(name);
     if (!capability.writes) {
       return toolError('BAD_INPUT', `${name} es de sólo lectura: no hace falta permiso`,
         'llámala directamente con use_capability');
     }
+
+    /*
+     * Sólo aquí «falta summary» es la verdad entera: la capacidad existe, escribe, y lo único que
+     * impide enseñar la tarjeta es que nadie ha escrito qué va a leer quien la autorice.
+     */
+    const summary = asString(input['summary']);
+    if (!summary) {
+      return toolError('BAD_INPUT', 'falta summary',
+        'el resumen es lo que la persona lee antes de autorizar; sin él no hay nada que decidir');
+    }
+    const args = (input['args'] && typeof input['args'] === 'object' && !Array.isArray(input['args']))
+      ? input['args'] as Record<string, unknown>
+      : {};
 
     return {
       type: 'decision',

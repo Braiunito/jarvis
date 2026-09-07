@@ -791,6 +791,40 @@ describe('R-06 · una capacidad cuesta un hueco, se llame como se llame', () => 
     expect((fallo['error'] as Record<string, string>)['hint']).toContain('directamente');
   });
 
+  it('sin summary y con un nombre que ya es suyo, se le dice lo del nombre y no lo del resumen', async () => {
+    /*
+     * El orden de la validación, que era el fallo de verdad.
+     *
+     * Seis corridas contra producción medidas por jarvis-76: veinte llamadas a esta puerta, quince
+     * fallidas y **las quince por esquema**. El modelo manda `{name, args}` —el par que usa en
+     * `use_capability`— y no `{name, summary}`. Validando por orden de campo, las quince oían
+     * «falta summary»: cierto, y sobre el campo que menos importaba, porque cinco de ellas pedían
+     * permiso para `search_sessions` o `get_health`, herramientas que ya tenían delante.
+     *
+     * Mandarle a redactar el resumen de algo que no necesita permiso es gastarle la vuelta
+     * siguiente igual que la anterior.
+     */
+    const caja = cajaCon(buildService(fakeMcpServer()));
+    const fallo = contenido(await caja.invoke('request_capability', {
+      name: 'search_capabilities', args: {},
+    }));
+
+    const error = fallo['error'] as Record<string, string>;
+    expect(error['message']).toContain('herramienta tuya');
+    expect(error['message']).not.toContain('summary');
+  });
+
+  it('sin summary y con un nombre inventado, contesta las que existen', async () => {
+    // La otra mitad de las quince: `zeus.http_probe`, `zeus.listening_ports`, `CLAUDE_CAPABILITY`,
+    // `None`. Que exista se comprueba **antes** que el resumen porque `describe` se sirve del
+    // catálogo en memoria: adelantarlo no cuesta una vuelta de red y cambia lo que oye.
+    const caja = cajaCon(buildService(fakeMcpServer()));
+    const fallo = contenido(await caja.invoke('request_capability', { name: 'zeus.http_probe' }));
+
+    expect((fallo['error'] as Record<string, string>)['code']).toBe('NOT_FOUND');
+    expect((fallo['error'] as Record<string, string>)['message']).not.toContain('summary');
+  });
+
   it('un fallo de validación se memoriza: repetirlo no puede salir bien nunca', async () => {
     /*
      * «Reintentar es legítimo» vale para la red, no para unos argumentos mal escritos. En la misma
