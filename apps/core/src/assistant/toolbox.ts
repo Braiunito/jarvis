@@ -1449,6 +1449,53 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     return memoKey(name, input);
   }
 
+  /**
+   * Que una capacidad no exista se contesta con las que sí, no con un consejo.
+   *
+   * Visto en producción ante un simple «Hola»: cinco `request_capability` seguidas con nombres
+   * inventados —`server.status`, `server.hello`, `server.capabilities`…— y las cinco recibieron la
+   * misma pista, «búscala con search_capabilities». La ignoró cinco veces. Repetir un consejo que
+   * no se sigue gasta el turno; darle la búsqueda hecha le pone la respuesta delante, que es lo que
+   * `use_capability` ya hacía y esta puerta no.
+   */
+  async #noSuchCapability(name: string): Promise<ToolOutcome> {
+    const bare = bareCapability(name);
+    /*
+     * Y si lo que pidió es una herramienta suya, se le dice.
+     *
+     * La quinta de aquellas cinco fue `server.search_capabilities`: pidió como capacidad del sistema
+     * **una herramienta que ya tiene delante**. Contestarle que no existe es falso y no deshace la
+     * confusión; lo que hay que decirle es que la llame directamente.
+     */
+    if (this.#available.some((tool) => tool.name === bare)) {
+      return toolError('BAD_INPUT', `${bare} es una herramienta tuya, no una capacidad del sistema`,
+        `llámala directamente como ${bare}, sin pasar por use_capability ni request_capability`);
+    }
+    const nearby = await this.#deps.mcp?.search(bare.replace(/[._]+/g, ' '), 3) ?? [];
+    if (!nearby.length) {
+      return toolError('NOT_FOUND', `no existe la capacidad ${name}`,
+        'mira list_capabilities antes de llamar: los nombres son exactos');
+    }
+    return {
+      type: 'observation',
+      content: {
+        ok: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: `no existe la capacidad ${name}`,
+          hint: 'no te la inventes; éstas sí existen y una de ellas es la que buscabas. '
+            + 'Llámala con su nombre exacto.',
+        },
+        capabilities: nearby.map((capability) => ({
+          name: capability.name,
+          summary: capability.summary,
+          writes: capability.writes,
+          params: compactParams(capability.inputSchema),
+        })),
+      },
+    };
+  }
+
   /** Apunta lo que se sabe de una sesión, sin perder lo que ya se sabía. */
   #remember(entry: SeenSession): void {
     const previous = this.#seen.get(entry.ref.sessionId);
@@ -2280,10 +2327,7 @@ export class CoreAssistantToolbox implements AssistantToolbox {
     // Que exista se comprueba **antes** de enseñar la tarjeta: hacer que alguien autorice algo que
     // luego no se puede ejecutar gasta su atención, que es lo único que no se puede reintentar.
     const [capability] = await mcp.describe([name]);
-    if (!capability) {
-      return toolError('NOT_FOUND', `no existe la capacidad ${name}`,
-        'búscala primero con search_capabilities y usa el nombre exacto que devuelva');
-    }
+    if (!capability) return this.#noSuchCapability(name);
     if (!capability.writes) {
       return toolError('BAD_INPUT', `${name} es de sólo lectura: no hace falta permiso`,
         'llámala directamente con use_capability');

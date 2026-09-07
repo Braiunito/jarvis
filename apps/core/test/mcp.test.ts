@@ -758,6 +758,39 @@ describe('R-06 · una capacidad cuesta un hueco, se llame como se llame', () => 
     expect(caja.repeats).toBe(1);
   });
 
+  it('pedir una capacidad inventada devuelve las que existen, no un consejo', async () => {
+    /*
+     * Ante un simple «Hola», el asistente hizo cinco `request_capability` seguidas con nombres
+     * inventados —`server.status`, `server.hello`, `server.capabilities`…— y las cinco recibieron
+     * la misma pista: «búscala con search_capabilities». La ignoró cinco veces. `use_capability` ya
+     * devolvía las candidatas y esta puerta no, siendo la misma con otro nombre.
+     */
+    const caja = cajaCon(buildService(fakeMcpServer()));
+    const fallo = contenido(await caja.invoke('request_capability', {
+      name: 'server.docker_restart_thing', summary: 'reiniciar algo',
+    }));
+
+    expect((fallo['error'] as Record<string, string>)['code']).toBe('NOT_FOUND');
+    // Lo que importa: la respuesta trae la búsqueda hecha.
+    expect(Array.isArray(fallo['capabilities'])).toBe(true);
+    expect((fallo['capabilities'] as Array<{ name: string }>).length).toBeGreaterThan(0);
+  });
+
+  it('y si pide como capacidad una herramienta suya, se le dice que ya la tiene', async () => {
+    /*
+     * La quinta de aquellas cinco fue `server.search_capabilities`: pidió como capacidad del
+     * sistema una herramienta que tenía delante. «No existe» es falso y no deshace la confusión.
+     */
+    const caja = cajaCon(buildService(fakeMcpServer()));
+    const fallo = contenido(await caja.invoke('request_capability', {
+      name: 'server.search_capabilities', summary: 'buscar',
+    }));
+
+    expect((fallo['error'] as Record<string, string>)['code']).toBe('BAD_INPUT');
+    expect((fallo['error'] as Record<string, string>)['message']).toContain('herramienta tuya');
+    expect((fallo['error'] as Record<string, string>)['hint']).toContain('directamente');
+  });
+
   it('un fallo de validación se memoriza: repetirlo no puede salir bien nunca', async () => {
     /*
      * «Reintentar es legítimo» vale para la red, no para unos argumentos mal escritos. En la misma
