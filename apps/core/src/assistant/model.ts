@@ -1277,6 +1277,28 @@ export function renderContext(context: PlanContext): string {
     }
   }
 
+  /*
+   * Cuántos quedan por atar, y qué cuesta cerrar.
+   *
+   * Medido contra producción: con el plan delante y el paso marcado con →, el modelo ató el primero
+   * —trabajo real, inventario de disco correcto— escribió en su propia síntesis «siguiente paso
+   * recomendado: 2. Auditar tareas nocturnas», y cerró el plan en el mismo turno. **No es que no
+   * viera cuál seguía**: lo escribió. Es que nada le decía qué pasa al terminar.
+   *
+   * La instrucción de arriba dice **cuál** atar; ésta dice **cuándo se puede acabar**, que es la
+   * mitad que faltaba.
+   *
+   * Se enuncia como consecuencia y no como prohibición, a propósito: cerrar antes de tiempo sigue
+   * siendo lo correcto cuando lo que queda dejó de aplicar. Lo que no puede es pasar sin querer.
+   */
+  const sinAtar = context.plannedSteps?.filter((step) => step.state !== 'done').length ?? 0;
+  if (sinAtar > 0) {
+    lines.push('', `Quedan ${sinAtar} de ${context.plannedSteps?.length ?? sinAtar} pasos del plan`
+      + ' firmado sin atar. `finish` cierra el plan ENTERO y los que queden no se harán: úsalo sólo'
+      + ' si el objetivo ya está cumplido o lo que falta dejó de tener sentido, y entonces di por'
+      + ' qué. Si todavía aplica, ata el marcado con → y deja el cierre para cuando no quede ninguno.');
+  }
+
   lines.push('',
     `Llevas ${context.limits.stepsUsed} de ${context.limits.maxSteps} pasos y puedes hacer hasta`
     + ` ${context.limits.maxToolCalls} consultas en este turno. Decide un solo paso.`);

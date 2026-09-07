@@ -102,5 +102,26 @@ describe('CONTEXTO · el peor caso cabe, y crecer se nota', () => {
     // de proponer, no después de que el core le devuelva una tarjeta.
     expect(rendered).toContain('puede modificar');
     expect(rendered).toContain('zeus.capacidad_numero_0');
+
+    /*
+     * Y cuántos quedan por atar. Medido contra producción: el modelo ató el primer paso, escribió
+     * en su propia síntesis cuál era el siguiente, y cerró el plan en el mismo turno. Sabía cuál
+     * seguía; lo que no sabía es qué pasa al terminar.
+     */
+    expect(rendered).toContain('Quedan 3 de 12 pasos del plan firmado sin atar');
+    expect(rendered).toContain('cierra el plan ENTERO');
+  });
+
+  it('y cuando no queda ninguno por atar, no se le avisa de nada', () => {
+    const rendered = renderContext({
+      objective: 'ya está', pendingInput: null, pendingApprovals: [], history: [], limits: limites,
+      plannedSteps: [{
+        ordinal: 0, title: 'Único', intent: 'i', expects: 'e', unknowns: [], writes: false,
+        state: 'done' as const,
+      }],
+    } as never);
+
+    // Un aviso que sale siempre deja de leerse. Éste sólo aparece cuando hay algo que perder.
+    expect(rendered).not.toContain('sin atar');
   });
 });
