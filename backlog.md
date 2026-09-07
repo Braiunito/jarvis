@@ -1847,6 +1847,18 @@ Dos salidas, de menor a mayor coste:
 Consecuencia colateral: mientras un plan dure un solo turno, **`revise()` no se puede medir con
 modelo real**, porque no hay ventana en la que corregir un plan en marcha.
 
+**Medido con las dos guardas puestas (instrucción en el prompt + vuelta en el motor): reduce, no
+elimina.** Dos corridas contra producción: una encadenó —quedó en `waiting_input` con el segundo
+paso pedido— y la otra volvió a cerrar tras el primero. Es el diseño funcionando, no fallando: la
+guarda devuelve **una** vuelta y si el modelo insiste se cierra con lo que dijo, porque un plan a
+medias es mejor que un bucle. Con gpt-5-nano, insiste parte de las veces.
+
+Así que WF-01 sigue abierto y con el número al lado: 1 de 2 con guardas, 2 de 3 en total. Lo que
+falta decidir es si la salida es endurecer la vuelta —dos en vez de una, con contador— o que el
+motor deje el plan **pausado** en vez de completado cuando cierra con pasos firmados sin atar, que
+al menos conserva lo hecho y permite retomarlo. La segunda se parece a WF-02 y quizá sea la misma
+pieza.
+
 ### [ ] WF-02 · Una tarjeta caducada a mitad de plan se lleva por delante los pasos hechos
 
 `plans/service.ts` cierra el plan con `failed` y «la aprobación caducó sin respuesta» cuando la
