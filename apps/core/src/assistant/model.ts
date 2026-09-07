@@ -1163,6 +1163,18 @@ export function renderContext(context: PlanContext): string {
     for (const run of context.house.runs) {
       lines.push(`· trabajo ${run.runId} [${run.status}]${run.title ? ` — ${run.title}` : ''}`);
     }
+    /*
+     * Y los planes de varios pasos que están en marcha.
+     *
+     * `#house()` los calculaba y esto no los escribía, así que **el modelo no los veía nunca**: a
+     * «¿cómo va aquello?» proponía otro plan en vez de mirar el que ya está corriendo. El motivo de
+     * que existan estaba escrito donde se calculan y no donde se enseñan, que es lo único que el
+     * modelo lee.
+     */
+    for (const workflow of context.house.workflows ?? []) {
+      lines.push(`· plan ${workflow.planId} [${workflow.status}] paso ${workflow.step}`
+        + ` de ${workflow.steps} — ${workflow.objective}`);
+    }
   }
 
   if (context.capabilities?.length) {
@@ -1183,6 +1195,49 @@ export function renderContext(context: PlanContext): string {
     lines.push('',
       `Puedes hacer hasta ${context.limits.maxToolCalls} consultas en este turno antes de tener que responder.`);
     return lines.join('\n');
+  }
+
+  /*
+   * El perímetro firmado, **antes** de que proponga nada.
+   *
+   * El tipo dice que va en el contexto «porque el modelo tiene que saber dentro de qué se mueve
+   * antes de proponer el paso siguiente», y no se escribía: el campo se llenaba y moría aquí. Que
+   * el core convierta en tarjeta lo que se sale funciona, pero gasta un turno y una pregunta que no
+   * hacía falta, y quien la lee no entiende por qué se la hacen.
+   */
+  if (context.envelope) {
+    const { hosts, maxSteps, maxRuns, highestPermissionProfile, writes, capabilities } = context.envelope;
+    lines.push('', 'Lo que ya se firmó para este plan, y de donde no debes salirte:');
+    lines.push(`· máquinas: ${hosts.length ? hosts.join(', ') : 'ninguna'}`
+      + ` · hasta ${maxSteps} pasos y ${maxRuns} trabajos`
+      + ` · permiso máximo «${highestPermissionProfile}» · ${writes ? 'puede modificar' : 'sólo mirar'}`);
+    if (capabilities.length) lines.push(`· capacidades: ${capabilities.join(', ')}`);
+  }
+
+  /*
+   * Y el plan aprobado, que es lo que hay que atar.
+   *
+   * El turno que ata no es el que estimó y no comparten nada en memoria: sin esto, lo único que ve
+   * del plan son los pasos ya dados, así que improvisa el siguiente en vez de atar el que toca.
+   */
+  if (context.plannedSteps?.length) {
+    lines.push('', 'El plan que se aprobó (ata el marcado con →, no propongas otro):');
+    for (const step of context.plannedSteps) {
+      /*
+       * Un paso ya dado se enuncia en una línea, y no por ahorrar: **lo que planeaba ya no importa**
+       * —lo que de verdad pasó está en «Pasos dados», con su resultado— y repetir aquí sus
+       * incógnitas invita a resolver otra vez algo que ya se resolvió. Enseñar el plan entero en
+       * detalle costaba 1.655 tokens sobre un turno de plan (+38 % medido); así son 700.
+       */
+      if (step.state === 'done') {
+        lines.push(`✓ ${step.ordinal + 1}. ${step.title}`);
+        continue;
+      }
+      const marca = step.state === 'current' ? '→' : '·';
+      lines.push(`${marca} ${step.ordinal + 1}. ${step.title} — ${step.intent}`
+        + ` · esperas: ${step.expects}${step.writes ? ' · modifica' : ''}`
+        + (step.unknowns.length ? `\n   por decidir: ${step.unknowns.join('; ')}` : ''));
+    }
   }
 
   lines.push('', context.history.length
