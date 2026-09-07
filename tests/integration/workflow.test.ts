@@ -351,6 +351,32 @@ describe('WF · un plan puede repartir trabajo entre máquinas', () => {
     expect(donde?.ref.provider).toBe('opencode');
   });
 
+  it('no estrena un agente que esa máquina no tiene: lo dice y deja el plan pausado', async () => {
+    /*
+     * La flota no es uniforme y eso se sabe: la sonda dice que `goro3` sólo tiene Claude y que
+     * `goro1` no tiene ninguno. Pedir un Codex donde no lo hay abría la sesión igualmente y el
+     * trabajo moría en remoto con un error de shell — la peor forma de enterarse, y con el plan ya
+     * gastado.
+     */
+    const services = casa(new PlanBrain([
+      () => ({
+        kind: 'run', title: 'Codex donde no hay', prompt: 'arregla esto',
+        permissionProfile: 'safe', rationale: 'me apetece Codex', host: 'goro2', provider: 'codex',
+      }),
+    ]));
+    // La flota tal como la dejaría la sonda: en goro2 hay Claude y OpenCode, no Codex.
+    services.db.prepare(`INSERT INTO host_capabilities
+      (host, binaries_json, providers_json, tmux, probed_at, error)
+      VALUES ('goro2', '{}', '["claude","opencode"]', 1, '2030-01-01T00:00:00.000Z', NULL)`).run();
+    const plan = enDos(services);
+
+    await services.plans.advance(plan.id, user);
+
+    const despues = services.plans.require(plan.id);
+    expect(despues.status).toBe('paused');
+    expect(despues.summary).toContain('no hay codex');
+  });
+
   it('una máquina que no se firmó no se toca: se pregunta', async () => {
     const services = casa(new PlanBrain([
       () => ({ kind: 'run', title: 'Colarse', prompt: 'toca goro3', permissionProfile: 'safe', rationale: 'ya que estamos', host: 'goro3' }),

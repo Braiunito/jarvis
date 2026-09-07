@@ -357,6 +357,8 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     mcp,
     canEscalate: hybrid?.canEscalate === true,
     starterCapabilities: config.mcpStarter,
+    // Para no estrenar una sesión con un agente que esa máquina no tiene.
+    fleet,
     /*
      * Lo que el plan hace se cuenta en la conversación de la que salió.
      *

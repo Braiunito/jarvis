@@ -209,6 +209,15 @@ export interface PlanServiceDeps {
    * Va como función y no como el servicio de chat entero a propósito: el motor de planes no tiene
    * por qué conocer las conversaciones, sólo tiene que poder contar lo que hace.
    */
+  /**
+   * Qué máquinas hay y **qué agente corre en cada una**.
+   *
+   * La sonda lo mide y la salud lo publica desde hace tiempo —`ssh:goro3` dice `providers:
+   * ['claude']`—, pero ni el motor ni el modelo lo miraban. Sin esto, pedir un Codex en una máquina
+   * que sólo tiene Claude abre una sesión que no existe y el trabajo muere en remoto con un error
+   * de shell, que es la peor forma de enterarse.
+   */
+  fleet?: { known(): Array<{ host: string; providers: readonly Provider[] }> };
   narrate?: (conversationId: string, text: string) => void;
   approvalTtlMs?: number;
   maxSteps?: number;
@@ -875,9 +884,19 @@ export class PlanService {
      * convierte en tarjeta unas líneas más abajo—. Es lo que permite que un plan de la casa reparta
      * trabajo entre máquinas, que es para lo que se pide un plan de varios pasos.
      */
-    const destino = decision.kind === 'run'
-      ? this.#workspaceFor(plan, { host: decision.host, provider: decision.provider }, user)
-      : workspace;
+    let destino: Workspace | null;
+    try {
+      destino = decision.kind === 'run'
+        ? this.#workspaceFor(plan, { host: decision.host, provider: decision.provider }, user)
+        : workspace;
+    } catch (error) {
+      /*
+       * Que el agente pedido no esté en esa máquina no mata el plan: lo pausa con el motivo. Lo
+       * hecho sigue hecho, y quien lo lea puede instalarlo, corregir el paso y reanudar. Es la
+       * misma regla que con una firma caducada — cerrar un plan a medias no destruye lo hecho.
+       */
+      return this.#finish(planId, 'paused', (error as Error).message);
+    }
     if (decision.kind === 'run' && !destino) return this.#finish(planId, 'failed', sinSesion);
 
     /*
@@ -1353,7 +1372,21 @@ export class PlanService {
      */
     const abierto = workspaces.recent(50)
       .find((candidate) => candidate.ref.host === máquina && candidate.ref.provider === agente);
-    return abierto ?? workspaces.startSession({ host: máquina, provider: agente }, user);
+    if (abierto) return abierto;
+    /*
+     * Estrenar una sesión con un agente que esa máquina no tiene es fabricar un fallo para dentro
+     * de un minuto: `goro3` sólo tiene Claude, `goro1` no tiene ninguno. Se dice aquí, con lo que
+     * sí hay, en vez de dejar que el trabajo muera en remoto con un error de shell.
+     *
+     * Sólo se comprueba lo que se sabe: una máquina de la que nunca se supo nada no bloquea —decir
+     * «ahí no hay Codex» sin haber mirado sería mentir—.
+     */
+    const sabido = this.#deps.fleet?.known().find((candidate) => candidate.host === máquina);
+    if (sabido && sabido.providers.length > 0 && !sabido.providers.includes(agente)) {
+      throw new JarvisError('CONFLICT',
+        `en «${máquina}» no hay ${agente}: lo que hay es ${sabido.providers.join(', ')}`);
+    }
+    return workspaces.startSession({ host: máquina, provider: agente }, user);
   }
 
   /** Lo cuenta en su conversación, si vino de una. Un plan de la casa no tiene a quién contárselo. */
