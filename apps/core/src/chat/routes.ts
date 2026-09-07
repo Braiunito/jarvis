@@ -10,6 +10,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { JarvisError, type AutonomyMode } from '@jarvis/contracts';
 import { identityOf } from '../app.js';
 import type { CoreServices } from '../services.js';
+import { traceOf } from './trace.js';
 
 /**
  * Que el modo exista y que esta casa lo permita.
@@ -74,6 +75,24 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
       // un hueco. Los `panel` y `modal` se piden al abrirlos, que es cuando se miran.
       artifacts: services.chat.inlineArtifacts(id),
     });
+  });
+
+  /**
+   * La traza: qué hizo el asistente en esta conversación, en qué orden y qué le falló.
+   *
+   * Existe porque diagnosticar un hilo que salió mal obligaba a bajarse el JSON entero y escribir
+   * un script cada vez. El dato estaba en la base desde siempre; lo que faltaba era dónde mirarlo.
+   *
+   * Va por su propia ruta y no dentro del detalle porque el detalle lo pide la pantalla en cada
+   * pintada y esto sólo se mira cuando algo va mal: meterlo ahí sería cobrarle el diagnóstico a
+   * todas las conversaciones que van bien.
+   */
+  app.get('/api/chat/:id/trace', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    // `require` antes que nada: la traza dice tanto de una conversación como sus mensajes, así que
+    // pasa por la misma puerta de identidad y no por una más floja.
+    services.chat.require(id, identityOf(request));
+    return reply.send(traceOf(services.chat.messages(id, { user: identityOf(request) })));
   });
 
   app.post('/api/chat/:id/messages', async (request, reply) => {
