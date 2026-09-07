@@ -99,6 +99,26 @@ describe('TRAZA · lo que hizo el asistente y por qué falló', () => {
     expect(trace.totals.tools).toBe(1);
   });
 
+  it('dos respuestas seguidas son un turno, no dos: nada de filas vacías', () => {
+    seq = 0;
+    const trace = traceOf([
+      user('arréglalo', 0),
+      tool('get_health', true, '{"ok":true}', 1),
+      answer('te propongo un plan', 5),
+      answer('aprobado, sigo', 6),
+      answer('hecho', 7),
+    ] as never);
+
+    /*
+     * Salió en el primer uso contra una conversación real: cuatro turnos de 0 s y 0 herramientas,
+     * que eran mensajes del asistente seguidos. Inventaban idas y venidas que no hubo y ensuciaban
+     * justo el recuento por el que se mira una traza.
+     */
+    expect(trace.turns).toHaveLength(1);
+    expect(trace.turns[0]?.answer).toContain('hecho');
+    expect(trace.totals.turns).toBe(1);
+  });
+
   it('un cuerpo que no es JSON no rompe la traza', () => {
     seq = 0;
     const trace = traceOf([

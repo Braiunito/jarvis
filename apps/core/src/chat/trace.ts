@@ -114,9 +114,26 @@ export function traceOf(messages: readonly ChatMessage[]): ConversationTrace {
       lastAt = message.createdAt;
       continue;
     }
-    // Una herramienta o una respuesta sin pregunta delante existe: un turno reanudado tras un
-    // reinicio, o un evento del sistema. Se le abre turno propio en vez de perderlo.
+    /*
+     * Sin turno abierto hay dos casos y **no se tratan igual**, cosa que se vio en el primer uso
+     * contra una conversación de verdad: salían cuatro turnos fantasma de 0 s y 0 herramientas.
+     *
+     * Una **herramienta** suelta sí es trabajo sin pregunta delante —un turno reanudado tras un
+     * reinicio, una aprobación que continúa lo de antes— y merece su turno: si no, la traza no
+     * explicaría justo las conversaciones que peor acabaron.
+     *
+     * Una **respuesta o un evento** suelto no es un turno nuevo: es que el asistente dijo dos cosas
+     * seguidas. Abrirle turno propio inventa filas vacías que ensucian el recuento y hacen creer
+     * que hubo más idas y venidas de las que hubo. Se pega al turno anterior.
+     */
     if (!current) {
+      const anterior = turns[turns.length - 1];
+      if (message.role !== 'tool' && anterior) {
+        anterior.answer = clip(`${anterior.answer} · ${message.text ?? ''}`.trim());
+        if (message.modelId) anterior.model = message.modelId;
+        lastAt = message.createdAt;
+        continue;
+      }
       current = {
         seq: message.seq, at: message.createdAt, ms: 0, model: null,
         ask: '(sin pregunta: turno reanudado o evento del sistema)', answer: '', tools: [], failed: 0,
