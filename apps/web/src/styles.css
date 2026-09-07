@@ -1889,6 +1889,31 @@ a:hover { text-decoration: underline; }
 /* No es un aviso rojo: es un dato de la fila, y el rojo en una lista se lee como «rota». */
 .chat-rail-mudo { color: var(--warn); }
 
+/*
+ * Un plan que espera algo tuyo.
+ *
+ * Mismo peso visual que la tarjeta de permiso —es la misma clase de cosa: hasta que hagas algo,
+ * esto no avanza— y anclado igual, porque el fallo que lo trae fue justamente no verlo.
+ */
+.chat-plan-pending {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.chat-plan-pending.firma { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.chat-plan-pending .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* La pregunta se lee entera: cortarla dejaría a la persona adivinando qué le preguntan. */
+.chat-plan-question { margin: 0; color: var(--text-strong); }
+.chat-plan-answer { display: flex; gap: 8px; }
+.chat-plan-answer .input { flex: 1 1 auto; min-width: 0; }
+
 .chat-capabilities {
   margin-top: auto;
   padding-top: 10px;

@@ -24,7 +24,7 @@ import type {
 import type { SpendSummary } from '@jarvis/contracts';
 import {
   useCapabilityCatalog, useConversation, useConversations, useDeleteConversation, useHosts,
-  useOpenWorkspace, useResolveApproval, useSendMessage, useSetAutonomy, useSpend,
+  useAnswerPlan, useOpenWorkspace, useResolveApproval, useSendMessage, useSetAutonomy, useSpend,
 } from '../api/queries.js';
 import { useChatStream } from '../api/chat-stream.js';
 import { terminalHref } from '../api/links.js';
@@ -35,6 +35,7 @@ import {
 } from '../ui/icons.jsx';
 import { AUTONOMY, autonomyName, EFFORT } from '../ui/labels.js';
 import { useAskAssistant } from '../ui/ask-assistant.jsx';
+import { PlanPending, planEspera } from '../ui/plan-pending.jsx';
 import { ArtifactChip, InlineArtifact } from '../ui/artifact.jsx';
 import { ApprovalCard } from '../ui/approval-card.jsx';
 import { Boundary } from '../ui/boundary.jsx';
@@ -752,6 +753,7 @@ export function AssistantScreen(): JSX.Element {
   const stream = useChatStream(active);
   const ask = useAskAssistant();
   const send = useSendMessage(active);
+  const answerPlan = useAnswerPlan();
   const setAutonomy = useSetAutonomy(active);
   const remove = useDeleteConversation();
   const resolve = useResolveApproval();
@@ -800,6 +802,12 @@ export function AssistantScreen(): JSX.Element {
    * Se funden por identificador, como los mensajes por `seq`, y por el mismo motivo: son la misma
    * cosa contada por dos canales y el que llegue segundo no puede borrar al primero.
    */
+  /*
+   * Lo que la conversación tiene en marcha. Sale del estado del plan y no de un mensaje: un
+   * mensaje que no se emitió es invisible para siempre, y esto es justo lo que se perdió.
+   */
+  const plan = detail.data?.plan ?? null;
+
   const artifactBodies = new Map<string, ChatArtifact>();
   for (const artifact of detail.data?.artifacts ?? []) artifactBodies.set(artifact.id, artifact);
   for (const artifact of stream.artifacts) artifactBodies.set(artifact.id, artifact);
@@ -1151,6 +1159,26 @@ export function AssistantScreen(): JSX.Element {
             * alguien se desplace hasta encontrarlo: es lo único de esta pantalla que **hay que**
             * leer, y por eso se queda pegada bajo la cabecera hasta que se resuelve.
             */}
+          {/*
+            * Y lo mismo para un plan que espera: es una pregunta pendiente, no una fila del hilo.
+            *
+            * Va junto a las tarjetas de permiso y por el mismo motivo —hasta que la persona haga
+            * algo, esto no avanza— y **antes** que ellas porque un plan parado bloquea más: una
+            * tarjeta sin firmar detiene una acción, un plan sin contestar detiene los siete pasos.
+            */}
+          {planEspera(plan) && plan ? (
+            <PlanPending
+              plan={plan}
+              pending={answerPlan.isPending}
+              error={answerPlan.error}
+              onAnswer={(answer) => answerPlan.mutate(
+                { planId: plan.planId, answer },
+                { onSuccess: () => void detail.refetch() },
+              )}
+              onOpen={() => { window.location.href = `/plans/${plan.planId}`; }}
+            />
+          ) : null}
+
           {approvals.map((approval) => (
             <ApprovalCard
               className="chat-approval-sticky"

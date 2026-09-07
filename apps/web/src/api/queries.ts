@@ -11,6 +11,7 @@ import type {
   Draft, Health, HostCapabilities, McpCapability, McpServerState, Plan, PlanStep, Run, RunEvent, SpendSummary,
   SessionSearchResult, TargetPlan, TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
+import type { LivePlan } from '../ui/plan-pending.jsx';
 import { api, get, post, put } from './client.js';
 
 export interface MetricsSnapshot {
@@ -610,6 +611,16 @@ export interface ConversationDetail {
   approvals: Approval[];
   /** Los cuerpos de los `inline`, ya atados: la carga inicial no puede parpadear. */
   artifacts: ChatArtifact[];
+  /**
+   * El plan vivo de esta conversación, si lo hay.
+   *
+   * Viene en el detalle y no en una ruta aparte porque su motivo es que **nadie se quede
+   * esperando**: si hay que pedirlo, llega tarde o no llega. Se escribe aquí a mano porque hoy el
+   * core lo añade en su ruta y no está en `@jarvis/contracts` — o sea que este tipo y el del
+   * servidor pueden separarse sin que nadie se entere, que es justo lo que el contrato existe para
+   * evitar. Está dicho y pedido.
+   */
+  plan: LivePlan | null;
 }
 
 export interface CapabilityCatalog {
