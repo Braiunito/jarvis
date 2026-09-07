@@ -10,6 +10,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { JarvisError, type AutonomyMode } from '@jarvis/contracts';
 import { identityOf } from '../app.js';
 import type { CoreServices } from '../services.js';
+import { livePlanOf } from './live-plan.js';
 import { traceOf } from './trace.js';
 
 /**
@@ -74,6 +75,15 @@ export function registerChatRoutes(app: FastifyInstance, services: CoreServices)
       // Los `inline` son parte de la respuesta: si no llegan con ella, la primera pintada tiene
       // un hueco. Los `panel` y `modal` se piden al abrirlos, que es cuando se miran.
       artifacts: services.chat.inlineArtifacts(id),
+      /*
+       * Y si esta conversación tiene un plan en marcha.
+       *
+       * Va en el detalle y no en una ruta aparte —al revés que la traza— porque esto **no es para
+       * diagnosticar, es para no dejar a nadie esperando**: si hay una pregunta pendiente, hay que
+       * verla al abrir el hilo, no cuando a alguien se le ocurra buscarla. Pasó: un plan pidió algo
+       * al usuario y la pregunta no se publicó, así que él esperaba y el plan también.
+       */
+      plan: livePlanOf(services.db, id),
     });
   });
 
