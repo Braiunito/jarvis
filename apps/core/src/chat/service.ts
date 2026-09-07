@@ -54,12 +54,15 @@ import { ChatEventBus } from './events-bus.js';
  * Y es además **el único techo del contexto de un plan**, cosa que no se ve desde aquí:
  * `buildEnvelope` firma `maxSteps: draft.steps.length`, así que el sobre vale siempre lo que el
  * modelo haya escrito, y `renderContext` pinta un renglón por paso previsto más el resumen de cada
- * paso dado (recortado a `MAX_STEP_OUTPUT_CHARS`). Medido: un plan avanzado de doce ocupa ~5.100
- * tokens de prompt en cada turno.
+ * paso dado (recortado a `MAX_STEP_OUTPUT_CHARS`).
+ *
+ * Medido **con este doce**: un plan avanzado de doce pasos ocupa ~5.100 tokens de prompt en cada
+ * turno. El número va atado a su tamaño a propósito — si alguien sube el techo, deja de describir
+ * el peor caso y pasa a describir el de antes, y se lee igual de tranquilizador.
  *
  * O sea que subir este número no alarga sólo el plan: **alarga el prompt de todos sus turnos**, en
- * línea recta y sin que nada avise. Si se sube, hay que darle al contexto un tope propio en vez de
- * dejar que lo herede de aquí. La medida está en `test/context-budget.test.ts`.
+ * línea recta y sin que nada avise. Si se sube: volver a medirlo, y darle al contexto un tope propio
+ * en vez de dejar que lo herede de aquí. La medida está en `test/context-budget.test.ts`.
  */
 const DEFAULT_MAX_WORKFLOW_STEPS = 12;
 
