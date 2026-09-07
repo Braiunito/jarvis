@@ -1653,6 +1653,39 @@ describe('WF · un plan puede dar un paso en otra máquina', () => {
     expect((definicion?.inputSchema.properties as Record<string, unknown>)['host']).toBeUndefined();
   });
 
+  it('el agente también se enumera, y no es lo mismo que la máquina', () => {
+    /*
+     * Una sesión de Claude no sustituye a una de Codex: son herramientas distintas con contextos
+     * distintos, así que el motor sólo reutiliza una sesión abierta si coincide en **las dos**
+     * cosas. Y sin `enum` el modelo no manda un nombre de agente, igual que no mandaba uno de
+     * máquina hasta que se enumeró la flota.
+     */
+    const definicion = conFlota(['bastion']).definitions().find((tool) => tool.name === 'create_run');
+    const provider = (definicion?.inputSchema.properties as Record<string, { enum?: string[] }>)['provider'];
+
+    expect(provider?.enum).toEqual(['claude', 'codex', 'opencode']);
+    expect(definicion?.inputSchema.required).not.toContain('provider');
+  });
+
+  it('un agente que no existe se corta con la lista delante', async () => {
+    const outcome = await conFlota(['bastion']).invoke('create_run', {
+      title: 'Arreglar', prompt: 'algo', permission_profile: 'safe', provider: 'gemini',
+    });
+    const error = (outcome as { content: { error: Record<string, string> } }).content.error;
+    expect(error['code']).toBe('BAD_INPUT');
+    expect(error['hint']).toContain('opencode');
+  });
+
+  it('máquina y agente viajan juntos en la decisión', async () => {
+    const outcome = await conFlota(['bastion', 'goro3']).invoke('create_run', {
+      title: 'Arreglar el proxy', prompt: 'toca la conf', permission_profile: 'safe',
+      host: 'goro3', provider: 'codex',
+    });
+    expect(outcome).toMatchObject({
+      type: 'decision', decision: { kind: 'run', host: 'goro3', provider: 'codex' },
+    });
+  });
+
   it('una máquina declarada viaja en la decisión', async () => {
     const outcome = await conFlota(['bastion', 'goro3']).invoke('create_run', {
       title: 'Arreglar el proxy', prompt: 'toca la conf de nginx',

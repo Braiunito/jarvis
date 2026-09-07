@@ -639,19 +639,37 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
  * que no existe.
  */
 function withHosts(tool: ToolDefinition, hosts: readonly string[]): ToolDefinition {
-  if (tool.name !== 'create_run' || !hosts.length) return tool;
+  if (tool.name !== 'create_run') return tool;
   return {
     ...tool,
     inputSchema: {
       ...tool.inputSchema,
       properties: {
         ...tool.inputSchema.properties,
-        host: {
+        ...(hosts.length ? {
+          host: {
+            type: 'string',
+            enum: [...hosts],
+            description: 'En qué máquina, si no es donde vive este plan. Omítelo salvo que el paso '
+              + 'tenga que ocurrir en otra: lo normal es que sea la misma. Sólo valen las máquinas '
+              + 'que el sobre autoriza.',
+          },
+        } : {}),
+        /*
+         * Qué agente, y no es lo mismo que qué máquina.
+         *
+         * Una sesión de Claude no sustituye a una de Codex: son herramientas distintas con
+         * contextos distintos. Por eso el motor reutiliza una sesión abierta sólo si coincide en
+         * **las dos** cosas, y por eso esto se enumera: sin la lista el modelo no manda un nombre
+         * de agente, igual que no mandaba uno de máquina.
+         */
+        provider: {
           type: 'string',
-          enum: [...hosts],
-          description: 'En qué máquina, si no es donde vive este plan. Omítelo salvo que el paso '
-            + 'tenga que ocurrir en otra: lo normal es que sea la misma. Sólo valen las máquinas '
-            + 'que el sobre autoriza.',
+          enum: [...PROVIDERS],
+          description: 'Con qué agente. Omítelo para heredar el del plan, que es lo normal. '
+            + 'Cambiarlo **abre una sesión nueva** si no hay ninguna de ese agente en esa máquina, '
+            + 'así que no lo cambies por costumbre: acabarías con tres sesiones en el mismo sitio '
+            + 'sin contexto compartido.',
         },
       },
     },
@@ -2310,6 +2328,11 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       return toolError('BAD_INPUT', `no alcanzo la máquina ${host}`,
         `las que hay son ${(this.#deps.hosts ?? []).join(', ')}`);
     }
+    const provider = asString(input['provider']);
+    if (provider && !(PROVIDERS as readonly string[]).includes(provider)) {
+      return toolError('BAD_INPUT', `no conozco el agente ${provider}`,
+        `los que hay son ${PROVIDERS.join(', ')}`);
+    }
 
     /*
      * La escalera (ADR-010).
@@ -2347,8 +2370,9 @@ export class CoreAssistantToolbox implements AssistantToolbox {
       type: 'decision',
       decision: {
         kind: 'run', title, prompt, permissionProfile: profile, rationale,
-        // Sólo si viene: omitirlo significa «donde vive el plan», que es lo de siempre.
+        // Sólo si vienen: omitirlos hereda la máquina y el agente del plan, que es lo de siempre.
         ...(host ? { host } : {}),
+        ...(provider ? { provider: provider as Provider } : {}),
       },
     };
   }
