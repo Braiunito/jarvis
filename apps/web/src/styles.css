@@ -1974,7 +1974,10 @@ a:hover { text-decoration: underline; }
  */
 .chat-status-part { min-width: 0; flex: 0 1 auto; }
 .chat-status-part + .chat-status-part::before,
-.chat-status-part + .chat-status-warn::before { content: '·'; margin: 0 5px; color: var(--text-faint); }
+.chat-status-part + /* El botón no encoge: es la única salida del callejón. */
+.chat-status-retry { flex: 0 0 auto; margin-left: 2px; }
+
+.chat-status-warn::before { content: '·'; margin: 0 5px; color: var(--text-faint); }
 
 /*
  * El aviso no encoge ni se corta, y va en negrita.

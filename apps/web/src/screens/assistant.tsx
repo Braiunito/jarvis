@@ -537,7 +537,7 @@ const catalogWeight = (bytes: number): string => {
  * el índice y seis hosts en una palabra es un indicador que no se puede comprobar; aquí cada cosa
  * se cuenta con su número, y el que esté mal se lee.
  */
-function StatusLine({ hosts, capabilities, thinking, effort, failed, lost }: {
+function StatusLine({ hosts, capabilities, thinking, effort, failed, lost, onRetry }: {
   hosts: { reachable: boolean }[] | undefined;
   capabilities: ChatCapabilities | undefined;
   thinking: boolean;
@@ -545,6 +545,8 @@ function StatusLine({ hosts, capabilities, thinking, effort, failed, lost }: {
   effort: string | null;
   /** El turno se cayó. Antes esto no se distinguía de «en reposo». */
   failed: boolean;
+  /** Volver a abrir el stream cuando se dio por vencido. */
+  onRetry: () => void;
   /** El stream se dio por vencido: no va a volver solo. */
   lost: boolean;
 }): JSX.Element | null {
@@ -572,6 +574,16 @@ function StatusLine({ hosts, capabilities, thinking, effort, failed, lost }: {
       <span className="chat-status warn">
         <span className="chat-status-dot" aria-hidden="true" />
         <span className="truncate">sin conexión con el hilo</span>
+        {/*
+          * Y con qué volver.
+          *
+          * Decirlo sin ofrecer la vuelta dejaba un callejón: el stream ya está cerrado, así que la
+          * única salida era recargar la página —y quien lee esto no tiene por qué saberlo—. Pasa
+          * dejando la pestaña abierta mientras el portátil se duerme.
+          */}
+        <button type="button" className="btn small chat-status-retry" onClick={onRetry}>
+          Reconectar
+        </button>
       </span>
     );
   }
@@ -983,6 +995,7 @@ export function AssistantScreen(): JSX.Element {
                 effort={stream.effort}
                 failed={status === 'failed'}
                 lost={stream.lost}
+                onRetry={stream.retry}
               />
             </span>
           </div>

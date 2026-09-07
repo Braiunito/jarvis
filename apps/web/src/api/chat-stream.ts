@@ -10,7 +10,7 @@
  * «pensando» no es algo que nadie haya dicho, y meterlo en el hilo dejaría un rastro de burbujas
  * vacías en el histórico.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ChatArtifact, ChatMessage } from '@jarvis/contracts';
 
@@ -46,17 +46,30 @@ export interface ChatStreamState {
    * a volver solo», y por eso se enseña con una forma de reintentar.
    */
   lost: boolean;
+  /**
+   * Volver a intentarlo cuando se dio por vencido.
+   *
+   * Sin esto, `lost` era un callejón: el stream se cerraba, la línea decía «sin conexión con el
+   * hilo» y no había forma de reabrirlo salvo recargar la página. El comentario de abajo prometía
+   * que cerrar «es lo que permite volver a intentarlo a propósito» y no había con qué —una
+   * garantía escrita más grande que la que daba el código—. Se ve dejando una pestaña abierta:
+   * el portátil se duerme, `EventSource` agota sus seis reintentos y el hilo se queda mudo para
+   * siempre aunque la red vuelva.
+   */
+  retry: () => void;
 }
 
-const EMPTY: ChatStreamState = {
+const EMPTY: Omit<ChatStreamState, 'retry'> = {
   messages: [], artifacts: [], status: null, effort: null, source: null, autonomy: null,
   title: null, connected: false, lost: false,
 };
 
 export function useChatStream(conversationId: string | null): ChatStreamState {
-  const [state, setState] = useState<ChatStreamState>(EMPTY);
+  const [state, setState] = useState<Omit<ChatStreamState, 'retry'>>(EMPTY);
   const seen = useRef<Set<number>>(new Set());
   const client = useQueryClient();
+  /** Cambiarlo rehace el efecto entero, que es lo que abre un `EventSource` nuevo. */
+  const [intento, setIntento] = useState(0);
 
   useEffect(() => {
     seen.current = new Set();
@@ -142,7 +155,19 @@ export function useChatStream(conversationId: string | null): ChatStreamState {
     };
 
     return () => source.close();
-  }, [conversationId, client]);
+  }, [conversationId, client, intento]);
 
-  return state;
+  /*
+   * Reintentar **no** limpia lo que ya se leyó.
+   *
+   * `seen` y los mensajes se conservan: al reabrir, el servidor repite desde el último id y la
+   * deduplicación por `seq` los descarta. Vaciarlos aquí duplicaría el hilo entero en pantalla,
+   * que es peor que la avería que se está arreglando.
+   */
+  const retry = useCallback(() => {
+    setState((previous) => ({ ...previous, lost: false }));
+    setIntento((previous) => previous + 1);
+  }, []);
+
+  return { ...state, retry };
 }
