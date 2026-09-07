@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeSessionIndex, fakeSshPath, indexRow } from '@jarvis/testkit';
 import type { AutonomyMode, PermissionProfile, WorkflowEnvelope } from '@jarvis/contracts';
+import { HybridModel } from '../../apps/core/src/assistant/hybrid.js';
 import { openDatabase } from '../../apps/core/src/platform/db.js';
 import { buildServices, type CoreServices } from '../../apps/core/src/services.js';
 import { digestOf } from '../../apps/core/src/plans/workflow.js';
@@ -239,6 +240,97 @@ describe('WF · los topes se gastan a lo largo del plan, no dentro de un turno',
     const segundo = services.plans.steps(plan.id)[1];
     expect(segundo?.kind).toBe('approval');
     expect(services.plans.approval(segundo!.approvalId!)?.summary).toContain('el trabajo 2');
+  });
+});
+
+describe('WF · firmar la tarjeta es lo único que pone un workflow en marcha', () => {
+  /*
+   * El puente entre la conversación y el motor, que no lo probaba nadie.
+   *
+   * El hilo propone el workflow y crea la tarjeta; el motor sólo arranca si alguien firma. Entre
+   * las dos mitades hay un salto —la tarjeta se resuelve en `chat`, el plan vive en `plans`— y las
+   * pruebas de cada lado daban verde sin que el salto existiera: `tests/integration/chat.test.ts`
+   * firma tarjetas de run, de escalada y de capacidad, nunca de workflow, y este fichero activa
+   * los planes llamando a `activate` a mano, que es justo lo que en producción no puede hacer
+   * nadie — no hay ruta que active un plan.
+   *
+   * Así que lo que se comprueba aquí es lo mínimo y lo único que importa: firmar **saca el plan de
+   * borrador**. Sin esto, un workflow aprobado se queda quieto para siempre y la firma no se
+   * distingue de no haber firmado.
+   */
+  /*
+   * El hilo quiere un modelo híbrido, no uno suelto: `chat` distingue el local del de la nube y sin
+   * esa distinción se planta antes de pensar. El resto del fichero no lo necesita porque el motor
+   * de planes habla con el modelo directamente.
+   */
+  const harnessChat = (model: PlanBrain): CoreServices => {
+    const services = buildServices({
+      db: openDatabase({ path: ':memory:' }),
+      index: new FakeSessionIndex([indexRow()]) as never,
+      model: new HybridModel({ local: model, cloud: model }),
+      config: {
+        hosts: ['bastion'], bastionHost: 'bastion', spoolRoot: '/tmp/jarvis-workflow-spool',
+        sshCommand: fakeSshPath(), knownHostsFile: '',
+      },
+    });
+    open.push(services);
+    return services;
+  };
+
+  const propone = (): AssistantDecision => ({
+    kind: 'workflow',
+    objective: 'averiguar por qué el pool se queda sin conexiones',
+    steps: [
+      { title: 'Mirar el log', intent: 'ver qué dice el log', expects: 'la hora del primer fallo' },
+      { title: 'Comprobar el límite', intent: 'ver el pool_size', expects: 'el número' },
+    ],
+    hosts: ['bastion'],
+    highestPermissionProfile: 'safe',
+    rationale: 'con dos pasos se sabe si es el pool o la red',
+  });
+
+  it('un workflow firmado desde el hilo deja de ser un borrador', async () => {
+    const services = harnessChat(new PlanBrain([
+      () => propone(),
+      () => ({ kind: 'finish', summary: 'ya está' }),
+    ]));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'mira por qué se queda sin conexiones', user);
+    await services.chat.settled(conversation.id);
+
+    const [tarjeta] = services.chat.pendingApprovals(conversation.id);
+    expect(tarjeta?.actionType).toBe('workflow');
+    const planId = String((tarjeta!.target as { planId?: string }).planId);
+    expect(services.plans.require(planId).status).toBe('draft');
+
+    await services.chat.resolveApproval(tarjeta!.id, 'approved', user);
+    await services.chat.settled(conversation.id);
+
+    /*
+     * El estado se afirma por su nombre y no con un `not.toBe('draft')`: un plan que acaba en
+     * `failed` también deja de ser un borrador, y esa prueba pasaría dando por buena una firma que
+     * rompió el plan. Firmar tiene que ponerlo a andar.
+     */
+    /*
+     * El estado se afirma por su nombre y no con un `not.toBe('draft')`: un plan que acaba en
+     * `failed` también deja de ser un borrador, y esa prueba pasaría dando por buena una firma que
+     * rompió el plan. Firmar tiene que ponerlo a andar.
+     */
+    expect(['ready', 'running', 'waiting_run', 'waiting_approval', 'completed'])
+      .toContain(services.plans.require(planId).status);
+  });
+
+  it('y rechazarla lo deja donde estaba', async () => {
+    const services = harnessChat(new PlanBrain([() => propone()]));
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'mira por qué se queda sin conexiones', user);
+    await services.chat.settled(conversation.id);
+
+    const [tarjeta] = services.chat.pendingApprovals(conversation.id);
+    const planId = String((tarjeta!.target as { planId?: string }).planId);
+    await services.chat.resolveApproval(tarjeta!.id, 'rejected', user);
+
+    expect(services.plans.require(planId).status).toBe('draft');
   });
 });
 
