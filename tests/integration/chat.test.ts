@@ -343,6 +343,36 @@ describe('CHAT · un turno deja rastro según ocurre', () => {
     expect(services.chat.pendingApprovals(mia.id)).toHaveLength(1);
   });
 
+  it('«sin contestar» es un hecho del hilo, no una lectura del último rol', async () => {
+    /*
+     * `lastMessageRole` no bastaba: `event` lo escriben diecisiete sitios y dicen cosas opuestas
+     * —«me quedé sin intentos» y «plan corregido», que es un turno que acabó bien—. Deducir la
+     * avería del rol marcaría un plan corregido como pregunta perdida; lo vio jarvis-76 antes de
+     * fiarse del campo que le di.
+     *
+     * Lo que se pregunta de verdad es si hay respuesta después de la pregunta. Eso no se deduce.
+     */
+    const local = new ScriptedBrain('local', [() => ({ kind: 'finish', summary: 'la memoria va bien' })]);
+    const { services } = track(harness({ local }));
+
+    const conversation = services.chat.create({ user });
+    services.chat.send(conversation.id, 'cómo va la memoria', user);
+    await settled(services, conversation.id);
+
+    // Contestada: no está pendiente.
+    expect(services.chat.list({ user })[0]?.pendingAnswer).toBe(false);
+
+    // Un evento posterior —cualquiera de los diecisiete— no la convierte en pendiente.
+    services.chat.turnGaveUp(conversation.id, 'da igual el motivo');
+    const conEvento = services.chat.list({ user })[0];
+    expect(conEvento?.lastMessageRole).toBe('event');
+    expect(conEvento?.pendingAnswer).toBe(false);
+
+    // Y una pregunta nueva sin respuesta sí lo está, aunque el turno no llegue a arrancar.
+    services.chat.send(conversation.id, 'y el disco', user);
+    expect(services.chat.list({ user })[0]?.pendingAnswer).toBe(true);
+  });
+
   it('el primer mensaje nombra la conversación', async () => {
     const { services } = track(harness({ local: new ScriptedBrain('local', [() => ({ kind: 'finish', summary: 'ya' })]) }));
     const conversation = services.chat.create({ user });

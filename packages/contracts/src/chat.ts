@@ -192,6 +192,19 @@ export const Conversation = Type.Object({
    * sólo se sabe abriendo la conversación, y quien no la abre no se entera nunca.
    */
   lastMessageRole: Type.Union([Type.Union(CHAT_ROLES.map((role) => Type.Literal(role))), Type.Null()]),
+  /**
+   * Si la última pregunta de la persona se quedó sin respuesta.
+   *
+   * Definido como **no hay ningún mensaje del asistente después del último de la persona**, y eso
+   * es un hecho sobre el hilo, no una regla sobre roles: sigue significando lo mismo aunque
+   * mañana cambien los estados, los eventos o quién escribe qué.
+   *
+   * Hacía falta porque `lastMessageRole` no basta: `event` lo escriben diecisiete sitios distintos
+   * y dicen cosas opuestas —«me quedé sin intentos» y «plan corregido», que es un turno que acabó
+   * bien—. Deducir la avería del rol marcaría un plan corregido como pregunta perdida. Aquí no hay
+   * nada que deducir: o hay respuesta después de la pregunta, o no la hay.
+   */
+  pendingAnswer: Type.Boolean(),
   createdAt: Iso8601,
   updatedAt: Iso8601,
   lastMessageAt: Type.Union([Iso8601, Type.Null()]),

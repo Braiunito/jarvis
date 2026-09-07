@@ -18,6 +18,7 @@ interface ConversationRow {
   created_at: string; updated_at: string; last_message_at: string | null;
   message_count?: number;
   last_message_role?: string | null;
+  pending_answer?: number;
 }
 
 interface MessageRow {
@@ -37,6 +38,7 @@ const toConversation = (row: ConversationRow): Conversation => ({
   source: row.source as ModelSource,
   messageCount: row.message_count ?? 0,
   lastMessageRole: (row.last_message_role as Conversation['lastMessageRole']) ?? null,
+  pendingAnswer: row.pending_answer === 1,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   lastMessageAt: row.last_message_at,
@@ -105,7 +107,13 @@ export class ChatRepository {
   find(id: string): Conversation | null {
     const row = this.#db.prepare(`
       SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count,
-        (SELECT m.role FROM chat_messages m WHERE m.conversation_id = c.id ORDER BY m.seq DESC LIMIT 1) AS last_message_role
+        (SELECT m.role FROM chat_messages m WHERE m.conversation_id = c.id ORDER BY m.seq DESC LIMIT 1) AS last_message_role,
+        -- Sin respuesta = hay una pregunta y no hay nada del asistente después de ella. Se calcula
+        -- en la consulta y no en el cliente porque es la definición del dato, no una interpretación.
+        (SELECT CASE WHEN MAX(CASE WHEN m.role = 'user' THEN m.seq END) IS NULL THEN 0
+                     WHEN COALESCE(MAX(CASE WHEN m.role = 'assistant' THEN m.seq END), -1)
+                          < MAX(CASE WHEN m.role = 'user' THEN m.seq END) THEN 1 ELSE 0 END
+         FROM chat_messages m WHERE m.conversation_id = c.id) AS pending_answer
       FROM conversations c WHERE c.id = ?`).get(id) as ConversationRow | undefined;
     return row ? toConversation(row) : null;
   }
@@ -131,7 +139,13 @@ export class ChatRepository {
     if (user) { where.push('c.created_by = ?'); params.push(user.username); }
     const rows = this.#db.prepare(`
       SELECT c.*, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = c.id) AS message_count,
-        (SELECT m.role FROM chat_messages m WHERE m.conversation_id = c.id ORDER BY m.seq DESC LIMIT 1) AS last_message_role
+        (SELECT m.role FROM chat_messages m WHERE m.conversation_id = c.id ORDER BY m.seq DESC LIMIT 1) AS last_message_role,
+        -- Sin respuesta = hay una pregunta y no hay nada del asistente después de ella. Se calcula
+        -- en la consulta y no en el cliente porque es la definición del dato, no una interpretación.
+        (SELECT CASE WHEN MAX(CASE WHEN m.role = 'user' THEN m.seq END) IS NULL THEN 0
+                     WHEN COALESCE(MAX(CASE WHEN m.role = 'assistant' THEN m.seq END), -1)
+                          < MAX(CASE WHEN m.role = 'user' THEN m.seq END) THEN 1 ELSE 0 END
+         FROM chat_messages m WHERE m.conversation_id = c.id) AS pending_answer
       FROM conversations c
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY c.updated_at DESC LIMIT ?`)
