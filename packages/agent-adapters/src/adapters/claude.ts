@@ -19,6 +19,19 @@ const PERMISSION_MODE: Record<PermissionProfile, string> = {
   yolo: 'bypassPermissions',
 };
 
+/**
+ * `yolo` sólo arranca como root si se le dice al CLI que está en un sandbox.
+ *
+ * Claude Code rechaza `bypassPermissions` con uid 0 salvo que `IS_SANDBOX=1`, y en vultr y goro1-3
+ * Jarvis entra como root: los cuatro runs `yolo` que se lanzaron ahí entre el 2026-09-24 y el
+ * 2026-09-29 murieron con «--dangerously-skip-permissions cannot be used with root/sudo
+ * privileges» antes de hacer nada. Que el agente sin restricciones corra con root en esas máquinas
+ * lo decidió el usuario el 2026-10-14, a sabiendas. Sólo va en `yolo`: `safe` y `auto` no lo
+ * necesitan, y ahí no tiene por qué constar.
+ */
+const sandboxEnv = (mode: string): Record<string, string> =>
+  mode === 'bypassPermissions' ? { IS_SANDBOX: '1' } : {};
+
 interface ClaudeBlock {
   type?: string;
   text?: string;
@@ -75,10 +88,11 @@ export const claudeAdapter: AgentAdapter = {
      * dice la suya. Los otros dos CLI no lo permiten, y ahí sí hay que adoptar la que reporten.
      */
     else if (!resume && sessionId) argv.push('--session-id', sessionId);
-    argv.push('--permission-mode', PERMISSION_MODE[permissionProfile] ?? PERMISSION_MODE.safe);
+    const mode = PERMISSION_MODE[permissionProfile] ?? PERMISSION_MODE.safe;
+    argv.push('--permission-mode', mode);
     if (model) argv.push('--model', model);
 
-    const env: Record<string, string> = {};
+    const env: Record<string, string> = sandboxEnv(mode);
     // Sólo cuando el transcript vive fuera del store por defecto, igual que lo resuelve aiSessions.
     if (sourceRoot && !sourceRoot.endsWith('/.claude')) env['CLAUDE_CONFIG_DIR'] = sourceRoot;
     return { argv, env };
@@ -87,8 +101,9 @@ export const claudeAdapter: AgentAdapter = {
   buildAttach({ sessionId, permissionProfile }: BuildAttachOptions): Invocation {
     const argv = ['claude'];
     if (sessionId) argv.push('--resume', sessionId);
-    argv.push('--permission-mode', PERMISSION_MODE[permissionProfile] ?? PERMISSION_MODE.safe);
-    return { argv, env: {} };
+    const mode = PERMISSION_MODE[permissionProfile] ?? PERMISSION_MODE.safe;
+    argv.push('--permission-mode', mode);
+    return { argv, env: sandboxEnv(mode) };
   },
 
   normalize(input: unknown): AgentEvent | AgentEvent[] | null {

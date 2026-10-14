@@ -72,8 +72,10 @@
         "--permission-mode",
         "bypassPermissions"
       ],
-      "env": {},
-      "nota": "Cambiado a propósito el 2026-09-02: estrenar una sesión ahora fija su identificador con --session-id, para que el workspace nazca con el mismo id que tendrá la conversación en la máquina. El stack anterior no lo hacía porque no tenía workspaces con identidad propia; aquí evita una fase en la que el id que se ve va a cambiar."
+      "env": {
+        "IS_SANDBOX": "1"
+      },
+      "nota": "Cambiado a propósito el 2026-09-02: estrenar una sesión ahora fija su identificador con --session-id, para que el workspace nazca con el mismo id que tendrá la conversación en la máquina. El stack anterior no lo hacía porque no tenía workspaces con identidad propia; aquí evita una fase en la que el id que se ve va a cambiar. Y desde el 2026-10-14 yolo lleva IS_SANDBOX=1: sin él, Claude Code se niega a arrancar con bypassPermissions cuando el usuario remoto es root."
     },
     {
       "id": "ADAPT-CLAUDE-01/new-session-without-id",
@@ -210,7 +212,27 @@
         "sid-1",
         "--permission-mode",
         "plan"
-      ]
+      ],
+      "env": {}
+    },
+    {
+      "id": "ADAPT-CLAUDE-01/attach-yolo-as-root",
+      "nota": "La terminal en yolo pasa por la misma comprobación de root que un run: sin IS_SANDBOX=1 no llega ni a pintar la pantalla en vultr y goro1-3.",
+      "provider": "claude",
+      "options": {
+        "sessionId": "sid-1",
+        "permissionProfile": "yolo"
+      },
+      "argv": [
+        "claude",
+        "--resume",
+        "sid-1",
+        "--permission-mode",
+        "bypassPermissions"
+      ],
+      "env": {
+        "IS_SANDBOX": "1"
+      }
     },
     {
       "id": "ADAPT-CODEX-01/attach-safe-keeps-sandbox",

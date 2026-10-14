@@ -16,7 +16,7 @@ const fixture = <T>(name: string): T =>
 
 interface InvocationFixture {
   cases: Array<{ id: string; provider: Provider; options: Record<string, unknown>; argv: string[]; env: Record<string, string> }>;
-  attach: Array<{ id: string; provider: Provider; options: Record<string, unknown>; argv: string[] }>;
+  attach: Array<{ id: string; provider: Provider; options: Record<string, unknown>; argv: string[]; env?: Record<string, string> }>;
   permissionModes: Record<Provider, Record<PermissionProfile, string>>;
 }
 
@@ -35,7 +35,9 @@ describe('ADAPT-*: invocación', () => {
   for (const item of invocations.attach) {
     it(`${item.id} conserva el perfil de permiso en modo interactivo`, () => {
       const adapter = getAdapter(item.provider);
-      expect(adapter.buildAttach(item.options as never).argv).toEqual(item.argv);
+      const built = adapter.buildAttach(item.options as never);
+      expect(built.argv).toEqual(item.argv);
+      if (item.env) expect(built.env).toEqual(item.env);
     });
   }
 
