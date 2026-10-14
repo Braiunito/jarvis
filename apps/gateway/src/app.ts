@@ -160,10 +160,15 @@ export function buildGateway(options: { logger?: boolean } = {}): FastifyInstanc
         socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
         return;
       }
-      const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-      const claims = token ? session.read(token) : null;
-      const user = claims ? users.findByUserId(claims.sub) : null;
-      if (!user || !user.enabled) {
+      /**
+       * La misma resolución que cualquier otra petición, no una propia.
+       *
+       * Aquí se leía la cookie a mano, y cuando llegó el modo de pruebas sin autenticación el
+       * upgrade se quedó fuera: la API dejaba entrar sin cookie y la terminal contestaba 401. La
+       * tmux se creaba, el socket nunca se enganchaba, y la pantalla se quedaba en negro.
+       */
+      const user = userFromHeaders(req.headers.cookie, clientIp(req, config.trustProxy));
+      if (!user) {
         socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
         return;
       }
@@ -180,7 +185,7 @@ export function buildGateway(options: { logger?: boolean } = {}): FastifyInstanc
       }
       proxyUpgradeToCore(req, socket, head, {
         path: pathname,
-        user: { userId: user.userId, username: user.username },
+        user: { userId: user.sub, username: user.username },
         requestId: `req_${randomUUID()}`,
       });
     } catch (error) {
