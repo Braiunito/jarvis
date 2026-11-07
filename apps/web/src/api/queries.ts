@@ -27,7 +27,6 @@ export interface MetricsSnapshot {
     buckets: Array<{ at: string; runs: number; failed: number }>;
   };
   workspaces: { total: number; openedInWindow: number };
-  plans: { active: number; waitingApproval: number };
   /** La ventana de cuota más apretada de cada cuenta, sin tocar la red. */
   usage?: Array<{
     provider: string;

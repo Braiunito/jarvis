@@ -17,10 +17,8 @@ import { registerAttachmentRoutes } from './attachments/routes.js';
 import { registerUsageRoutes } from './usage/routes.js';
 import { registerHealthRoutes } from './health/routes.js';
 import { registerTerminalRoutes } from './terminal/routes.js';
-import { registerPlanRoutes } from './plans/routes.js';
 import { registerImportRoutes } from './import/routes.js';
 import { registerMetricsRoutes } from './metrics/routes.js';
-import { registerChatRoutes } from './chat/routes.js';
 import { closeAllTerminals, handleTerminalUpgrade } from './terminal/gateway-upgrade.js';
 import type { CoreServices } from './services.js';
 
@@ -136,10 +134,8 @@ export function buildApp({ services, logger = false, trustAllIdentities = false 
   registerAttachmentRoutes(app, services);
   registerUsageRoutes(app, services);
   registerTerminalRoutes(app, services);
-  registerPlanRoutes(app, services);
   registerImportRoutes(app, services);
   registerMetricsRoutes(app, services);
-  registerChatRoutes(app, services);
 
   /**
    * La terminal es lo único bidireccional del producto, y por eso lo único que usa WebSocket.

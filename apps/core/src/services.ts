@@ -16,7 +16,6 @@ import { WorkspaceService } from './workspaces/use-cases.js';
 import { HttpSessionIndex, type SessionIndex } from './sessions/index-client.js';
 import { SessionService } from './sessions/service.js';
 import { CwdResolver } from './sessions/cwd-resolver.js';
-import { EvidenceService } from './evidence/service.js';
 import { FleetService } from './fleet/service.js';
 import { RunRepository } from './runs/repository.js';
 import { RunEventBus } from './runs/events-bus.js';
@@ -28,83 +27,6 @@ import { AttachmentService } from './attachments/service.js';
 import { UsageService } from './usage/service.js';
 import { HealthService } from './health/service.js';
 import { TerminalService } from './terminal/service.js';
-import {
-  AnthropicModel, OpenAiCompatibleModel, ScriptedModel,
-  type AssistantModel, type ModelTurnUsage,
-} from './assistant/model.js';
-import { HybridModel, LOCAL_SYSTEM_PROMPT } from './assistant/hybrid.js';
-import { McpService } from './mcp/service.js';
-import { parseMcpServers } from './mcp/config.js';
-import { ChatService } from './chat/service.js';
-import { parseModelPrices, SpendService } from './spend/service.js';
-
-/**
- * El cerebro de casa: un `llama-server` en el bastión, API compatible con OpenAI.
- *
- * Se le habla con `LOCAL_SYSTEM_PROMPT` y no con el de siempre porque un modelo pequeño rinde
- * distinto: lo que a uno grande le da matiz, a éste le ocupa el contexto que necesita para
- * razonar. Y con más plazo, porque genera a unos 7 tokens por segundo y una API no.
- */
-function buildLocalModel(config: CoreConfig, onUsage: (usage: ModelTurnUsage) => void): AssistantModel | null {
-  if (!config.localModelBaseUrl) return null;
-  return new OpenAiCompatibleModel({
-    onUsage,
-    apiKey: config.localModelApiKey,
-    baseUrl: config.localModelBaseUrl,
-    model: config.localModelName || 'local',
-    maxToolCalls: config.assistantMaxToolCalls,
-    timeoutMs: config.localModelTimeoutMs,
-    systemPrompt: LOCAL_SYSTEM_PROMPT,
-    /*
-     * Lo que se le devuelve de una herramienta va corto.
-     *
-     * El tope de siempre —60.000 caracteres— son unos 15.000 tokens: el contexto entero de este
-     * modelo por una sola observación. Y aunque cupiera, el turno que redacta lleva ese texto
-     * dentro y es donde se va el 70 % del tiempo de respuesta.
-     */
-    maxToolResultChars: config.localModelToolResultChars,
-    maxOutputTokens: config.localModelMaxOutputTokens,
-    maxOutputTokensParam: config.localModelMaxTokensParam,
-    /*
-     * La temperatura y el esfuerzo de razonamiento sólo se mandan si están puestos.
-     *
-     * No es prudencia genérica: un modelo que razona rechaza la petición entera si le llega una
-     * temperatura que no sea la suya. Mandar un parámetro de más aquí no degrada nada, tumba el
-     * asistente.
-     */
-    ...(config.localModelTemperature !== '' ? { temperature: Number(config.localModelTemperature) } : {}),
-    ...(config.localModelReasoningEffort ? { reasoningEffort: config.localModelReasoningEffort } : {}),
-  });
-}
-
-/**
- * A dónde se escala, según el proveedor configurado.
- *
- * Un solo sitio donde se decide, porque el fallo que evita es el que no se ve: una credencial
- * puesta y un Assistant que sigue sin funcionar porque el core habla otro protocolo.
- */
-function buildCloudModel(config: CoreConfig, onUsage: (usage: ModelTurnUsage) => void): AssistantModel | null {
-  if (!config.cloudModelApiKey) return null;
-  const options = {
-    onUsage,
-    apiKey: config.cloudModelApiKey,
-    baseUrl: config.cloudModelBaseUrl,
-    model: config.cloudModelName,
-    maxToolCalls: config.assistantMaxToolCalls,
-    // Sin tope salvo que alguien lo pida: ver `cloudModelMaxOutputTokens`.
-    ...(config.cloudModelMaxOutputTokens ? {
-      maxOutputTokens: config.cloudModelMaxOutputTokens,
-      maxOutputTokensParam: config.cloudModelMaxTokensParam,
-    } : {}),
-  };
-  return config.cloudModelProvider === 'anthropic'
-    ? new AnthropicModel(options)
-    : new OpenAiCompatibleModel(options);
-}
-import { PlanService } from './plans/service.js';
-import { JobRepository } from './platform/jobs.js';
-import { JobSupervisor } from './platform/job-supervisor.js';
-import { PlanSupervisor } from './plans/supervisor.js';
 import { ImportService } from './import/service.js';
 import { OpenAiCompatibleTitleModel, TitleService } from './workspaces/title.js';
 import { MetricsService } from './metrics/service.js';
@@ -133,17 +55,6 @@ export interface CoreServices {
   usage: UsageService;
   health: HealthService;
   terminal: TerminalService;
-  plans: PlanService;
-  planSupervisor: PlanSupervisor;
-  /** El consumidor de la cola de turnos. Lo arranca `main`, como el de planes. */
-  jobSupervisor: JobSupervisor;
-  /** La cola en sí, para el salto de salud y para las pruebas. */
-  jobs: JobRepository;
-  /** Las capacidades MCP que este core consume (ADR-009). */
-  mcp: McpService;
-  chat: ChatService;
-  /** Lo que cuesta pensar, contado en casa porque el proveedor no lo dice. */
-  spend: SpendService;
   imports: ImportService;
   titles: TitleService;
   metrics: MetricsService;
@@ -155,15 +66,6 @@ export interface BuildServicesOptions {
   clock?: Clock;
   index?: SessionIndex;
   db?: Db;
-  /** Sólo para tests y desarrollo: un modelo determinista en vez del de verdad. */
-  model?: AssistantModel | null;
-  /**
-   * Un MCP ya construido, igual que `index`.
-   *
-   * Existe por el mismo motivo que aquél: probar el asistente contra capacidades de verdad exigiría
-   * un servidor MCP levantado, y lo que hay que probar aquí es el core, no el servidor de otro.
-   */
-  mcp?: McpService;
   onSupervisorError?: (error: Error, runId: string) => void;
 }
 
@@ -212,9 +114,6 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     onWarn: (message) => console.warn(`[jarvis] ${message}`),
   });
 
-  /** Ficheros y cambios del host, para que el Assistant vea la evidencia que no es texto (TEC-06). */
-  const evidence = new EvidenceService({ sshConfig });
-
   const runs = new RunService({
     repository: runRepository, runner, workspaces, capabilities, bus, audit, clock, sshConfig, attachments,
     cwd: cwdResolver,
@@ -242,96 +141,9 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
     ...(options.onSupervisorError ? { onError: options.onSupervisorError } : {}),
   });
 
-  /**
-   * El asistente: el cerebro de casa, el de la nube, o los dos con una puerta entre medias.
-   *
-   * Los cuatro casos son válidos y ninguno rompe lo que había. Una instalación que sólo tenía
-   * `JARVIS_MODEL_API_KEY` sigue funcionando exactamente igual —queda como cerebro de nube, sin
-   * escalada, porque no hay dos sitios entre los que escalar—, y añadir el local no le quita nada:
-   * le pone delante quien piensa gratis.
-   */
-  /**
-   * El contador de gasto.
-   *
-   * Se cablea a los dos escalones porque la pregunta que contesta —«¿cuánto llevo gastado?»— no
-   * distingue: lo que importa es el total, y el desglose por modelo es justo lo que enseña que
-   * escalar cuesta veinticinco veces más.
-   */
-  const spend = new SpendService({
-    db, clock,
-    prices: parseModelPrices(config.modelPrices),
-    budgetUsd: config.modelBudgetUsd,
-    ...(config.modelBudgetSince ? { since: config.modelBudgetSince } : {}),
-    retentionDays: config.modelSpendRetentionDays,
-  });
-
-  /** Apunta el gasto, y con `JARVIS_VERBOSE` cuenta además dónde se fue el tiempo de la vuelta. */
-  const meter = (source: 'local' | 'cloud') => (usage: ModelTurnUsage): void => {
-    spend.record({
-      model: usage.model,
-      source,
-      promptTokens: usage.promptTokens,
-      cachedTokens: usage.cachedTokens,
-      completionTokens: usage.completionTokens,
-    });
-    if (config.verbose) {
-      console.log(`[jarvis] ${source} · ${usage.elapsedMs} ms · prompt ${usage.promptTokens}`
-        + ` (caché ${usage.cachedTokens}) · generados ${usage.completionTokens}`
-        + (usage.effort ? ` · esfuerzo ${usage.effort}` : ''));
-    }
-  };
-
-  const localModel = buildLocalModel(config, meter('local'));
-  const cloudModel = buildCloudModel(config, meter('cloud'));
-  /*
-   * El guionizado también es un cerebro, y el chat necesita uno híbrido.
-   *
-   * Antes sólo alimentaba el motor de planes, así que `npm run dev:local` levantaba el producto
-   * entero y **la pantalla del asistente no funcionaba**: crear una conversación contestaba «no hay
-   * modelo configurado». Levantar la consola completa sin credencial y que justo el asistente
-   * quede fuera es lo contrario de para lo que existe ese arranque.
-   *
-   * Va sin nube a propósito: sin dos sitios entre los que escalar, `canEscalate` es falso y la
-   * interfaz no promete una salida que en desarrollo no existe.
-   */
-  const scripted = config.assistantScripted ? new ScriptedModel() : null;
-  const hybrid = localModel || cloudModel
-    ? new HybridModel({ local: localModel, cloud: cloudModel })
-    : scripted && new HybridModel({ local: scripted, cloud: null });
-  const model = options.model !== undefined ? options.model : (hybrid || scripted);
-
-  /**
-   * Los servidores MCP declarados.
-   *
-   * Sin ninguno, `configured` es falso y el router de capacidades no se le ofrece al modelo: un
-   * asistente que enumera lo que no puede hacer gasta el turno prometiendo.
-   */
-  const mcp = options.mcp ?? new McpService({
-    servers: parseMcpServers({
-      servers: config.mcpServers,
-      tokens: config.mcpTokens,
-      writeServers: config.mcpWriteServers,
-      trustUntagged: config.mcpTrustUntagged,
-      allow: config.mcpAllow,
-      deny: config.mcpDeny,
-    }),
-    clock,
-    audit,
-    ttlMs: config.mcpTtlMs,
-    timeoutMs: config.mcpTimeoutMs,
-    maxOutputChars: config.mcpMaxOutputChars,
-  });
-
   const usage = new UsageService({ db, clock, sshConfig, ttlMs: config.usageTtlMs, probeTimeoutMs: config.usageProbeTimeoutMs });
   const metrics = new MetricsService({ db, clock });
-  /*
-   * La cola durable de turnos.
-   *
-   * Va aquí y no dentro del chat porque el supervisor que la consume necesita el mismo
-   * repositorio, y dos instancias sobre la misma tabla serían dos ideas de qué está en marcha.
-   */
-  const jobs = new JobRepository(db);
-  const health = new HealthService({ db, clock, fleet, index, runs: runRepository, mcp, jobs, version: VERSION });
+  const health = new HealthService({ db, clock, fleet, index, runs: runRepository, version: VERSION });
   /**
    * El barrido de spools le cuenta a Salud cuándo ocurrió.
    *
@@ -347,100 +159,6 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const terminal = new TerminalService({
     sshConfig, clock, audit, capabilities, bastionHost: config.bastionHost, hosts: config.hosts,
   });
-  const plans = new PlanService({
-    db, clock, runs, workspaces, sessions, health, model, audit, attachments, evidence,
-    maxToolCalls: config.assistantMaxToolCalls,
-    // El mismo plazo que el chat, y de la misma variable: dos servicios que crean tarjetas con
-    // caducidades distintas serían dos productos.
-    approvalTtlMs: config.approvalTtlMs,
-    // En un plan el MCP es de sólo lectura: su motor sólo sabe ejecutar runs (ADR-009).
-    mcp,
-    canEscalate: hybrid?.canEscalate === true,
-    starterCapabilities: config.mcpStarter,
-    // Para no estrenar una sesión con un agente que esa máquina no tiene.
-    fleet,
-    /*
-     * Lo que el plan hace se cuenta en la conversación de la que salió.
-     *
-     * El motor avanza por su cuenta y en otro momento que el turno que lo propuso, así que sin esto
-     * pregunta, lanza trabajo y termina **en silencio**: en el hilo `c94zth2lpnktkrqx8` un plan se
-     * quedó esperando una respuesta cuya pregunta nunca se escribió, y la persona acabó diciendo
-     * «autoricé el plan» porque no tenía forma de saber que le tocaba a ella.
-     *
-     * Va como función y no como el servicio entero: el motor de planes no tiene por qué conocer las
-     * conversaciones, sólo tiene que poder contar lo que hace. Y escribir en el hilo lo hace quien
-     * lo posee —`chat.narrate`, que se defiende de la base cerrada y de la conversación que ya no
-     * está—, en vez de un segundo camino de escritura que acabaría divergiendo en el `notify` o en
-     * el orden. `chat` se resuelve al llamarla, no al definirla, así que se puede cablear aquí
-     * aunque se construya debajo.
-     */
-    narrate: (conversationId, text) => chat.narrate(conversationId, text),
-  });
-
-  /**
-   * La conversación.
-   *
-   * Toma el mismo modelo y las mismas herramientas que el plan, y se diferencia en lo que sabe
-   * ejecutar: además de lanzar trabajo, puede ejecutar una capacidad del sistema cuando hay una
-   * aprobación firmada detrás.
-   */
-  const chat = new ChatService({
-    db, clock, runs, workspaces, sessions, health, audit,
-    // El motor de planes, para los workflows. Con él, la conversación puede proponer un plan de
-    // varios pasos; sin él la herramienta no se ofrece y no se promete lo que no hay.
-    plans,
-    hosts: config.hosts, jobs,
-    model: options.model !== undefined
-      ? (options.model instanceof HybridModel ? options.model : null)
-      : hybrid,
-    mcp, attachments, evidence,
-    maxToolCalls: config.chatMaxToolCalls,
-    maxTurnMs: config.chatMaxTurnMs,
-    allowHtmlArtifacts: config.allowHtmlArtifacts,
-    approvalTtlMs: config.approvalTtlMs,
-    directCapabilities: config.chatDirectCapabilities,
-    allowUnrestricted: config.chatAllowUnrestricted,
-    maxTools: config.chatMaxTools,
-    historyMessages: config.chatHistoryMessages,
-    defaultAutonomy: config.chatDefaultAutonomy,
-    starterCapabilities: config.mcpStarter,
-  });
-  /*
-   * Un turno de chat vive en memoria, así que un reinicio deja conversaciones «pensando» que no
-   * vuelven solas. Se cierran al arrancar, diciendo qué pasó: es el equivalente conversacional de
-   * reconciliar un run, sólo que aquí no hay nada que adoptar —el turno no dejó rastro fuera—.
-   */
-  const stuck = chat.reconcile();
-  if (stuck > 0) console.warn(`[jarvis] ${stuck} conversación(es) se quedaron pensando en el arranque anterior`);
-
-  /*
-   * El único consumidor de la cola.
-   *
-   * `reconcile()` acaba de decidir qué trabajos son seguros de rehacer —los que no llegaron a
-   * escribir nada— y los ha dejado listos. Esto es lo que los termina.
-   */
-  const jobSupervisor = new JobSupervisor({
-    jobs,
-    clock,
-    handlers: { 'chat.turn': (job) => chat.resume(job.resourceId) },
-    onError: (error, job) => {
-      console.warn(`[jarvis] el turno de ${job.resourceId} falló: ${error.message}`);
-      /*
-       * Un turno que agota sus intentos tiene que decirlo **en el hilo**.
-       *
-       * Hasta ahora el trabajo pasaba a `failed` y la conversación se quedaba tal cual: el único
-       * sitio de la casa donde constaba que alguien preguntó y nadie contestó era un `/api/health`
-       * que no mira nadie. Medido: dos turnos perdidos en 24 h y ninguna conversación marcada.
-       *
-       * La conversación **no** pasa a `failed`: sigue siendo usable y lo que murió es el turno, no
-       * ella. Lo que hacía falta era que se viera, y un evento en el hilo lo hace por los dos
-       * lados: se lee al abrirla, y deja el último mensaje en `event`, con lo que la lista puede
-       * enseñarlo antes de entrar.
-       */
-      if (job.kind === 'chat.turn') chat.turnGaveUp(job.resourceId, error.message);
-    },
-  });
-  const planSupervisor = new PlanSupervisor({ plans, intervalMs: config.planIntervalMs });
 
   /**
    * La retención de eventos (ADR-007), que a diferencia del barrido de spools no necesita que
@@ -480,7 +198,7 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   };
 
   // Nombrar el workspace es consecuencia de que un trabajo termine, así que se engancha ahí y no
-  // en la ruta: da igual si el run lo lanzó una persona o el Assistant.
+  // en la ruta.
   runs.onRunFinished = (run, prompt) => {
     void titles.nameFromRun(run.workspaceId, { prompt, resultSummary: run.resultSummary })
       .catch(() => undefined);
@@ -489,11 +207,9 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces, cwdResolver,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
-    plans, planSupervisor, jobSupervisor, jobs, retention, imports, titles, metrics, mcp, chat, spend,
+    retention, imports, titles, metrics,
     close() {
       supervisor.stop();
-      planSupervisor.stop();
-      jobSupervisor.stop();
       retention.stop();
       db.close();
     },

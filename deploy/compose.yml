@@ -88,95 +88,10 @@ services:
       JARVIS_ATTACHMENT_ROOT: ${JARVIS_ATTACHMENT_ROOT:-/tmp/jarvis-attachments}
       JARVIS_INTERNAL_SECRET: ${JARVIS_INTERNAL_SECRET:?define JARVIS_INTERNAL_SECRET en .env}
       JARVIS_ALLOW_YOLO: ${JARVIS_ALLOW_YOLO:-false}
-      JARVIS_ALLOW_UNRESTRICTED: ${JARVIS_ALLOW_UNRESTRICTED:-false}
-      JARVIS_APPROVAL_TTL_MS: ${JARVIS_APPROVAL_TTL_MS:-}
-      JARVIS_MODEL_API_KEY: ${JARVIS_MODEL_API_KEY:-}
-      JARVIS_MODEL_NAME: ${JARVIS_MODEL_NAME:-claude-sonnet-5}
-      # Sin estas dos, una credencial de OpenAI acaba hablando con la API de Anthropic: el
-      # Assistant queda configurado y aun así no funciona, que es la peor forma de estar apagado.
-      JARVIS_MODEL_BASE_URL: ${JARVIS_MODEL_BASE_URL:-https://api.anthropic.com}
-      JARVIS_MODEL_PROVIDER: ${JARVIS_MODEL_PROVIDER:-}
       # El modelo que pone nombre a los workspaces. Estaba en el `.env` y no se pasaba al
       # contenedor, así que el core arrancaba sin él y **todos** los títulos salían del heurístico
       # local: de ahí nombres como «/model model». Un ajuste configurado que no llega es peor que
       # uno ausente, porque nadie vuelve a mirarlo.
-      # --- el cerebro de casa y la puerta a la nube (ADR-009) ---------------
-      #
-      # Con `JARVIS_LOCAL_MODEL_BASE_URL` puesto, el asistente piensa en el `llama-server` del
-      # bastión y la nube pasa a ser el sitio al que se escala **con permiso**. Sin él, todo sigue
-      # exactamente como estaba: el modelo de nube es el que piensa.
-      #
-      # La URL es la de la LAN y no `127.0.0.1` por un motivo que cuesta media hora descubrir: el
-      # core vive en un contenedor, y ahí `localhost` es el propio contenedor. El servidor local
-      # escucha en toda la LAN y exige `Authorization: Bearer`, que es lo que evita que abrirlo
-      # más allá de loopback sea abrirlo a cualquiera.
-      JARVIS_ASSISTANT_MODEL_BASE_URL: ${JARVIS_ASSISTANT_MODEL_BASE_URL:-}
-      # Si no se declara una propia, se usa la del modelo de la nube: los dos escalones suelen ser
-      # el mismo proveedor y la misma cuenta, y duplicar un secreto es duplicar dónde se filtra.
-      JARVIS_ASSISTANT_MODEL_API_KEY: ${JARVIS_ASSISTANT_MODEL_API_KEY:-${JARVIS_MODEL_API_KEY:-}}
-      JARVIS_ASSISTANT_MODEL_NAME: ${JARVIS_ASSISTANT_MODEL_NAME:-}
-      # Los dos que tumban la petición entera si van mal con un modelo que razona.
-      JARVIS_ASSISTANT_MODEL_MAX_TOKENS_PARAM: ${JARVIS_ASSISTANT_MODEL_MAX_TOKENS_PARAM:-}
-      JARVIS_ASSISTANT_MODEL_REASONING_EFFORT: ${JARVIS_ASSISTANT_MODEL_REASONING_EFFORT:-}
-      JARVIS_ASSISTANT_MODEL_TEMPERATURE: ${JARVIS_ASSISTANT_MODEL_TEMPERATURE:-}
-      JARVIS_ASSISTANT_MODEL_MAX_OUTPUT_TOKENS: ${JARVIS_ASSISTANT_MODEL_MAX_OUTPUT_TOKENS:-}
-      JARVIS_CHAT_DIRECT_CAPABILITIES: ${JARVIS_CHAT_DIRECT_CAPABILITIES:-true}
-      JARVIS_CHAT_MAX_TOOLS: ${JARVIS_CHAT_MAX_TOOLS:-128}
-      # Lo que cuesta pensar, contado en casa porque el proveedor no da el saldo.
-      JARVIS_MODEL_PRICES: ${JARVIS_MODEL_PRICES:-}
-      JARVIS_MODEL_BUDGET_USD: ${JARVIS_MODEL_BUDGET_USD:-}
-      JARVIS_MODEL_BUDGET_SINCE: ${JARVIS_MODEL_BUDGET_SINCE:-}
-      # Nombres antiguos, cuando esto era un llama-server en el propio bastión.
-      JARVIS_LOCAL_MODEL_BASE_URL: ${JARVIS_LOCAL_MODEL_BASE_URL:-}
-      JARVIS_LOCAL_MODEL_API_KEY: ${JARVIS_LOCAL_MODEL_API_KEY:-}
-      JARVIS_LOCAL_MODEL_NAME: ${JARVIS_LOCAL_MODEL_NAME:-}
-      # Cuánto contexto tiene de verdad. Equivocarse aquí no degrada la respuesta: la impide.
-      JARVIS_LOCAL_MODEL_TIMEOUT_MS: ${JARVIS_LOCAL_MODEL_TIMEOUT_MS:-180000}
-      # A dónde se escala. Por defecto, el modelo de siempre: quien ya lo tenía no toca nada.
-      JARVIS_CLOUD_MODEL_BASE_URL: ${JARVIS_CLOUD_MODEL_BASE_URL:-}
-      JARVIS_CLOUD_MODEL_API_KEY: ${JARVIS_CLOUD_MODEL_API_KEY:-}
-      JARVIS_CLOUD_MODEL_NAME: ${JARVIS_CLOUD_MODEL_NAME:-}
-      JARVIS_CLOUD_MODEL_PROVIDER: ${JARVIS_CLOUD_MODEL_PROVIDER:-}
-      JARVIS_CLOUD_MODEL_MAX_OUTPUT_TOKENS: ${JARVIS_CLOUD_MODEL_MAX_OUTPUT_TOKENS:-}
-      JARVIS_CLOUD_MODEL_MAX_TOKENS_PARAM: ${JARVIS_CLOUD_MODEL_MAX_TOKENS_PARAM:-}
-
-      # --- capacidades MCP que este core consume (ADR-009) ------------------
-      #
-      # Un servidor declarado aquí es de **sólo lectura** salvo que su nombre esté además en
-      # JARVIS_MCP_WRITE_SERVERS. Y hay cuatro herramientas que no se sirven jamás —apagar,
-      # reiniciar e instalar paquetes—, estén o no en la lista de denegación.
-      #
-      # Esas cuatro son las de la **máquina entera**, y conviene no leerlas como «lo destructivo ya
-      # está cubierto»: `stop_service` y `restart_service` **no** están entre ellas. Sobre un
-      # servicio que sostenga a Jarvis —nginx termina su TLS— pararlo tira la consola por la que se
-      # aprueban las tarjetas, y en autonomía sin restricciones eso iría sin tarjeta. Si se amplía
-      # `MCP_SERVICE_ALLOWLIST` en la máquina para poder **mirar** un servicio, la mitad que impide
-      # **tocarlo** va aquí:
-      #
-      #   JARVIS_MCP_DENY=zeus.stop_service,zeus.restart_service
-      #
-      # Y con su límite dicho: eso es una guarda de Jarvis, no del servidor MCP. El modelo sólo
-      # entra por aquí, así que para él vale; cualquier otra cosa que hable con ese MCP tiene como
-      # única barrera la lista de la máquina. No es lo mismo cerrar la puerta que no ofrecer la
-      # llave.
-      JARVIS_MCP_SERVERS: ${JARVIS_MCP_SERVERS:-}
-      JARVIS_MCP_TOKENS: ${JARVIS_MCP_TOKENS:-}
-      JARVIS_MCP_WRITE_SERVERS: ${JARVIS_MCP_WRITE_SERVERS:-}
-      JARVIS_MCP_ALLOW: ${JARVIS_MCP_ALLOW:-}
-      JARVIS_MCP_DENY: ${JARVIS_MCP_DENY:-}
-      JARVIS_MCP_STARTER: ${JARVIS_MCP_STARTER:-}
-      JARVIS_CHAT_DEFAULT_AUTONOMY: ${JARVIS_CHAT_DEFAULT_AUTONOMY:-manual}
-      JARVIS_CHAT_MAX_TOOL_CALLS: ${JARVIS_CHAT_MAX_TOOL_CALLS:-}
-      JARVIS_CHAT_MAX_TURN_MS: ${JARVIS_CHAT_MAX_TURN_MS:-}
-      JARVIS_MCP_MAX_OUTPUT_CHARS: ${JARVIS_MCP_MAX_OUTPUT_CHARS:-}
-      JARVIS_ASSISTANT_MODEL_TOOL_RESULT_CHARS: ${JARVIS_ASSISTANT_MODEL_TOOL_RESULT_CHARS:-}
-      # Dice por cada vuelta cuánto tardó, cuánto prompt pagó y cuánto reutilizó de caché. El
-      # runbook manda encenderlo para diagnosticar el asistente, y hasta hoy la variable **no
-      # llegaba al contenedor**: se prometía un control que no se tenía. Es la cuarta vez que pasa
-      # en este fichero, y por eso las de arriba van también aunque tengan buenos valores por
-      # defecto.
-      JARVIS_VERBOSE: ${JARVIS_VERBOSE:-}
-
       JARVIS_TITLE_API_KEY: ${JARVIS_TITLE_API_KEY:-}
       JARVIS_TITLE_BASE_URL: ${JARVIS_TITLE_BASE_URL:-https://api.groq.com/openai}
       JARVIS_TITLE_MODEL: ${JARVIS_TITLE_MODEL:-llama-3.1-8b-instant}

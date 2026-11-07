@@ -102,9 +102,6 @@ start('core', [join(root, 'apps/core/dist/main.js')], {
   JARVIS_ATTACHMENT_ROOT: join(state, 'attachments'),
   JARVIS_INDEX_URL: 'http://127.0.0.1:8098',
   JARVIS_POLL_INTERVAL_MS: '300',
-  JARVIS_PLAN_INTERVAL_MS: '600',
-  // Un modelo determinista: la prueba comprueba durabilidad, no la calidad de un modelo.
-  JARVIS_ASSISTANT_SCRIPTED: 'true',
 });
 start('gateway', [join(root, 'apps/gateway/dist/src/main.js')], {
   ...shared,

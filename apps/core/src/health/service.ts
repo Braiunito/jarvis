@@ -12,8 +12,6 @@ import type { Clock } from '../platform/clock.js';
 import type { FleetService } from '../fleet/service.js';
 import type { SessionIndex } from '../sessions/index-client.js';
 import type { RunRepository } from '../runs/repository.js';
-import type { McpService } from '../mcp/service.js';
-import type { JobRepository } from '../platform/jobs.js';
 
 export interface HealthServiceDeps {
   db: Db;
@@ -21,15 +19,8 @@ export interface HealthServiceDeps {
   fleet: FleetService;
   index: SessionIndex;
   runs: RunRepository;
-  /** Las capacidades MCP, si las hay. Opcional: sin servidores no hay salto que comprobar. */
-  mcp?: McpService;
-  /** La cola de turnos, si esta casa la tiene. Sin ella no hay nada que vigilar aquí. */
-  jobs?: JobRepository;
   version: string;
 }
-
-/** Cuánto hacia atrás mira el aviso de turnos sin contestar. Un día: lo que aún es accionable. */
-const JOBS_ALERT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** Cuándo arrancó este proceso: es lo que convierte «uptime» en un dato y no en una sensación. */
 const STARTED_AT = new Date();
@@ -74,31 +65,6 @@ export class HealthService {
       ? { status: 'ok', lastOkAt: index.lastOkAt }
       : { status: index.lastOkAt ? 'stale' : 'failed', code: 'INDEX_UNAVAILABLE', message: index.error ?? undefined, lastOkAt: index.lastOkAt };
 
-    /*
-     * Los servidores MCP, uno por salto.
-     *
-     * Un catálogo que no se puede pedir deja al asistente sin capacidades, y eso hoy se notaría
-     * como «el asistente contesta peor» en vez de como una avería. Aquí se ve por lo que es. Que
-     * uno esté caído no invalida al resto ni a nada más: es exactamente el mismo criterio que con
-     * los hosts.
-     */
-    if (this.#deps.mcp?.configured) {
-      for (const server of await this.#deps.mcp.states()) {
-        checks[`mcp:${server.name}`] = server.status === 'ok'
-          ? {
-            status: 'ok',
-            ...(server.lastOkAt ? { lastOkAt: server.lastOkAt } : {}),
-            detail: { tools: server.toolCount, writes: server.writesAllowed, server: server.serverInfo },
-          }
-          : {
-            status: server.status === 'stale' ? 'stale' : 'failed',
-            code: 'UPSTREAM_UNAVAILABLE',
-            ...(server.lastError ? { message: server.lastError } : {}),
-            ...(server.lastOkAt ? { lastOkAt: server.lastOkAt } : {}),
-          };
-      }
-    }
-
     if (probeHosts) {
       for (const host of await this.#deps.fleet.list()) {
         checks[`ssh:${host.host}`] = host.reachable
@@ -116,31 +82,6 @@ export class HealthService {
     checks['runs'] = stuck.length
       ? { status: 'degraded', code: 'CANCEL_UNCONFIRMED', message: `${stuck.length} run(s) waiting for cancellation to be confirmed`, detail: { runIds: stuck.map((run) => run.id) } }
       : { status: 'ok', detail: { active: this.#deps.runs.countActive() } };
-
-    /*
-     * La cola de turnos.
-     *
-     * Lo que se vigila es lo **fallido**, no lo pendiente: unos cuantos esperando es una casa
-     * ocupada, pero uno que agotó sus intentos es una pregunta que alguien hizo y nadie contestó,
-     * y sin esto no se enteraría nadie. El pendiente va en el detalle para poder distinguir «hay
-     * cola» de «hay atasco».
-     */
-    if (this.#deps.jobs) {
-      const counts = this.#deps.jobs.counts();
-      /*
-       * Lo que se vigila son los fallos **recientes**, no el histórico.
-       *
-       * Contando el total, un despliegue que pierde dos turnos deja la casa en `degraded` para
-       * siempre: nadie puede contestar ya esas preguntas, así que el aviso no lleva a ninguna
-       * acción y se aprende a ignorarlo. Con ventana, avisa mientras se puede hacer algo y se
-       * calla después. El total sigue en el detalle, que es donde se mira el historial.
-       */
-      const desde = new Date(this.#deps.clock.nowMs() - JOBS_ALERT_WINDOW_MS).toISOString();
-      const recientes = this.#deps.jobs.failedSince(desde);
-      checks['chatJobs'] = recientes
-        ? { status: 'degraded', code: 'JOBS_FAILED', message: `${recientes} turno(s) quedaron sin contestar en las últimas 24 h`, detail: { ...counts, recientes } }
-        : { status: 'ok', detail: { ...counts } };
-    }
 
     checks['runnerSweep'] = { status: this.#lastSweepAt ? 'ok' : 'unknown', lastAt: this.#lastSweepAt };
     checks['eventRetention'] = {

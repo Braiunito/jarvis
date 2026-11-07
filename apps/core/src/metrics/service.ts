@@ -51,7 +51,6 @@ export interface MetricsSnapshot {
     stale: boolean;
   }>;
   workspaces: { total: number; openedInWindow: number };
-  plans: { active: number; waitingApproval: number };
   /** Terminales vivas, para el aviso de la navegación. Es lo último conocido, no una sonda. */
   terminals: { open: number; byHost: Array<{ host: string; open: number }>; at: string | null; stale: boolean };
 }
@@ -141,10 +140,6 @@ export class MetricsService {
         openedInWindow: count('SELECT COUNT(*) AS n FROM workspaces WHERE last_opened_at >= ?', from),
       },
       terminals: this.terminals?.() ?? { open: 0, byHost: [], at: null, stale: true },
-      plans: {
-        active: count("SELECT COUNT(*) AS n FROM plans WHERE status NOT IN ('completed','failed','cancelled')"),
-        waitingApproval: count("SELECT COUNT(*) AS n FROM approvals WHERE status = 'pending'"),
-      },
     };
   }
 

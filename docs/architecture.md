@@ -12,9 +12,8 @@ Ninguna finge ser otra. Esa es la mitad del diseño.
 | Run | `runId` + snapshot del destino | el core y el host de ejecución | hasta estado terminal + retención |
 | Terminal | host + nombre tmux | el host remoto | hasta que alguien la destruye |
 
-El Assistant **no** es una sexta variante de sesión: es un coordinador que crea runs y
-aprobaciones por los mismos casos de uso que el trabajo directo. La terminal tampoco es un chat:
-es un TTY con su propia entrada.
+La terminal no es un chat: es un TTY con su propia entrada. (Hubo además un Assistant que
+coordinaba runs y aprobaciones; se quitó el 2026-11-07 y sus tablas quedan en la base sin uso.)
 
 La **conversación** (ADR-009) tampoco es un plan, y por eso tiene su propia tabla. Un plan es una
 lista de pasos con checkpoint que puede pasarse cuatro horas esperando a que termine un run; una
@@ -40,7 +39,7 @@ workspace: preguntar por el servidor no exige haber abierto antes una sesión de
 | cuota de la cuenta | core | snapshot con TTL | sí |
 
 No son durables: un `Map` de Node, un `EventEmitter`, una conexión SSE, el estado de React, un
-proceso SSH padre ni una respuesta abierta del Assistant.
+proceso SSH padre.
 
 ## El límite de privilegio
 
@@ -72,81 +71,6 @@ GET /events/runs/:id            → SSE: replay exacto desde `Last-Event-ID`
 Las dos cosas que no se pueden confundir: `remote_cursor_bytes` es **cómo lee el core**; `seq` es
 **identidad pública** del evento. La primera puede cambiar de implementación; la segunda no se
 reutiliza jamás.
-
-## Dónde piensa el asistente
-
-Desde ADR-009 hay dos escalones y una puerta entre ellos. El primero contesta siempre y es barato;
-al segundo se le consulta, y sólo si alguien abre la puerta.
-
-```
-turno ─► primer escalón ─┬─► decide algo                    → el core lo persiste
-                         └─► «esto se me escapa» (escalate) → aprobación → firma → un turno arriba
-```
-
-No es «uno barato que reintenta con uno caro»: eso gastaría lo mismo sin que nadie se entere. El
-primero se queda corto, **lo dice y espera**. Tampoco sale solo cuando se cae: un modelo que no
-responde no es permiso para gastar en el caro. Y el permiso vale para un turno, no para el plan.
-
-Los dos escalones son hoy `gpt-5-nano` y `gpt-5`, y la diferencia es de veinticinco veces el
-precio. Durante un día el primero fue un `llama-server` en el propio bastión; la enmienda de
-ADR-009 cuenta por qué se retiró y, sobre todo, que cambiarlo fueron cinco variables de entorno.
-Los nombres `local` y `cloud` que quedan en el código significan **qué escalón**, no dónde vive.
-
-**El catálogo de capacidades se ofrece de dos formas**, y la elige el core solo. Si cabe bajo el
-tope de funciones por petición —128 en la API de OpenAI—, cada capacidad va como herramienta
-propia: el modelo la llama por su nombre y **no puede inventarse uno**, porque la API sólo acepta
-los declarados. Si no cabe, se vuelve al router: tres herramientas para navegar áreas, buscar y
-ejecutar. El segundo modo nació para un modelo al que el catálogo no le cabía en el contexto, y se
-queda porque el catálogo sigue creciendo.
-
-## Un turno del Assistant
-
-El Assistant coordina; el estado lo posee el core. Un turno es corto y siempre acaba en algo que
-se puede guardar:
-
-```
-contexto (resúmenes + referencias)
-  → el modelo consulta lo que le falte      search_sessions · get_session_context · get_health
-                                            list_runs · get_run · cancel_run
-                                            list_capabilities · search_capabilities · use_capability
-  → o deja algo pulsable                    open_workspace · open_terminal_offer
-  → decide una acción del core              create_run · request_approval · ask_human · finish
-                                            request_capability · escalate
-  → el core persiste el checkpoint y el turno termina
-```
-
-Una consulta que se repite con los mismos argumentos **no se ejecuta ni gasta presupuesto**: se le
-devuelve lo que ya contestó, y esa vuelta no deja fila en el hilo porque no se consultó nada. Se
-cuenta aparte (`toolbox.repeats`), que es lo único que distingue arreglar un bucle de esconderlo.
-No se memoriza lo que salió mal ni lo que salió viejo (`stale`): un índice caído se reintenta.
-
-Las herramientas llaman a los **mismos casos de uso que REST**, nunca a la API HTTP ni a una copia
-de la lógica, y van atadas al plan: no alcanzan el trabajo de otro workspace ni actúan como otra
-persona. Lo que devuelven va acotado y dice que va acotado; un modelo al que se le recorta la
-evidencia en silencio concluye sobre lo que no vio.
-
-Tres frenos, y ninguno vive en el prompt:
-
-- el presupuesto de consultas por turno lo aplica el toolbox, porque un modelo puede llamar a una
-  herramienta que no se le ofreció;
-- `finish` cita los trabajos por id y la interfaz enlaza a la evidencia: la síntesis no copia
-  buffers;
-- ofrecer una terminal deja un dato en el plan; abrirla es un gesto de la persona.
-
-La frontera de qué puede hacer el asistente por su cuenta no es «leer contra escribir»: es si el
-gesto tiene efecto **fuera de Jarvis**. Abrir un workspace lo hace él —es una fila que dice «me
-interesa esta sesión», no entra en ninguna máquina y abrirlo dos veces devuelve el mismo—; abrir
-una terminal levanta una tmux en un servidor, así que se ofrece y la abre una persona.
-
-Lo que un turno deja pulsable viaja en el mensaje como **referencias** (`ChatRef`): el workspace
-que abrió, la terminal que ofrece, la sesión que leyó, el trabajo que lanzó. La interfaz las pinta
-como botones, y el turno siguiente las lee de vuelta para poder decir «esa sesión» sin volver a
-buscarla.
-
-Lo que espera —un run de horas, una aprobación, una respuesta humana— no se espera dentro del
-turno: se persiste como paso y el despertador vuelve cuando hay motivo. Por eso un plan sobrevive
-a un reinicio del core sin repetir el efecto: la clave de idempotencia es del paso, no de la
-ejecución.
 
 ## Estrategia A y B
 

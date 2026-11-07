@@ -4,53 +4,39 @@ Qué promete la interfaz y con qué reglas está hecha. No es una guía de uso �
 sino el sitio donde viven las decisiones que se tomaron una vez y no conviene volver a discutir
 desde cero, con el porqué de cada una.
 
-## El orden es el de los flujos, no el de las entidades
-
-El carril lateral no lista secciones por lo que son sino por el orden en que se trabaja:
+## Cuatro destinos, y Sesiones es la portada
 
 | | |
 |---|---|
-| **Inicio** | retomar: qué hay abierto, qué corre y qué pide algo de ti |
-| **Asistente** | preguntar: a la casa, a las máquinas, o por dónde seguir |
-| **Sesiones** | encontrar la conversación que existe en alguna máquina |
+| **Sesiones** | retomar: las conversaciones de las máquinas, agrupadas por carpeta |
 | **Trabajo** | vigilar lo que se mandó y cómo acabó |
 | **Terminal** | intervenir a mano |
-| **Salud** | diagnosticar cuando algo va raro |
+| **Salud** | diagnosticar cuando algo va raro; también la cuota y los datos del sistema |
 
-Buscar es una consulta, no una navegación: filtrar en Sesiones no cambia el workspace activo.
-Abrir una sesión es lo único que cambia de contexto, y es atómico.
+Hubo una portada de cifras y una sección de Asistente. Se quitaron el 2026-11-07: la portada
+repetía lo que ya dicen estas cuatro pantallas, y el asistente se usaba poco para lo que pesaba.
 
-## El Asistente enseña su trabajo
+## Menos a la vista, un clic más
 
-Va segundo en el carril, justo después de Inicio, porque es por donde se empieza a preguntar
-cuando no se sabe todavía qué se está buscando. Antes esto vivía dentro de un workspace y sólo
-servía si ya habías elegido una sesión, que es pedirle el contexto a quien viene a preguntar
-precisamente por eso.
+La regla del rediseño compacto: se enseña lo mínimo para reconocer algo y el resto está a un clic.
 
-Tres decisiones que gobiernan la pantalla:
-
-**Cada consulta se ve, con su nombre real.** Cuando el asistente mira la memoria del servidor, en
-el hilo aparece `zeus.memory_pressure` y se puede desplegar para ver qué devolvió. Un asistente
-que consulta seis cosas y contesta una frase sin enseñar de dónde sale es indistinguible de uno
-que se lo inventa. Va plegado porque el hilo lo lee una persona y un volcado de JSON entre dos
-frases lo rompe.
-
-**De dónde salió cada respuesta, en la burbuja.** «Casa» o «nube», con forma propia y no sólo
-color. Es la pregunta que alguien se hace sobre una respuesta concreta —¿esto ha costado dinero?—
-y no sobre la conversación entera, así que va en cada una y no en una leyenda.
-
-**Cuánta cuerda tiene, donde se está usando.** El selector Manual/Automático está en la cabecera
-del hilo y no enterrado en unos ajustes: es la decisión que más cambia lo que va a pasar a
-continuación. En manual, hasta lanzar un trabajo en modo seguro pasa por una tarjeta. Lo que
-`auto` **no** suelta nunca —tocar una máquina, escribir, parar trabajo humano, salir a la nube—
-no se puede apagar desde aquí, porque eso separa «que trabaje solo» de «que decida solo».
-
-Las tarjetas de permiso van dentro del hilo, con el nombre exacto de la capacidad y sus argumentos
-sin recortar. Entre lo que se lee y lo que se ejecuta no cabe un cambio: el digest lo garantiza.
+- **Sesiones se agrupan por dónde se ejecutaron**, con el nombre corto de la carpeta —`jarvis`, no
+  `/var/www/jarvis`—. Se agrupa por el nombre y no por la ruta: `jarvis` en zeus y en goro1 es el
+  mismo proyecto para quien mira. La ruta completa aparece al abrir el grupo y al pulsar la sesión.
+  Grupos y sesiones van por lo último que se movió. El grupo abierto vive en la URL (`?g=`).
+- **Una sesión es un hilo de turnos plegados.** Un turno es lo que pediste y lo que hizo el agente
+  hasta contestar; plegado se lee en dos líneas —lo que pediste, lo último que contestó— y el
+  último viene abierto. Desplegado es el turno entero, con el proceso en tarjetas compactas que
+  también se despliegan.
+- **Transcript y trabajos van en el mismo hilo**, sin repetirse: un trabajo lanzado desde Jarvis
+  también acaba en el transcript de la máquina, y cuando un turno es el de un trabajo gana el
+  trabajo, que dice lo mismo y además trae el proceso (`ui/turns.ts`).
+- **Lo que se consulta de vez en cuando va plegado**: los detalles de una sesión, lo que va bien en
+  Salud, el «dónde y cómo» de un trabajo.
 
 ## Sesión y trabajo no son lo mismo
 
-Es la confusión más frecuente y por eso está explicada dentro de la propia pantalla de Trabajo.
+Es la confusión más frecuente.
 
 Una **sesión** vive en la máquina: la crea el agente —Claude, Codex, OpenCode— la primera vez que
 alguien le habla, sigue existiendo aunque Jarvis esté apagado, y se puede continuar desde la
@@ -84,8 +70,9 @@ rango de horas. Lo distinto no se junta nunca, aunque llegue seguido: dos respue
 que el agente dijo, y fundirlas escondería información.
 
 **Dónde contestó la IA se ve sin buscarlo.** La respuesta del agente pesa más que el resto —tipografía
-de lectura, banda violeta, aire— y la línea de tiempo permite aislar sólo las respuestas. Es el
-único sitio con ese realce: si todo destaca, no destaca nada.
+de lectura, banda violeta— y se lee entera, con su markdown. El resultado con el que Claude cierra
+un turno repite su último mensaje; cuando es idéntico se queda en su línea —«terminado · 3 turnos»—
+y el texto se lee una vez.
 
 **Un estado se distingue por forma, no sólo por color.** Todos los distintivos llevan icono además
 de color, para que «terminado» y «falló» se diferencien sin ver bien el verde y el rojo.
@@ -108,13 +95,13 @@ con un cartel.
 **Lo que no se ha comprobado no se afirma.** Un host sin sondear no se marca «sin tmux»; un
 contador que aún no se ha calculado no se pinta como cero; una carpeta deducida se marca «deducida».
 
-**`aria-live` anuncia transiciones, no tokens.** Se anuncia que el trabajo terminó o que un plan
-pide permiso; jamás el texto que el agente va escribiendo, que se leería palabra a palabra.
+**`aria-live` anuncia transiciones, no tokens.** Se anuncia que el trabajo terminó; jamás el texto
+que el agente va escribiendo, que se leería palabra a palabra.
 
 ## Accesibilidad
 
-Comprobada con axe (WCAG 2.1 AA) en las seis pantallas y las cuatro pestañas del workspace, en los
-dos temas y en escritorio y teléfono: [`tests/e2e/a11y.spec.ts`](../tests/e2e/a11y.spec.ts).
+Comprobada con axe (WCAG 2.1 AA) en las cuatro pantallas, con un grupo abierto y con un hilo
+plegado, desplegado y con sus detalles, en los dos temas y en escritorio y teléfono: [`tests/e2e/a11y.spec.ts`](../tests/e2e/a11y.spec.ts).
 
 - «Saltar al contenido» es el primer paso del tabulador;
 - el foco se ve siempre, con una sola regla y no una por componente;
@@ -140,19 +127,21 @@ dice nada a nadie. El identificador queda debajo, que es donde hace falta al cit
 ## Dónde está cada cosa
 
 ```
-apps/web/src/app.tsx          el armazón: carril, cabecera, barra de estado, anuncios
+apps/web/src/app.tsx          el armazón: carril, cabecera, anuncios
 apps/web/src/screens/         una pantalla por destino del carril, más el workspace
 apps/web/src/ui/              piezas compartidas
   bits.tsx                    vacíos, cargas y errores, con sus tres reglas
-  primitives.tsx              tarjeta, métrica, pestañas, segmentado, confirmación
+  primitives.tsx              tarjeta, segmentado, confirmación
   event-log.tsx               la línea de tiempo de un trabajo y el detalle en crudo
+  turns.ts                    el hilo de una sesión en turnos: transcript y trabajos, sin repetir
+  markdown.tsx                las respuestas del agente con formato, sin HTML crudo
   icons.tsx                   un icono por concepto, en un solo sitio
   labels.ts                   el vocabulario del producto, en un solo sitio
-  charts.tsx                  gráficos a mano; el porqué de no traer una librería
+  charts.tsx                  el medidor de la cuota
   new-session.tsx             estrenar una sesión desde cero
   announce.tsx               la única región `aria-live` de la aplicación
 apps/web/src/api/queries.ts   TanStack Query: los datos del servidor, sin store global
-apps/web/src/api/chat-stream.ts  el hilo del asistente en directo, con el mismo contrato SSE
+apps/web/src/api/run-stream.ts   los eventos de un trabajo en directo, por SSE
 ```
 
 Las librerías de interfaz que entran y las que se descartaron, con su coste en bundle, están en
