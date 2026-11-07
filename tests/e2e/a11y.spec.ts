@@ -95,7 +95,7 @@ for (const screen of [
   },
   { name: 'Trabajo', go: (page: Page) => nav(page, /^Trabajo/).click() },
   { name: 'Terminal', go: (page: Page) => nav(page, 'Terminal').click() },
-  { name: 'Salud', go: (page: Page) => nav(page, /^Salud/).click() },
+  { name: 'Salud', go: (page: Page) => page.locator('.topbar').getByRole('link', { name: /^Salud/ }).click() },
 ]) {
   test(`${screen.name} no tiene fallos de accesibilidad`, async ({ page }) => {
     await login(page);
@@ -189,6 +189,17 @@ test('recorrer la portada con el tabulador enseña siempre dónde estás', async
   expect(sinAnillo).toEqual([]);
 });
 
+test('en el teléfono, Sesiones va en el centro de la barra, entre Trabajo y Terminal', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'movil', 'sólo aplica al proyecto con pantalla de teléfono');
+  await login(page);
+  const x = async (name: string | RegExp) => (await nav(page, name).boundingBox())?.x ?? Number.NaN;
+  const [trabajo, sesiones, terminal] = [await x(/^Trabajo/), await x('Sesiones'), await x('Terminal')];
+  expect(trabajo).toBeLessThan(sesiones);
+  expect(sesiones).toBeLessThan(terminal);
+  // Y es la portada: se entra ahí.
+  await expect(nav(page, 'Sesiones')).toHaveAttribute('aria-current', 'page');
+});
+
 test('en un dedo, los objetivos táctiles miden 44 px', async ({ page, isMobile }, testInfo) => {
   test.skip(testInfo.project.name !== 'movil', 'sólo aplica al proyecto con pantalla de teléfono');
   void isMobile;
@@ -200,7 +211,7 @@ test('en un dedo, los objetivos táctiles miden 44 px', async ({ page, isMobile 
 
     const small = await page.evaluate(() => {
       const targets = [...document.querySelectorAll<HTMLElement>(
-        '.rail a, .btn, .tabs button, .topbar-search, .select, .input',
+        '.rail a, .btn, .tabs button, .topbar-search, .select, .input, .health-shield',
       )].filter((element) => element.offsetParent !== null);
       return targets
         .map((element) => ({

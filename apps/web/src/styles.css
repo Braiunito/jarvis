@@ -195,10 +195,10 @@ a:hover { text-decoration: underline; }
 
 .shell.collapsed { --rail: 68px; }
 
-/* El carril: identidad, destinos y estado de la conexión. Siempre a la vista. */
+/* El carril: identidad y destinos. El estado vive arriba, en el escudo. Siempre a la vista. */
 .rail {
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-rows: auto 1fr auto;
   gap: 12px;
   padding: 14px 10px;
   background: var(--bg-rail);
@@ -283,16 +283,6 @@ a:hover { text-decoration: underline; }
 .nav a .count.attention { background: var(--danger); }
 .nav a .count.warn { background: var(--warn); color: #1a1300; }
 
-.rail-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 6px 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
 .rail-collapse {
   display: flex;
   align-items: center;
@@ -309,7 +299,6 @@ a:hover { text-decoration: underline; }
 
 .shell.collapsed .rail-brand span,
 .shell.collapsed .nav a span:not(.count),
-.shell.collapsed .rail-status,
 .shell.collapsed .rail-collapse span { display: none; }
 .shell.collapsed .nav a { justify-content: center; padding: 0; }
 .shell.collapsed .nav a .count { position: absolute; top: 4px; right: 6px; margin: 0; }
@@ -384,6 +373,17 @@ a:hover { text-decoration: underline; }
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
+
+/*
+ * El escudo, que es la puerta a Salud. Con todo en orden sólo el icono va en verde: una palabra
+ * verde fija es una etiqueta que se deja de leer al segundo día. El color entero es para avisar.
+ */
+.health-shield { cursor: pointer; }
+.health-shield:hover { text-decoration: none; border-color: var(--border-strong); }
+.health-shield.ok { color: var(--text-muted); border-color: var(--border); }
+.health-shield.ok svg { color: var(--ok); }
+.health-shield[aria-current="page"] { background: var(--bg-elevated); border-color: var(--border-strong); }
+.health-shield.ok[aria-current="page"], .health-shield.neutral[aria-current="page"] { color: var(--text-strong); }
 
 .avatar {
   display: grid;
@@ -848,9 +848,8 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
 .event-head > .badge { flex: 0 0 auto; }
 .event-headline { font-weight: 600; color: var(--text-strong); font-size: 13px; min-width: 0; flex: 0 1 auto; }
 
-/* El crudo, a un clic y en la esquina: se ve sin estorbar. */
-.event-more {
-  margin-left: auto;
+/* El crudo y el copiar, a un clic y en la esquina: se ven sin estorbar. */
+.event-more, .copy-btn {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
@@ -863,12 +862,23 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
   cursor: pointer;
   opacity: 0.6;
 }
-.event-more:hover, .event-more:focus-visible { opacity: 1; background: var(--bg-elevated); color: var(--text); }
+.event-more:hover, .event-more:focus-visible,
+.copy-btn:hover, .copy-btn:focus-visible { opacity: 1; background: var(--bg-elevated); color: var(--text); }
+.copy-btn.copied { opacity: 1; color: var(--ok); }
+.event-more, .event-copy { margin-left: auto; }
+.event-copy + .event-more { margin-left: 0; }
 .event-body.md-body { white-space: normal; }
 .event-card { position: relative; }
-/* Una respuesta sin distintivo: el botón del crudo flota en la esquina y no gasta una fila. */
-.event-head.bare { position: absolute; top: 6px; right: 6px; }
-.event-head.bare + .event-body { padding-right: 24px; }
+/*
+ * Una respuesta sin distintivo: sus botones flotan en la esquina y no gastan una fila.
+ *
+ * Flotan de verdad (`float`), no encima (`absolute`): el texto les deja sitio sólo en su primera
+ * línea y el resto va a todo el ancho. Apilados se salían por debajo de una respuesta de una línea,
+ * y con un margen fijo a la derecha la respuesta entera perdía el ancho de dos botones.
+ */
+.event-card:has(> .event-head.bare) { display: block; }
+.event-head.bare { float: right; flex-wrap: nowrap; gap: 0; margin: -5px -7px 0 10px; }
+.event-head.bare > * { margin-left: 0; }
 .timeline-head .turn-tools { margin-right: auto; }
 .timeline-mode { flex: 0 0 auto; }
 .event-body {
@@ -1068,6 +1078,8 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
 }
 .message.assistant .body { font-size: 14px; line-height: 1.68; color: var(--text-strong); white-space: normal; }
 .message.assistant .who { color: var(--running); font-weight: 600; }
+/* El copiar de cada respuesta, al final de su línea de autor: no le añade alto. */
+.message-copy { margin: -5px -4px -5px auto; }
 
 /* Una línea de CLI: pesa lo que tiene que pesar, que es poco. */
 .cli-line {
@@ -1455,6 +1467,11 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
 
   .topbar-search { min-height: var(--touch); }
   .rail-collapse { min-height: var(--touch); }
+  /* El escudo es la única puerta a Salud: con el dedo tiene que acertarse a la primera. */
+  .health-shield { min-height: var(--touch); min-width: var(--touch); justify-content: center; }
+  /* Los de la esquina crecen un poco: siguen sin gastar una fila, pero se aciertan con el dedo. */
+  .event-more, .copy-btn { width: 32px; height: 32px; }
+  .turn.has-copy .turn-answer { padding-right: 32px; }
 }
 
 /* --------------------------------------------------------------------- móvil */
@@ -1463,8 +1480,8 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
   .shell { grid-template-columns: minmax(0, 1fr); }
 
   /*
-   * En un teléfono el carril baja y se queda en iconos con su palabra: cinco destinos no caben
-   * en el lateral, y una tira con scroll horizontal hace que se pulse el de al lado.
+   * En un teléfono el carril baja y se queda en iconos con su palabra: en el lateral no caben, y
+   * una tira con scroll horizontal hace que se pulse el de al lado.
    */
   .rail {
     position: fixed;
@@ -1476,8 +1493,14 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
     border-top: 1px solid var(--border);
     z-index: 40;
   }
-  .rail-brand, .rail-status, .rail-collapse { display: none; }
+  .rail-brand, .rail-collapse { display: none; }
   .nav { grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; }
+  /*
+   * Sesiones, en el centro: es la portada y el destino de casi todo, y el centro es donde cae el
+   * pulgar. Trabajo y Terminal a sus lados. Sólo cambia el orden visual: el del documento sigue
+   * siendo el del escritorio, que es el que lee un lector de pantalla.
+   */
+  .nav .nav-runs { order: -1; }
   .nav a {
     flex-direction: column;
     justify-content: center;
@@ -1902,12 +1925,16 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
  * en pantalla, veinte bordes de colores son ruido.
  */
 .turn {
+  position: relative;
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-card);
 }
 .turn.open { border-color: var(--border-strong); }
+/* Copiar la última respuesta sin abrir el turno: abajo a la derecha, junto a lo que copia. */
+.turn-copy { position: absolute; right: 8px; bottom: 7px; }
+.turn.has-copy .turn-answer { padding-right: 26px; }
 .turn-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

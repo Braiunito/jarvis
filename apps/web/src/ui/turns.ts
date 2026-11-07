@@ -92,6 +92,22 @@ function matches(turn: Extract<Turn, { kind: 'transcript' }>, run: Run): boolean
 const runAnswer = (run: Run): string | null =>
   run.resultSummary ?? run.errorMessage ?? (run.errorCode ? `Error ${run.errorCode}` : null);
 
+/** El core guarda de la respuesta de un trabajo los primeros 4000 caracteres: `apps/core/src/runs/service.ts`. */
+export const RESULT_SUMMARY_MAX = 4000;
+
+/**
+ * La respuesta del turno, sólo si está entera: es lo que copia la tarjeta plegada.
+ *
+ * La de un trabajo es su `resultSummary`, que llega cortado cuando la respuesta era larga. Copiar
+ * media respuesta sin avisar es peor que no ofrecerlo: en ese caso se copia desde dentro del
+ * turno, donde está el texto completo del evento.
+ */
+export function fullAnswer(turn: Turn): string | null {
+  if (!turn.answer?.trim()) return null;
+  if (turn.kind === 'run' && turn.answer.length >= RESULT_SUMMARY_MAX) return null;
+  return turn.answer;
+}
+
 /**
  * Los turnos de una sesión, del más antiguo al más reciente.
  *

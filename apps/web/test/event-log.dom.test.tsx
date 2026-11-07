@@ -8,7 +8,7 @@
 import { StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunEvent } from '@jarvis/contracts';
 import { EventTimeline } from '../src/ui/event-log.jsx';
 
@@ -75,5 +75,36 @@ describe('la respuesta del agente', () => {
     expect(enlace?.getAttribute('href')).toBe('https://example.com/pr/1');
     expect(enlace?.closest('button')).toBeNull();
     expect(host.querySelector('strong')?.textContent).toBe('fin');
+  });
+});
+
+describe('copiar una respuesta', () => {
+  it('cada respuesta lleva su botón y copia el Markdown tal cual, no el texto pintado', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('isSecureContext', true);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+
+    const texto = 'Cambia `pool.max` a **40** y reinicia.';
+    render(<EventTimeline events={[
+      event('agent.started', { model: 'claude-opus-5' }),
+      event('agent.text', { text: texto }),
+      event('agent.result', { ok: true, text: texto, turns: 2 }),
+    ]} />);
+
+    // Uno solo: el resultado que repite el último mensaje no trae un segundo botón.
+    const botones = host.querySelectorAll<HTMLButtonElement>('button[aria-label="Copiar la respuesta"]');
+    expect(botones).toHaveLength(1);
+    await act(async () => { botones[0]!.click(); });
+    expect(writeText).toHaveBeenCalledWith(texto);
+    expect(botones[0]!.getAttribute('title')).toBe('Copiado');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('los pasos de la máquina no se ofrecen para copiar: para eso está el crudo', () => {
+    render(<EventTimeline events={[
+      event('tool.started', { name: 'Bash', input: { command: 'ls' } }),
+    ]} />);
+    expect(host.querySelector('button[aria-label="Copiar la respuesta"]')).toBeNull();
   });
 });

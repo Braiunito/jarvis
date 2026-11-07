@@ -16,7 +16,7 @@ import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { JsonView } from 'react-json-view-lite';
 import type { PermissionProfile, RunEvent } from '@jarvis/contracts';
-import { Empty } from './bits.jsx';
+import { CopyButton, Empty, useCopy } from './bits.jsx';
 import { Markdown } from './markdown.jsx';
 import { EVENT_KIND, PERMISSION, RUN_STATUS } from './labels.js';
 import { ACTION_ICON, Glyph, RUN_STATUS_ICON, STATUS_ICON, type LucideIcon } from './icons.jsx';
@@ -243,7 +243,7 @@ export const JSON_STYLES = {
 };
 
 function EventDetail({ event, onClose }: { event: RunEvent; onClose: () => void }): JSX.Element {
-  const [copied, setCopied] = useState(false);
+  const [copied, copy] = useCopy();
   const visual = visualOf(event.type);
   const data = event.payload as object;
 
@@ -260,12 +260,7 @@ function EventDetail({ event, onClose }: { event: RunEvent; onClose: () => void 
             <Dialog.Title className="modal-title mono">#{event.seq}</Dialog.Title>
             <span className="tiny faint modal-date">{new Date(event.at).toLocaleString()}</span>
             <div className="after">
-              <button type="button" className="btn small" onClick={() => {
-                void navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => {
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 2000);
-                });
-              }}>
+              <button type="button" className="btn small" onClick={() => copy(JSON.stringify(data, null, 2))}>
                 <Glyph icon={copied ? ACTION_ICON.approve : ACTION_ICON.copy} />
                 {copied ? 'Copiado' : 'Copiar JSON'}
               </button>
@@ -336,6 +331,8 @@ function EventCard({ event, onOpen, repeats = 1, quiet = false }: {
             ×{repeats}
           </span>
         ) : null}
+        {/* Lo que contestó el agente se copia de un clic; el resto, desde el crudo. */}
+        {answer && body ? <CopyButton text={body} className="event-copy" /> : null}
         <button type="button" className="event-more" onClick={onOpen}
           title={`Ver el evento #${event.seq} tal y como llegó`} aria-label={`Ver el evento #${event.seq} en crudo`}>
           <Glyph icon={ACTION_ICON.expandJson} size={13} />

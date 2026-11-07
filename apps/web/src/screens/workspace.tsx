@@ -25,7 +25,7 @@ import {
 } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import { terminalHref } from '../api/links.js';
-import { Empty, ErrorNote, Link, Loading, RunStatusBadge, TargetChip, relativeTime } from '../ui/bits.jsx';
+import { CopyButton, Empty, ErrorNote, Link, Loading, RunStatusBadge, TargetChip, relativeTime } from '../ui/bits.jsx';
 import { useAnnounceOnChange } from '../ui/announce.jsx';
 import { Boundary } from '../ui/boundary.jsx';
 import { Composer } from '../ui/composer.jsx';
@@ -39,7 +39,7 @@ import { openNewSession } from '../ui/new-session.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
 import { UsageBadge } from '../ui/usage.jsx';
 import { DataRow, Segmented, formatDuration, type SegmentOption } from '../ui/primitives.jsx';
-import { buildTurns, oneLine, type Turn } from '../ui/turns.js';
+import { buildTurns, fullAnswer, oneLine, type Turn } from '../ui/turns.js';
 import { folderName } from './explorer.jsx';
 
 const PROFILES: Array<SegmentOption<PermissionProfile>> = (['safe', 'auto', 'yolo'] as const).map((value) => ({
@@ -382,9 +382,11 @@ function TurnCard({ turn, open, onToggle }: { turn: Turn; open: boolean; onToggl
     : '(continúa de antes)';
   const answer = turn.answer ? oneLine(turn.answer, 260) : null;
   const live = turn.kind === 'run' && isRunLive(turn.run.status);
+  // Plegado se copia la última respuesta sin abrir nada; desplegado, cada respuesta tiene el suyo.
+  const copyable = !open && !live ? fullAnswer(turn) : null;
 
   return (
-    <article id={`turn-${turn.key}`} className={`turn ${open ? 'open' : ''} ${turn.kind}`}>
+    <article id={`turn-${turn.key}`} className={`turn ${open ? 'open' : ''} ${copyable ? 'has-copy' : ''} ${turn.kind}`}>
       <button type="button" className="turn-head" aria-expanded={open} onClick={onToggle}>
         <span className="turn-prompt">
           <span className="turn-you" aria-hidden="true">Tú</span>
@@ -401,6 +403,8 @@ function TurnCard({ turn, open, onToggle }: { turn: Turn; open: boolean; onToggl
           </span>
         ) : null}
       </button>
+      {/* Fuera del botón del turno: un botón dentro de otro no es HTML válido ni se puede pulsar. */}
+      {copyable ? <CopyButton text={copyable} label="Copiar la última respuesta" className="turn-copy" /> : null}
 
       {open ? (
         <div className="turn-body">
@@ -486,6 +490,7 @@ function TranscriptTurnBody({ messages, prompt }: { messages: TranscriptMessage[
               {message.at ? (
                 <span className="faint" title={new Date(message.at).toLocaleString()}>{relativeTime(message.at)}</span>
               ) : null}
+              {message.role === 'assistant' ? <CopyButton text={message.text} className="message-copy" /> : null}
             </div>
             <div className="body">
               {message.role === 'assistant' ? <Markdown source={message.text} /> : message.text}

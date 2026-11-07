@@ -4,17 +4,27 @@ Qué promete la interfaz y con qué reglas está hecha. No es una guía de uso �
 sino el sitio donde viven las decisiones que se tomaron una vez y no conviene volver a discutir
 desde cero, con el porqué de cada una.
 
-## Cuatro destinos, y Sesiones es la portada
+## Tres destinos, Sesiones es la portada, y Salud es el escudo
 
 | | |
 |---|---|
 | **Sesiones** | retomar: las conversaciones de las máquinas, agrupadas por carpeta |
 | **Trabajo** | vigilar lo que se mandó y cómo acabó |
 | **Terminal** | intervenir a mano |
-| **Salud** | diagnosticar cuando algo va raro; también la cuota y los datos del sistema |
+| **Salud** (el escudo de arriba) | diagnosticar cuando algo va raro; también la cuota y los datos del sistema |
 
 Hubo una portada de cifras y una sección de Asistente. Se quitaron el 2026-11-07: la portada
-repetía lo que ya dicen estas cuatro pantallas, y el asistente se usaba poco para lo que pesaba.
+repetía lo que ya dicen estas pantallas, y el asistente se usaba poco para lo que pesaba.
+
+**Salud no está en el carril: se entra por el escudo de la cabecera**, y es la única entrada (ni
+carril ni paleta; sólo un error de conexión enlaza a ella, porque es justo donde se diagnostica).
+El escudo dice el estado de todo sin abrir nada: verde y callado con todo en orden; tachado si se
+entra sin autenticación o por HTTP; con exclamación si algo falla. Antes eso estaba repartido en
+tres sitios —el destino del carril, un chip de conexión insegura y un «Conectado» al pie del
+carril— para una sola pregunta: ¿va todo bien?
+
+En el teléfono el carril baja a una barra con **Sesiones en el centro**, entre Trabajo y Terminal:
+es la portada y lo que más se toca, y el centro es donde cae el pulgar.
 
 ## Menos a la vista, un clic más
 
@@ -33,6 +43,10 @@ La regla del rediseño compacto: se enseña lo mínimo para reconocer algo y el 
   trabajo, que dice lo mismo y además trae el proceso (`ui/turns.ts`).
 - **Lo que se consulta de vez en cuando va plegado**: los detalles de una sesión, lo que va bien en
   Salud, el «dónde y cómo» de un trabajo.
+- **Cada respuesta del agente se copia de un clic**, con el Markdown tal cual: en su esquina dentro
+  del hilo, y en la tarjeta plegada la última, sin abrirla. Si el core sólo guardó el principio de
+  una respuesta larga (4000 caracteres), la tarjeta plegada no lo ofrece: se copia desde dentro,
+  donde está entera.
 
 ## Sesión y trabajo no son lo mismo
 

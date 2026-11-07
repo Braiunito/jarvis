@@ -12,8 +12,78 @@ import type { JSX, ReactNode } from 'react';
 import { useState } from 'react';
 import type { HostFreshness, RunStatus, TargetPlan } from '@jarvis/contracts';
 import { navigate } from '../router.js';
+import { announce } from './announce.jsx';
 import { PERMISSION, RUN_STATUS } from './labels.js';
 import { ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, RUN_STATUS_ICON } from './icons.jsx';
+
+/**
+ * Copia texto al portapapeles y dice si lo consiguió.
+ *
+ * `navigator.clipboard` sólo existe en un contexto seguro: por HTTP sin cifrar —que es justo el
+ * modo en que se entra cuando algo va mal— no está, y el botón fallaba sin decir nada. Entonces
+ * se copia a la antigua, con un `textarea` fuera de la vista; es lo que hacen los navegadores con
+ * Ctrl+C y sigue funcionando en todos.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Sin permiso o sin foco: se prueba el otro camino antes de rendirse.
+    }
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.append(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch {
+    ok = false;
+  }
+  area.remove();
+  return ok;
+}
+
+/** `[copiado, copiar]`: el «copiado» dura lo justo para verlo y vuelve solo. */
+export function useCopy(ms = 2000): [boolean, (text: string) => void] {
+  const [copied, setCopied] = useState(false);
+  const copy = (text: string): void => {
+    void copyText(text).then((ok) => {
+      announce(ok ? 'Copiado' : 'No se pudo copiar');
+      if (!ok) return;
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), ms);
+    });
+  };
+  return [copied, copy];
+}
+
+/**
+ * El botoncito de copiar de una respuesta.
+ *
+ * Sólo icono, porque va en la esquina de cada respuesta y diez palabras «Copiar» en un hilo son
+ * ruido; el nombre está en `aria-label` y en el `title`. Copia el Markdown tal cual: pegado en otro
+ * sitio se vuelve a formatear, y pegado en un editor de texto se lee igual.
+ */
+export function CopyButton({ text, label = 'Copiar la respuesta', className = '' }: {
+  text: string;
+  label?: string;
+  className?: string;
+}): JSX.Element {
+  const [copied, copy] = useCopy();
+  return (
+    <button type="button" className={`copy-btn ${copied ? 'copied' : ''} ${className}`}
+      onClick={() => copy(text)} title={copied ? 'Copiado' : label} aria-label={label}>
+      <Glyph icon={copied ? ACTION_ICON.approve : ACTION_ICON.copy} size={13} />
+    </button>
+  );
+}
 
 export function RunStatusBadge({ status }: { status: RunStatus }): JSX.Element {
   const label = RUN_STATUS[status];
@@ -85,7 +155,7 @@ export function ErrorNote({ error, action, onRetry }: {
   action?: ReactNode;
   onRetry?: () => void;
 }): JSX.Element | null {
-  const [copied, setCopied] = useState(false);
+  const [copied, copyReport] = useCopy(2500);
   if (!error) return null;
   const typed = error as { code?: string; message?: string; requestId?: string; retryable?: boolean };
   const code = typed.code ?? 'ERROR';
@@ -99,10 +169,7 @@ export function ErrorNote({ error, action, onRetry }: {
       requestId: typed.requestId ?? null,
       where: window.location.pathname,
     }, null, 2);
-    void navigator.clipboard.writeText(report).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2500);
-    });
+    copyReport(report);
   };
 
   return (

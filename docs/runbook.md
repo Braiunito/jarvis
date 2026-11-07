@@ -37,7 +37,7 @@ bin/jarvis ps               # estado y salud de cada servicio
 curl -s localhost:8080/healthz
 ```
 
-En la interfaz, **Salud** enseña el estado por salto: base, índice, cada host, los runs que están
+En la interfaz, **Salud** —el escudo de la cabecera— enseña el estado por salto: base, índice, cada host, los runs que están
 esperando confirmación de cancelación y los dos barridos —`runnerSweep`, que limpia spools en las
 máquinas, y `eventRetention`, que compacta el historial en la base—. Que un host esté caído deja
 ese check en rojo y todo lo demás en pie: la aplicación no se declara «offline» por un servidor.

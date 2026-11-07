@@ -45,7 +45,7 @@ test('capturas', async ({ page }, testInfo) => {
   await page.waitForTimeout(1200);
   await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-trabajo.png` });
 
-  await nav(page, /^Salud/).click();
+  await page.locator('.topbar').getByRole('link', { name: /^Salud/ }).click();
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-salud.png`, fullPage: false });
 });

@@ -1,9 +1,10 @@
 /**
  * El armazón.
  *
- * Cuatro destinos y nada más: Sesiones —que es la portada, porque casi siempre se viene a
- * retomar algo—, Trabajo, Terminal y Salud. Arriba, dónde estoy y el buscador. En un teléfono el
- * carril baja y se queda en iconos.
+ * Tres destinos en el carril: Sesiones —que es la portada, porque casi siempre se viene a
+ * retomar algo—, Trabajo y Terminal. Arriba, dónde estoy, el buscador y el escudo, que es el
+ * estado de todo y la única puerta a Salud. En un teléfono el carril baja, se queda en iconos y
+ * Sesiones pasa al centro, entre Trabajo y Terminal.
  *
  * Lo que había además —una portada de tarjetas, el asistente, la barra de estado de abajo— se
  * quitó: duplicaba lo que ya dicen estas cuatro pantallas y obligaba a leer más para lo mismo.
@@ -20,7 +21,7 @@ import { Announcer } from './ui/announce.jsx';
 import { Link } from './ui/bits.jsx';
 import { CommandPalette, openCommandPalette } from './ui/command-palette.jsx';
 import { NewSessionDialog } from './ui/new-session.jsx';
-import { ACTION_ICON, Glyph, NAV_ICON } from './ui/icons.jsx';
+import { ACTION_ICON, Glyph, NAV_ICON, SHIELD_ICON } from './ui/icons.jsx';
 import { PageMetaProvider, usePageMetaValue } from './ui/page-meta.jsx';
 import { LoginScreen } from './screens/login.jsx';
 import { EnrollScreen } from './screens/enroll.jsx';
@@ -65,15 +66,13 @@ const queryClient = new QueryClient({
 
 const RAIL_KEY = 'jarvis.rail.collapsed';
 
-function Rail({ working, attention, insecure, terminals }: {
+function Rail({ working, attention, terminals }: {
   working: number;
   attention: number;
-  insecure: boolean;
   /** Terminales abiertas, o null si todavía no se ha contado ninguna vez. */
   terminals: number | null;
 }): JSX.Element {
   const route = useRoute();
-  const health = useHealth();
   const [collapsed, setCollapsed] = useState(() => window.localStorage.getItem(RAIL_KEY) === '1');
 
   useEffect(() => {
@@ -85,9 +84,6 @@ function Rail({ working, attention, insecure, terminals }: {
   const sessionsActive = route.path === '/' || route.path.startsWith('/sessions') || route.path.startsWith('/w/');
   const current = (path: string): 'page' | undefined =>
     (path === '/' ? sessionsActive : route.path.startsWith(path)) ? 'page' : undefined;
-
-  const status = health.data?.status ?? 'unknown';
-  const tone = status === 'ok' ? 'ok' : status === 'degraded' ? 'warn' : status === 'failed' ? 'danger' : 'neutral';
 
   return (
     <aside className="rail">
@@ -101,7 +97,7 @@ function Rail({ working, attention, insecure, terminals }: {
           <Glyph icon={NAV_ICON.sessions} size={17} />
           <span>Sesiones</span>
         </Link>
-        <Link to="/runs" aria-current={current('/runs')}>
+        <Link to="/runs" className="nav-runs" aria-current={current('/runs')}>
           <Glyph icon={NAV_ICON.runs} size={17} />
           <span>Trabajo</span>
           {attention > 0 ? (
@@ -121,22 +117,7 @@ function Rail({ working, attention, insecure, terminals }: {
             <span className="count" title={`${terminals} sesión(es) de terminal abiertas`}>{terminals}</span>
           ) : null}
         </Link>
-        <Link to="/health" aria-current={current('/health')}>
-          <Glyph icon={NAV_ICON.health} size={17} />
-          <span>Salud</span>
-          {insecure ? <span className="count attention" title="La conexión no está cifrada">!</span> : null}
-          {!insecure && tone !== 'ok' && tone !== 'neutral' ? (
-            <span className={`count ${tone === 'danger' ? 'attention' : 'warn'}`} title="Algo no va bien">!</span>
-          ) : null}
-        </Link>
       </nav>
-
-      <div className="rail-status">
-        <span className={`dot-status ${tone}`} aria-hidden="true" />
-        <span className="truncate">
-          {status === 'ok' ? 'Conectado' : status === 'unknown' ? 'Conectando…' : 'Con incidencias'}
-        </span>
-      </div>
 
       <button type="button" className="rail-collapse" onClick={() => setCollapsed((value) => !value)}
         title={collapsed ? 'Ampliar el menú' : 'Colapsar el menú'}
@@ -145,6 +126,63 @@ function Rail({ working, attention, insecure, terminals }: {
         <span>Colapsar</span>
       </button>
     </aside>
+  );
+}
+
+/**
+ * El escudo: el estado de todo y la única puerta a Salud.
+ *
+ * Antes Salud tenía su sitio en el carril y además había aquí un chip cuando la conexión no era
+ * segura, y abajo un «Conectado»: tres sitios para una sola pregunta, «¿va todo bien?». Ahora es
+ * uno, y siempre en el mismo sitio.
+ *
+ * Con todo en orden es un escudo verde con la palabra en gris, que no pide que lo mires. Cuando
+ * algo falla cambian la forma, el color y la palabra, y la palabra dice lo más grave: entrar sin
+ * autenticación pesa más que un host caído, y un fallo más que ir por HTTP. Lo demás se cuenta en
+ * el `title`, para no hacer un chip de tres líneas.
+ *
+ * Sin autenticación es más grave que sin cifrar: sin cifrar, alguien que ya está en la red puede
+ * leer lo que pasa; sin autenticación, cualquiera que llegue **es** tú.
+ */
+function HealthShield({ me }: { me: Me }): JSX.Element {
+  const route = useRoute();
+  const health = useHealth();
+  const status = health.data?.status ?? null;
+  const unreachable = !health.data && health.isError;
+
+  const problems: string[] = [];
+  if (me.testNoAuth) problems.push('Modo de pruebas: no se pide autenticación. Cualquiera que llegue a esta red entra como tú, y detrás está la clave de la flota.');
+  if (unreachable) problems.push('El core no responde a la comprobación de salud.');
+  if (status === 'failed') problems.push('Alguna comprobación ha fallado.');
+  if (me.insecureLogin) problems.push('La entrada por contraseña sobre HTTP sigue abierta: todo viaja en claro.');
+  if (status === 'degraded') problems.push('Alguna comprobación va con problemas.');
+
+  const [tone, icon, word] = me.testNoAuth
+    ? ['danger', SHIELD_ICON.insecure, 'Sin autenticación'] as const
+    : unreachable
+      ? ['danger', SHIELD_ICON.danger, 'Sin respuesta'] as const
+      : status === 'failed'
+        ? ['danger', SHIELD_ICON.danger, 'Con fallos'] as const
+        : me.insecureLogin
+          ? ['warn', SHIELD_ICON.insecure, 'HTTP sin cifrar'] as const
+          : status === 'degraded'
+            ? ['warn', SHIELD_ICON.warn, 'Con avisos'] as const
+            : status === 'ok'
+              ? ['ok', SHIELD_ICON.ok, 'Salud'] as const
+              : ['neutral', SHIELD_ICON.neutral, 'Salud'] as const;
+
+  const summary = problems.length > 0
+    ? problems.join(' ')
+    : status === 'ok' ? 'Todo en orden.' : 'Comprobando…';
+
+  return (
+    <Link to="/health" className={`chip health-shield ${tone}`}
+      aria-current={route.path.startsWith('/health') ? 'page' : undefined}
+      aria-label={word === 'Salud' ? `Salud: ${summary}` : `Salud: ${word}`}
+      title={`${summary} Abre Salud.`}>
+      <Glyph icon={icon} />
+      <span className="chip-text">{word}</span>
+    </Link>
   );
 }
 
@@ -188,7 +226,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
 
   return (
     <div className="shell">
-      {/* Lo primero del orden de tabulación: cuatro destinos antes del contenido son nueve saltos. */}
+      {/* Lo primero del orden de tabulación: el carril y la cabecera antes del contenido son muchos saltos. */}
       <a className="skip-link" href="#contenido"
         onClick={(event) => {
           event.preventDefault();
@@ -198,9 +236,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
         }}>
         Saltar al contenido
       </a>
-      <Rail working={working} attention={attention}
-        insecure={Boolean(me.insecureLogin) || Boolean(me.testNoAuth)}
-        terminals={openTerminals} />
+      <Rail working={working} attention={attention} terminals={openTerminals} />
 
       <div className="workarea">
         <header className="topbar">
@@ -223,28 +259,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
           </button>
 
           <div className="topbar-right">
-            {/*
-              * Sólo se dice algo cuando hay algo que decir.
-              *
-              * Sin autenticación es más grave que sin cifrar: sin cifrar, alguien que ya está en
-              * la red puede leer lo que pasa; sin autenticación, cualquiera que llegue **es** tú.
-              * Por eso va en rojo y lo dice con esas palabras. Con todo en orden no se pinta nada:
-              * un «conexión segura» fijo es una etiqueta que se deja de leer al segundo día.
-              */}
-            {me.testNoAuth ? (
-              <Link to="/health" className="chip danger"
-                title="Modo de pruebas: no se pide autenticación. Cualquiera que llegue a esta red
-                  entra como tú, y detrás está la clave de la flota.">
-                <Glyph icon={ACTION_ICON.insecure} />
-                <span className="chip-text">Sin autenticación</span>
-              </Link>
-            ) : me.insecureLogin ? (
-              <Link to="/health" className="chip warn"
-                title="La entrada por contraseña sobre HTTP sigue abierta: todo viaja en claro">
-                <Glyph icon={ACTION_ICON.insecure} />
-                <span className="chip-text">HTTP sin cifrar</span>
-              </Link>
-            ) : null}
+            <HealthShield me={me} />
             <span className="avatar" title={me.user.displayName} aria-hidden="true">
               {me.user.displayName.slice(0, 1).toUpperCase()}
             </span>

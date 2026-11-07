@@ -20,10 +20,11 @@ import {
   Activity, Ban, Boxes, Cable, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
   ChevronsDown, Check, CircleCheck,
   CircleHelp, CircleSlash, CircleStop, CircleX, Clock, Copy, CornerDownLeft, Database,
-  Download, ExternalLink, Eye, Filter, FolderOpen, Gauge, Hexagon, HeartPulse, History,
+  Download, ExternalLink, Eye, Filter, FolderOpen, Gauge, Hexagon, History,
   Hourglass, Inbox, ListChecks, LoaderCircle, LogOut, Maximize2, MessageSquare,
   Minimize2, Paperclip, Pencil,
-  Plus, RotateCcw, Search, SendHorizontal, Server, Settings2, ShieldCheck, ShieldOff, Sparkles,
+  Plus, RotateCcw, Search, SendHorizontal, Server, Settings2, Shield, ShieldAlert, ShieldCheck,
+  ShieldOff, Sparkles,
   SlidersHorizontal, SquareTerminal, Timer, TimerOff, TriangleAlert, Wrench, X, Zap, Braces,
   Code, Folder, Folders, Info, type LucideIcon,
 } from 'lucide-react';
@@ -87,8 +88,22 @@ export const NAV_ICON = {
   sessions: Folders,
   runs: ListChecks,
   terminal: SquareTerminal,
-  health: HeartPulse,
+  health: Shield,
   settings: Settings2,
+} as const;
+
+/**
+ * El escudo de arriba, que es la puerta a Salud.
+ *
+ * Cambia de forma además de color: con el escudo tachado o con la exclamación se sabe que algo
+ * pasa sin distinguir el verde del ámbar.
+ */
+export const SHIELD_ICON = {
+  ok: ShieldCheck,
+  warn: ShieldAlert,
+  danger: ShieldAlert,
+  insecure: ShieldOff,
+  neutral: Shield,
 } as const;
 
 /** Cada agente con su forma: en una lista de sesiones se distinguen sin leer el nombre. */

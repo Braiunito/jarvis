@@ -32,6 +32,14 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
   —un despliegue no borra historia— pero nada las lee ni las escribe, y las variables
   `JARVIS_MODEL_*`, `JARVIS_ASSISTANT_*`, `JARVIS_MCP_*` y `JARVIS_CHAT_*` que queden en un `.env`
   ya no hacen nada. El titulador de workspaces se queda: es de las sesiones, no del asistente.
+- **Salud se abre desde el escudo de la cabecera**, y sólo desde ahí: sale del carril y de la
+  paleta. El escudo es también el estado de todo —verde y callado si va bien, tachado sin
+  autenticación o por HTTP, con exclamación si algo falla— y sustituye al chip de conexión insegura
+  y al «Conectado» del pie del carril.
+- **En el teléfono, Sesiones va en el centro** de la barra, entre Trabajo y Terminal.
+- **Cada respuesta del agente tiene su botón de copiar**, que copia el Markdown tal cual: en la
+  esquina de cada respuesta dentro del hilo, y en la tarjeta plegada para la última, sin abrirla.
+  Copiar funciona también por HTTP sin cifrar, donde el portapapeles moderno no existe.
 
 ### Añadido
 

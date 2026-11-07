@@ -171,11 +171,6 @@ export function CommandPalette(): JSX.Element | null {
                   <Glyph icon={NAV_ICON.runs} />Trabajo en curso
                 </span>
               </Command.Item>
-              <Command.Item value="salud diagnostico" onSelect={() => go('/health')}>
-                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
-                  <Glyph icon={NAV_ICON.health} />Salud y diagnóstico
-                </span>
-              </Command.Item>
             </Command.Group>
           </Command.List>
         </Command>

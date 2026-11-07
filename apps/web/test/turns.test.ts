@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Run, TranscriptMessage } from '@jarvis/contracts';
-import { buildTurns, oneLine, transcriptTurns } from '../src/ui/turns.js';
+import { buildTurns, fullAnswer, oneLine, RESULT_SUMMARY_MAX, transcriptTurns } from '../src/ui/turns.js';
 
 const msg = (role: TranscriptMessage['role'], text: string, at: string | null, kind: TranscriptMessage['kind'] = 'text'): TranscriptMessage => ({
   role, text, at, kind, label: kind === 'text' ? null : text, provenance: 'remote-transcript',
@@ -94,6 +94,31 @@ describe('buildTurns', () => {
       status: 'failed', resultSummary: null, errorMessage: 'host caído',
     })]);
     expect(turns[0]?.answer).toBe('host caído');
+  });
+});
+
+describe('fullAnswer · lo que copia la tarjeta plegada', () => {
+  it('la respuesta del transcript se copia entera, con su Markdown', () => {
+    const turns = buildTurns([
+      msg('user', 'qué pasa', '2026-11-01T09:00:00Z'),
+      msg('assistant', '**El pool** se agota', '2026-11-01T09:00:10Z'),
+    ], []);
+    expect(fullAnswer(turns[0]!)).toBe('**El pool** se agota');
+  });
+
+  it('la de un trabajo cortada por el core no se ofrece: media respuesta no es la respuesta', () => {
+    const cortada = 'x'.repeat(RESULT_SUMMARY_MAX);
+    const turns = buildTurns([], [
+      run('r5', 'larga', '2026-11-01T12:00:00Z', { resultSummary: cortada }),
+      run('r6', 'corta', '2026-11-01T13:00:00Z', { resultSummary: 'hecho' }),
+    ]);
+    expect(fullAnswer(turns[0]!)).toBeNull();
+    expect(fullAnswer(turns[1]!)).toBe('hecho');
+  });
+
+  it('sin respuesta no hay nada que copiar', () => {
+    const turns = buildTurns([], [run('r7', 'x', '2026-11-01T12:00:00Z', { status: 'running', resultSummary: null })]);
+    expect(fullAnswer(turns[0]!)).toBeNull();
   });
 });
 

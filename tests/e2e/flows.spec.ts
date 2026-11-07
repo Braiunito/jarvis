@@ -19,6 +19,9 @@ const PASSWORD = 'e2e-password-de-pruebas';
 const nav = (page: Page, name: string | RegExp) =>
   page.locator('.rail').getByRole('link', { name });
 
+/** El escudo de arriba: la única puerta a Salud. */
+const shield = (page: Page) => page.locator('.topbar').getByRole('link', { name: /^Salud/ });
+
 async function login(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByLabel('Usuario').fill('braian');
@@ -89,8 +92,18 @@ test('flujo 1 · retomar trabajo: carpeta, sesión y abrir', async ({ page }) =>
   await expect(primero).toContainText('La API devuelve 502');
   await expect(primero).toContainText('el pool llega a 20 conexiones');
   await expect(primero.locator('.turn-head')).toHaveAttribute('aria-expanded', 'false');
+
+  // La última respuesta se copia sin abrir el turno, y entera: el Markdown tal cual.
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await primero.getByRole('button', { name: 'Copiar la última respuesta' }).click();
+  await expect(primero.getByRole('button', { name: 'Copiar la última respuesta' })).toHaveAttribute('title', 'Copiado');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('el pool llega a 20 conexiones');
+
   await primero.locator('.turn-head').click();
   await expect(primero.locator('.message.assistant')).toContainText('el pool llega a 20 conexiones');
+  // Abierto, cada respuesta lleva el suyo, y el de la tarjeta plegada se va.
+  await expect(primero.locator('.message.assistant').getByRole('button', { name: 'Copiar la respuesta' })).toBeVisible();
+  await expect(primero.getByRole('button', { name: 'Copiar la última respuesta' })).toHaveCount(0);
 
   // La miga vuelve al grupo abierto, no a la portada en frío.
   await page.locator('.crumb').getByRole('link', { name: 'Sesiones' }).click();
@@ -115,6 +128,8 @@ test('flujo 2 · trabajo directo: destino visible antes de enviar, y resultado e
   await expect(turno.locator('.turn-head')).toContainText('revisa el pool');
   await expect(turno.getByText('Terminado').first()).toBeVisible({ timeout: 60_000 });
   await expect(turno.getByText('resultado').first()).toBeVisible();
+  // Las respuestas del trabajo se copian igual que las del transcript.
+  await expect(turno.getByRole('button', { name: 'Copiar la respuesta' }).first()).toBeVisible();
 
   /*
    * Lo repetido se agrupa; lo distinto no.
@@ -143,7 +158,12 @@ test('flujo 3 · el borrador sobrevive a navegar y volver', async ({ page }) => 
 });
 
 test('flujo 4 · diagnóstico: qué salto está roto y cómo se copia', async ({ page }) => {
-  await nav(page, /^Salud/).click();
+  // Salud no está en el carril: se entra por el escudo, que ya avisa de que algo va mal.
+  await expect(nav(page, /Salud/)).toHaveCount(0);
+  await expect(shield(page)).toHaveClass(/danger|warn/);
+  await shield(page).click();
+  await expect(page).toHaveURL(/\/health/);
+  await expect(shield(page)).toHaveAttribute('aria-current', 'page');
 
   // Un host caído deja su check en rojo, a la vista, y el resto de la aplicación en pie.
   await expect(page.getByText('ssh:deadhost')).toBeVisible();
@@ -159,7 +179,7 @@ test('flujo 4 · diagnóstico: qué salto está roto y cómo se copia', async ({
 });
 
 test('el asistente ya no está: ni en el carril ni en su ruta', async ({ page }) => {
-  await expect(page.locator('.rail').getByRole('link')).toHaveCount(4);
+  await expect(page.locator('.rail').getByRole('link')).toHaveCount(3);
   await expect(nav(page, /Asistente/)).toHaveCount(0);
   // Un enlace viejo a /assistant cae en la portada, no en una pantalla en blanco.
   await page.goto('/assistant');
@@ -179,9 +199,9 @@ test('la paleta lleva a un contexto sin pasar por tres pantallas', async ({ page
 
   // Y también lleva a una sección, escribiendo lo que uno recuerda.
   await page.keyboard.press('ControlOrMeta+k');
-  await page.getByPlaceholder('Ir a una sesión').fill('salud');
+  await page.getByPlaceholder('Ir a una sesión').fill('trabajo');
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/health/);
+  await expect(page).toHaveURL(/\/runs/);
 });
 
 test('la terminal se abre, adjunta y no se cierra al salir', async ({ page }) => {

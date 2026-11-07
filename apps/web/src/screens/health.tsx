@@ -11,7 +11,7 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import { useHealth, useHosts, useMetrics } from '../api/queries.js';
-import { ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
+import { ErrorNote, Loading, relativeTime, useCopy } from '../ui/bits.jsx';
 import { Meter } from '../ui/charts.jsx';
 import { checkName, HEALTH, USAGE_LOW_PERCENT, usageWindowName } from '../ui/labels.js';
 import { ACTION_ICON, Glyph, HEALTH_ICON, NAV_ICON, PROVIDER_ICON } from '../ui/icons.jsx';
@@ -31,7 +31,7 @@ export function HealthScreen(): JSX.Element {
   // Aquí sí interesa el estado real de cada máquina, aunque cueste una conexión por host.
   const hosts = useHosts({ probe: true });
   const metrics = useMetrics(24);
-  const [copied, setCopied] = useState(false);
+  const [copied, copy] = useCopy(2500);
   const [showAllChecks, setShowAllChecks] = useState(false);
 
   const checks = Object.entries(health.data?.checks ?? {});
@@ -57,10 +57,7 @@ export function HealthScreen(): JSX.Element {
         error: host.error ?? null,
       })),
     };
-    void navigator.clipboard.writeText(JSON.stringify(report, null, 2)).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2500);
-    });
+    copy(JSON.stringify(report, null, 2));
   }
 
   return (
