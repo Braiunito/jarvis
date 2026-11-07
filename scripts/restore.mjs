@@ -107,7 +107,8 @@ const counts = {
   workspaces: db.prepare('SELECT COUNT(*) AS n FROM workspaces').get().n,
   runs: db.prepare('SELECT COUNT(*) AS n FROM runs').get().n,
   events: db.prepare('SELECT COUNT(*) AS n FROM run_events').get().n,
-  plans: db.prepare('SELECT COUNT(*) AS n FROM plans').get().n,
+  // Sin `plans`: la migración 19 se la llevó. Contar sólo lo que existe en todos los esquemas deja
+  // que este script restaure igual una copia de antes (la vuelta atrás) que una de después.
 };
 const schema = db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version;
 db.close();

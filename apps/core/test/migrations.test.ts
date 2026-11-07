@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Database as Db } from 'better-sqlite3';
-import { openDatabase } from '../src/platform/db.js';
+import { migrate, openDatabase } from '../src/platform/db.js';
 import { MIGRATIONS } from '../src/platform/migrations.js';
 
 const NOW = '2026-09-06T12:00:00.000Z';
@@ -111,6 +111,49 @@ describe('MIGRACIÓN 18 · relajar `plans.workspace_id` no borra el historial', 
       "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '\\_%' ESCAPE '\\'",
     ).all();
     expect(sobrantes).toEqual([]);
+    db.close();
+  });
+});
+
+describe('MIGRACIÓN 19 · sin el asistente, sin sus tablas', () => {
+  const DEL_ASISTENTE = [
+    'chat_artifacts', 'chat_messages', 'model_spend', 'approvals', 'plan_steps', 'plans',
+    'conversations', 'jobs', 'leases',
+  ];
+  const tablas = (db: Db): string[] =>
+    (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>)
+      .map((row) => row.name);
+
+  it('se lleva las del asistente con datos dentro, y lo demás queda entero y bien atado', () => {
+    const db = hasta(18);
+    sembrar(db);
+    db.prepare(`INSERT INTO conversations (id, title, created_by, workspace_id, created_at, updated_at)
+      VALUES ('c1', 'una charla', 'braian', 'w1', ?, ?)`).run(NOW, NOW);
+    db.prepare(`INSERT INTO chat_messages (id, conversation_id, seq, role, text, created_at)
+      VALUES ('m1', 'c1', 0, 'user', 'hola', ?)`).run(NOW);
+    db.prepare(`INSERT INTO runs
+      (id, workspace_id, created_by, provider, session_id, prompt, work_host, execution_host, strategy, cwd,
+       permission_profile, attempt, status, created_at)
+      VALUES ('r1', 'w1', 'braian', 'claude', 'sid-1', 'mira el pool', 'bastion', 'bastion', 'B', '/srv/app',
+       'safe', 1, 'completed', ?)`)
+      .run(NOW);
+
+    aplicar(db, 19);
+
+    const quedan = tablas(db);
+    for (const tabla of DEL_ASISTENTE) expect(quedan, tabla).not.toContain(tabla);
+    expect(cuantos(db, 'workspaces')).toBe(1);
+    expect(cuantos(db, 'runs')).toBe(1);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    db.close();
+  });
+
+  it('el runner la aplica sobre una base vacía y en orden, como en un despliegue', () => {
+    const db = openDatabase({ path: ':memory:' });
+    const { version } = migrate(db);
+    expect(version).toBe(19);
+    for (const tabla of DEL_ASISTENTE) expect(tablas(db), tabla).not.toContain(tabla);
+    expect(tablas(db)).toEqual(expect.arrayContaining(['workspaces', 'runs', 'run_events', 'attachments', 'drafts']));
     db.close();
   });
 });

@@ -6,7 +6,8 @@
  * resolver en tiempo de ejecución. El contenido sigue siendo SQL explícito, sin ORM ni DSL.
  *
  * Reglas: una migración aplicada no se edita nunca (el checksum lo impide) y no hay migraciones
- * destructivas mientras la ventana de rollback siga abierta.
+ * destructivas mientras la ventana de rollback siga abierta. La v19 es la excepción, decidida por
+ * el dueño el 2026-11-07: ver su comentario.
  */
 export interface Migration {
   version: number;
@@ -665,6 +666,34 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_plans_status ON plans (status, updated_at DESC);
       CREATE INDEX idx_plans_conversation ON plans (conversation_id)
         WHERE conversation_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 19,
+    name: 'without_assistant',
+    sql: `
+      -- El asistente se fue del core (2026-11-07) y con él todo lo que escribía aquí: las
+      -- conversaciones y sus mensajes y artifacts, los planes con sus pasos y aprobaciones, el
+      -- gasto del modelo y la cola de turnos (\`jobs\`, con su \`leases\`, que nunca se llegó a usar).
+      -- Ningún código las lee ni las escribe ya.
+      --
+      -- **Es destructiva a propósito**, y lo decidió el dueño: guardar tablas que nadie va a leer
+      -- es guardar historia que nadie sabe que está ahí. La vuelta atrás es la copia que hace
+      -- \`bin/jarvis backup\` antes de desplegar, no un código viejo: el de antes de la v19 se niega
+      -- a arrancar con este esquema, y es lo que debe hacer.
+      --
+      -- Las hijas antes que las madres: con las claves foráneas activas, soltar una tabla de la
+      -- que cuelga otra la vacía primero, y eso dispara sus cascadas. Los índices se van con su
+      -- tabla. Nada de lo que queda apunta a ninguna de éstas.
+      DROP TABLE chat_artifacts;
+      DROP TABLE chat_messages;
+      DROP TABLE model_spend;
+      DROP TABLE approvals;
+      DROP TABLE plan_steps;
+      DROP TABLE plans;
+      DROP TABLE conversations;
+      DROP TABLE jobs;
+      DROP TABLE leases;
     `,
   },
 ];
