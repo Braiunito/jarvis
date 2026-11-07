@@ -76,24 +76,3 @@ export function UsageBadge({ query }: { query: UseQueryResult<UsageSnapshot> }):
     </span>
   );
 }
-
-/**
- * Cuántos mensajes tiene la sesión, y cuántos se están viendo.
- *
- * Contar los de la página era decir «40 mensajes» de una sesión de trescientos. Lo que se enseña
- * es el total que conoce el índice; si sólo se ha traído un trozo, se dice que es un trozo.
- */
-export function messageBadgeText(
-  { shown, total }: { shown: number; total: number | null },
-): { text: string; title: string } {
-  if (total === null) {
-    return { text: `${shown} mensajes`, title: 'Mensajes traídos de la sesión.' };
-  }
-  if (total > shown) {
-    return {
-      text: `${total} mensajes`,
-      title: `La sesión tiene ${total} mensajes. Aquí se ven los ${shown} últimos.`,
-    };
-  }
-  return { text: `${total} mensajes`, title: 'La conversación completa de esta sesión.' };
-}

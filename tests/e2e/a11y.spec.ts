@@ -26,6 +26,28 @@ async function login(page: Page): Promise<void> {
 }
 
 /**
+ * Despliega todos los turnos del hilo.
+ *
+ * Siempre el primero de los plegados y no una lista sacada de antemano: el selector depende de
+ * `aria-expanded`, así que cada clic cambia qué elemento es el enésimo, y el último índice de la
+ * lista deja de existir.
+ */
+async function expandAll(page: Page): Promise<void> {
+  const folded = page.locator('.turn-head[aria-expanded="false"]');
+  for (let guard = 0; guard < 30 && await folded.count(); guard += 1) await folded.first().click();
+}
+
+/** Abre la sesión de prueba por el camino de la pantalla: carpeta, sesión, «Abrir». */
+async function openSession(page: Page, title: RegExp): Promise<void> {
+  await nav(page, 'Sesiones').click();
+  await page.getByLabel('Buscar sesiones').fill(title.source);
+  await page.locator('.group-head').first().click();
+  await page.locator('.session-head', { hasText: title }).click();
+  await page.getByRole('button', { name: 'Abrir', exact: true }).click();
+  await expect(page).toHaveURL(/\/w\//);
+}
+
+/**
  * Un fallo se cuenta con el sitio donde está.
  *
  * «color-contrast» a secas no se arregla: hay que saber qué elemento y con qué colores, y eso lo
@@ -58,16 +80,19 @@ test('la pantalla de entrada no tiene fallos de accesibilidad', async ({ page })
 });
 
 for (const screen of [
-  { name: 'Inicio', go: (page: Page) => nav(page, 'Inicio').click() },
-  /*
-   * El asistente entró tarde en esta lista y era la pantalla que más había cambiado.
-   *
-   * Aquí viven las piezas más delicadas de la consola: la tarjeta que se firma, un menú que se
-   * abre, un diálogo que borra algo irreversible y contenido escrito por un modelo. Que ninguna de
-   * ellas se auditara con el resto era el hueco más grande de la suite.
-   */
-  { name: 'Asistente', go: (page: Page) => nav(page, /^Asistente/).click() },
   { name: 'Sesiones', go: (page: Page) => nav(page, 'Sesiones').click() },
+  /*
+   * Con un grupo y una sesión abiertos: es donde están los botones y las rutas, y lo que una
+   * portada cerrada no enseña.
+   */
+  {
+    name: 'Sesiones con un grupo abierto',
+    go: async (page: Page) => {
+      await nav(page, 'Sesiones').click();
+      await page.locator('.group-head').first().click();
+      await page.locator('.session-head').first().click();
+    },
+  },
   { name: 'Trabajo', go: (page: Page) => nav(page, /^Trabajo/).click() },
   { name: 'Terminal', go: (page: Page) => nav(page, 'Terminal').click() },
   { name: 'Salud', go: (page: Page) => nav(page, /^Salud/).click() },
@@ -81,25 +106,26 @@ for (const screen of [
   });
 }
 
-test('el workspace no tiene fallos de accesibilidad, con las cuatro pestañas', async ({ page }) => {
+test('una sesión no tiene fallos de accesibilidad, plegada, desplegada y con detalles', async ({ page }) => {
   await login(page);
-  await nav(page, 'Sesiones').click();
-  await page.getByRole('row', { name: /timeout del pool/i }).click();
-  await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
-  await expect(page).toHaveURL(/\/w\//);
+  await openSession(page, /timeout del pool/);
+  await page.waitForTimeout(500);
+  expect(describeViolations((await analyze(page)).violations).map((line) => `hilo · ${line}`)).toEqual([]);
 
-  for (const tab of ['Actividad', 'Conversación', 'Archivos y contexto', 'Configuración']) {
-    await page.getByRole('tab', { name: new RegExp(tab) }).click();
-    await page.waitForTimeout(500);
-    const results = await analyze(page);
-    expect(describeViolations(results.violations).map((line) => `${tab} · ${line}`)).toEqual([]);
-  }
+  // Todos los turnos abiertos: mensajes, tarjetas de proceso, respuestas con formato.
+  await expandAll(page);
+  await page.waitForTimeout(500);
+  expect(describeViolations((await analyze(page)).violations).map((line) => `turnos · ${line}`)).toEqual([]);
+
+  await page.getByRole('button', { name: 'Detalles' }).click();
+  await page.waitForTimeout(300);
+  expect(describeViolations((await analyze(page)).violations).map((line) => `detalles · ${line}`)).toEqual([]);
 });
 
 test('el primer tabulador lleva al contenido, y el foco se ve', async ({ page }) => {
   await login(page);
 
-  // El atajo es el primer elemento del orden: con cinco destinos delante, llegar al contenido
+  // El atajo es el primer elemento del orden: con los destinos delante, llegar al contenido
   // costaba una docena de saltos en cada pantalla.
   await page.keyboard.press('Tab');
   const skip = page.getByRole('link', { name: 'Saltar al contenido' });
@@ -127,9 +153,16 @@ test('el primer tabulador lleva al contenido, y el foco se ve', async ({ page })
  */
 test('recorrer la portada con el tabulador enseña siempre dónde estás', async ({ page }) => {
   await login(page);
-  await nav(page, 'Inicio').click();
-  await page.waitForTimeout(600);
-  await page.locator('main#contenido').click();
+  /*
+   * Desde el principio del documento y con un grupo abierto por la URL, para que el recorrido pase
+   * por el carril, la cabecera, las carpetas y sus sesiones.
+   *
+   * Antes se hacía clic en el centro de `main` y se tabulaba desde ahí: en la portada de tarjetas
+   * caía en un hueco, en la de grupos cae sobre otro grupo, lo abre, y el recorrido empezaba por el
+   * final. Y empezar por el contenido ya no da para medir: la portada nueva tiene ocho controles.
+   */
+  await page.goto('/?g=app');
+  await expect(page.locator('.session-head').first()).toBeVisible();
 
   const sinAnillo: string[] = [];
   const recorrido: string[] = [];
@@ -161,7 +194,7 @@ test('en un dedo, los objetivos táctiles miden 44 px', async ({ page, isMobile 
   void isMobile;
   await login(page);
 
-  for (const screen of ['Inicio', 'Sesiones', 'Terminal'] as const) {
+  for (const screen of ['Sesiones', 'Terminal'] as const) {
     await nav(page, screen).click();
     await page.waitForTimeout(800);
 
@@ -300,10 +333,8 @@ test.describe('tema oscuro', () => {
     await page.waitForTimeout(1000);
     expect(describeViolations((await analyze(page)).violations)).toEqual([]);
 
-    await nav(page, 'Sesiones').click();
-    await page.getByRole('row', { name: /timeout del pool/i }).click();
-    await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
-    await expect(page).toHaveURL(/\/w\//);
+    await openSession(page, /timeout del pool/);
+    await expandAll(page);
     await page.waitForTimeout(800);
     expect(describeViolations((await analyze(page)).violations)).toEqual([]);
   });
@@ -520,7 +551,7 @@ test('mantener pulsado sigue desplazando, y soltar lo para', async ({ page }) =>
 test('ningún control deja seleccionar su texto', async ({ page }) => {
   await login(page);
 
-  for (const screen of ['Inicio', 'Sesiones', 'Terminal'] as const) {
+  for (const screen of ['Sesiones', 'Terminal'] as const) {
     await nav(page, screen).click();
     await page.waitForTimeout(600);
 
@@ -538,8 +569,10 @@ test('ningún control deja seleccionar su texto', async ({ page }) => {
   }
 
   // Y lo contrario: el texto de la aplicación se sigue pudiendo copiar, que para eso está.
+  // Texto de verdad, no la etiqueta de un botón que casualmente lleva `.small`.
   const textoNormal = await page.evaluate(() => {
-    const parrafo = document.querySelector('p, .small, .muted');
+    const parrafo = [...document.querySelectorAll<HTMLElement>('p, .small, .muted')]
+      .find((element) => !element.closest('button, .btn, [role="button"], a'));
     return parrafo ? getComputedStyle(parrafo).userSelect : 'none';
   });
   expect(textoNormal).not.toBe('none');

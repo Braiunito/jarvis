@@ -17,15 +17,15 @@
  */
 import type { JSX } from 'react';
 import {
-  Activity, Ban, Bot, Boxes, Cable, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
-  ChevronsDown, Check, CircleAlert, CircleCheck,
-  CircleDot, CircleHelp, CircleSlash, CircleStop, CircleX, Clock, Copy, CornerDownLeft, Database,
-  Download, ExternalLink, Eye, FileText, Filter, FolderOpen, Gauge, Hexagon, HeartPulse, History,
-  Hourglass, House, Inbox, ListChecks, LoaderCircle, LogOut, Maximize2, MessageSquare,
+  Activity, Ban, Boxes, Cable, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
+  ChevronsDown, Check, CircleCheck,
+  CircleHelp, CircleSlash, CircleStop, CircleX, Clock, Copy, CornerDownLeft, Database,
+  Download, ExternalLink, Eye, Filter, FolderOpen, Gauge, Hexagon, HeartPulse, History,
+  Hourglass, Inbox, ListChecks, LoaderCircle, LogOut, Maximize2, MessageSquare,
   Minimize2, Paperclip, Pencil,
   Plus, RotateCcw, Search, SendHorizontal, Server, Settings2, ShieldCheck, ShieldOff, Sparkles,
   SlidersHorizontal, SquareTerminal, Timer, TimerOff, TriangleAlert, Wrench, X, Zap, Braces,
-  Code, Cloud, HousePlug, Puzzle, Trash2, type LucideIcon,
+  Code, Folder, Folders, Info, type LucideIcon,
 } from 'lucide-react';
 import type { PermissionProfile, RunStatus } from '@jarvis/contracts';
 
@@ -65,18 +65,6 @@ export const RUN_STATUS_ICON: Record<RunStatus, LucideIcon> = {
   timed_out: TimerOff,
 };
 
-/** Estado de un plan del Assistant. */
-export const PLAN_STATUS_ICON: Record<string, LucideIcon> = {
-  ready: CircleDot,
-  running: LoaderCircle,
-  waiting_run: LoaderCircle,
-  waiting_approval: CircleAlert,
-  waiting_input: CircleHelp,
-  completed: CircleCheck,
-  failed: CircleX,
-  cancelled: Ban,
-};
-
 /** Qué puede hacer el agente: mirar, escribir, o cualquier cosa. */
 export const PERMISSION_ICON: Record<PermissionProfile, LucideIcon> = {
   safe: Eye,
@@ -93,44 +81,17 @@ export const HEALTH_ICON: Record<string, LucideIcon> = {
   unknown: CircleHelp,
 };
 
-/** De dónde salió lo que se está leyendo. */
-export const PROVENANCE_ICON: Record<string, LucideIcon> = {
-  'remote-transcript': Server,
-  'jarvis-run': Bot,
-  'litechat-import': Download,
-  system: FileText,
-};
-
 /** Las secciones. En el móvil son lo único que se ve antes que el texto. */
 export const NAV_ICON = {
   brand: Hexagon,
-  home: House,
-  sessions: Search,
+  sessions: Folders,
   runs: ListChecks,
   terminal: SquareTerminal,
   health: HeartPulse,
   settings: Settings2,
-  assistant: Bot,
 } as const;
 
-/**
- * De dónde salió una respuesta.
- *
- * Se distinguen por forma y no por color porque es exactamente el dato que alguien puede querer
- * comprobar de un vistazo antes de fiarse —o antes de mirar la factura—: una casa es el modelo de
- * casa, una nube es una consulta que salió de aquí.
- */
-export const SOURCE_ICON = {
-  local: HousePlug,
-  cloud: Cloud,
-} as const;
-
-/**
- * Un icono por proveedor.
- *
- * Son formas distintas, no marcas: sirven para recorrer una columna de sesiones sin leer cada
- * fila. Si algún día hay logotipos oficiales, se cambian aquí y en ningún otro sitio.
- */
+/** Cada agente con su forma: en una lista de sesiones se distinguen sin leer el nombre. */
 export const PROVIDER_ICON: Record<string, LucideIcon> = {
   claude: Sparkles,
   codex: Braces,
@@ -145,11 +106,14 @@ export const STATUS_ICON = {
   message: MessageSquare,
   host: Server,
   folder: FolderOpen,
+  folderClosed: Folder,
 } as const;
 
 /** Acciones. Siempre junto a su palabra: un botón que sólo es un dibujo se adivina, no se lee. */
 export const ACTION_ICON = {
   send: SendHorizontal,
+  search: Search,
+  info: Info,
   stop: CircleStop,
   retry: RotateCcw,
   copy: Copy,
@@ -157,7 +121,6 @@ export const ACTION_ICON = {
   approve: Check,
   reject: X,
   logout: LogOut,
-  delegate: Bot,
   attach: Paperclip,
   open: FolderOpen,
   go: CornerDownLeft,
@@ -171,8 +134,6 @@ export const ACTION_ICON = {
   collapse: ChevronLeft,
   expand: ChevronRight,
   external: ExternalLink,
-  capability: Puzzle,
-  delete: Trash2,
   filter: Filter,
   filters: SlidersHorizontal,
   new: Plus,

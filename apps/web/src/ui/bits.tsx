@@ -10,7 +10,7 @@
  */
 import type { JSX, ReactNode } from 'react';
 import { useState } from 'react';
-import type { HostFreshness, Run, RunStatus, TargetPlan } from '@jarvis/contracts';
+import type { HostFreshness, RunStatus, TargetPlan } from '@jarvis/contracts';
 import { navigate } from '../router.js';
 import { PERMISSION, RUN_STATUS } from './labels.js';
 import { ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, RUN_STATUS_ICON } from './icons.jsx';
@@ -251,23 +251,6 @@ export function Link({ to, children, ...rest }: { to: string; children: ReactNod
     >
       {children}
     </a>
-  );
-}
-
-export function RunRow({ run, onOpen }: { run: Run; onOpen: (run: Run) => void }): JSX.Element {
-  return (
-    <button type="button" className="list-item" onClick={() => onOpen(run)}>
-      <span className="row">
-        <RunStatusBadge status={run.status} />
-        <span className="small muted mono">{run.id.slice(0, 8)}</span>
-        <span className="small muted">{run.provider} · {run.executionHost}</span>
-        {run.strategy === 'A' ? <span className="badge warn">trabaja sobre {run.workHost}</span> : null}
-      </span>
-      <span className="small muted">
-        {new Date(run.createdAt).toLocaleString()}
-        {run.errorMessage ? ` · ${run.errorMessage}` : ''}
-      </span>
-    </button>
   );
 }
 

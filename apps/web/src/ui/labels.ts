@@ -32,81 +32,6 @@ export const PERMISSION: Record<PermissionProfile, PermissionLabel> = {
   },
 };
 
-export const permissionName = (profile: string): string =>
-  PERMISSION[profile as PermissionProfile]?.name ?? profile;
-
-/**
- * Cuánto está pensando, dicho para quien mira.
- *
- * `low`, `medium` y `high` son las palabras de la API y no dicen nada de lo que va a pasar: lo
- * que quiere saber quien lee es si esta pregunta le ha parecido fácil o si se está tomando su
- * tiempo, porque eso es lo que explica que la respuesta tarde ocho segundos o treinta.
- *
- * El nivel lo decide una pasada previa barata que **no deja rastro en el hilo**: no llama a
- * ninguna herramienta y no escribe ningún mensaje. Así que este indicador es el único sitio donde
- * se ve que esa decisión existió, y por eso dice también el porqué en su ayuda.
- *
- * `minimal` no está y no es un olvido: el juez lo elige, pero el turno que **contesta** nunca corre
- * con él —no compone una frase— así que a la pantalla no llega nunca. Tenerlo aquí era una etiqueta
- * que no se podía ver, comprobado pidiéndole un saludo a producción: el juez dijo lo suyo y la línea
- * puso «poco». Si algún día interesa ver lo que decidió el juez, será por un motivo y con su campo,
- * no por completar la escala.
- */
-export const EFFORT: Record<string, { name: string; help: string; tone: 'ok' | 'neutral' | 'warn' }> = {
-  low: {
-    name: 'poco',
-    help: 'Le ha parecido una pregunta directa y no se va a entretener.',
-    tone: 'ok',
-  },
-  medium: {
-    name: 'lo normal',
-    help: 'Esfuerzo intermedio: ni una respuesta de memoria ni un análisis largo.',
-    tone: 'neutral',
-  },
-  high: {
-    name: 'a fondo',
-    help: 'Le ha parecido que esto pide pensar. Tarda más y cuesta más.',
-    tone: 'warn',
-  },
-};
-
-export const effortName = (effort: string): string => EFFORT[effort]?.name ?? effort;
-
-/**
- * Cuánta cuerda tiene el asistente sin tu firma.
- *
- * Estaba escrito a mano en la pantalla, y por eso se quedó viejo: la pista de «Automático» decía que
- * el trabajo con permiso de escritura salía sin tarjeta, que era verdad cuando se escribió y dejó de
- * serlo en cuanto el core cumplió su contrato. Aquí vive una vez, al lado del resto del vocabulario,
- * y se lee del mismo sitio que lo lee el que lo cambie.
- *
- * `unrestricted` se llama **«Sin preguntar»** y no «sin restricciones», que es el nombre del perfil
- * `yolo`: uno dice qué permiso lleva un trabajo y el otro cuánta firma hace falta. Compartir palabra
- * entre los dos ejes es enseñar a leer una tarjeta de aprobación por encima.
- */
-export const AUTONOMY: Record<string, { name: string; help: string; tone: 'neutral' | 'warn' | 'danger' }> = {
-  manual: {
-    name: 'Manual',
-    help: 'Todo lo que tenga efectos te lo pregunta antes, incluido lanzar un trabajo en modo seguro.',
-    tone: 'neutral',
-  },
-  auto: {
-    name: 'Automático',
-    help: 'El trabajo en modo seguro y las lecturas van solos. Escribir en una máquina y las '
-      + 'capacidades con efectos siguen pidiéndote tarjeta, igual que salir a la nube.',
-    tone: 'warn',
-  },
-  unrestricted: {
-    name: 'Sin preguntar',
-    help: 'Además van solos el trabajo que escribe y las capacidades **etiquetadas** con efectos. '
-      + 'Lo desconocido no: una capacidad sin etiquetar sigue pidiendo tarjeta. Y nunca van solos el '
-      + 'perfil sin restricciones, salir a la nube ni parar trabajo que lanzaste tú.',
-    tone: 'danger',
-  },
-};
-
-export const autonomyName = (mode: string): string => AUTONOMY[mode]?.name ?? mode;
-
 export interface StatusLabel {
   name: string;
   tone: 'neutral' | 'running' | 'warn' | 'ok' | 'danger';
@@ -136,32 +61,6 @@ export const RUN_STATUS: Record<RunStatus, StatusLabel> = {
  */
 export const isRunLive = (status: RunStatus): boolean =>
   ['queued', 'preparing', 'running', 'waiting', 'cancelling'].includes(status);
-
-export const PLAN_STATUS: Record<string, StatusLabel> = {
-  ready: { name: 'Listo', tone: 'neutral', help: 'Va a decidir el siguiente paso.' },
-  running: { name: 'Pensando', tone: 'running', help: 'Decidiendo qué hacer ahora.' },
-  waiting_run: { name: 'Trabajando', tone: 'running', help: 'Un agente está ejecutando un paso.' },
-  waiting_approval: { name: 'Necesita tu permiso', tone: 'warn', help: 'No sigue sin que lo autorices.' },
-  waiting_input: { name: 'Te pregunta algo', tone: 'warn', help: 'Necesita una respuesta tuya.' },
-  completed: { name: 'Terminado', tone: 'ok', help: 'Cerró el objetivo con una síntesis.' },
-  failed: { name: 'Falló', tone: 'danger', help: 'Se detuvo por un problema.' },
-  cancelled: { name: 'Parado', tone: 'neutral', help: 'Se paró antes de terminar.' },
-};
-
-export const PLAN_STEP_KIND: Record<string, string> = {
-  run: 'trabajo',
-  approval: 'permiso',
-  input: 'pregunta',
-  synthesis: 'cierre',
-};
-
-/** Cómo se cuenta de dónde salió lo que se está leyendo. */
-export const PROVENANCE: Record<string, string> = {
-  'remote-transcript': 'escrito en la máquina',
-  'jarvis-run': 'trabajo de Jarvis',
-  'litechat-import': 'importado de LiteChat',
-  system: 'del sistema',
-};
 
 /** Los estados de salud, que la gente lee de un vistazo y sin leer. */
 export const HEALTH: Record<string, { name: string; tone: 'ok' | 'warn' | 'danger' | 'neutral' }> = {
@@ -233,6 +132,8 @@ export function checkName(key: string): { title: string; id: string } {
     aisessions: 'Índice de sesiones',
     runs: 'Trabajos en curso',
     runnerSweep: 'Limpieza de spools',
+    eventRetention: 'Retención de eventos',
+    chatJobs: 'Cola de conversaciones',
   };
   return { title: known[key] ?? key, id: key };
 }

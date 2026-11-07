@@ -6,7 +6,6 @@
  * accesible —roles, teclado, foco— porque es justo lo que se hace mal cuando se copia y pega.
  */
 import type { JSX, ReactNode } from 'react';
-import { useId } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ACTION_ICON, Glyph, type LucideIcon } from './icons.jsx';
 
@@ -37,89 +36,6 @@ export function Card({ title, icon, count, countTone, actions, children, classNa
       {children}
       {footer ? <div className="card-foot">{footer}</div> : null}
     </section>
-  );
-}
-
-/**
- * Una métrica con su variación.
- *
- * La variación se omite cuando no hay con qué comparar: inventar un «+100%» porque antes había
- * cero es peor que no decir nada.
- */
-export function Stat({ value, label, delta, hint, children }: {
-  value: ReactNode;
-  label: string;
-  delta?: number | null;
-  hint?: string;
-  children?: ReactNode;
-}): JSX.Element {
-  return (
-    <div className="stat">
-      <div className="row nowrap" style={{ gap: 10, alignItems: 'baseline' }}>
-        <span className="value">{value}</span>
-        {delta === null || delta === undefined ? null : (
-          <span className={`delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
-            {delta > 0 ? '▲' : delta < 0 ? '▼' : '■'} {Math.abs(delta)}%
-          </span>
-        )}
-      </div>
-      <div className="label">{label}</div>
-      {hint ? <div className="tiny faint">{hint}</div> : null}
-      {children}
-    </div>
-  );
-}
-
-export interface TabDefinition {
-  id: string;
-  label: string;
-  icon?: LucideIcon;
-  count?: number;
-}
-
-/**
- * Pestañas con teclado.
- *
- * Flechas para moverse, Home y End para los extremos: es lo que espera cualquiera que navegue
- * sin ratón, y es exactamente lo que se pierde al hacerlas con `div`s.
- */
-export function Tabs({ tabs, active, onChange, label }: {
-  tabs: TabDefinition[];
-  active: string;
-  onChange: (id: string) => void;
-  label: string;
-}): JSX.Element {
-  const base = useId();
-  const move = (delta: number): void => {
-    const index = tabs.findIndex((tab) => tab.id === active);
-    const next = tabs[(index + delta + tabs.length) % tabs.length];
-    if (next) onChange(next.id);
-  };
-
-  return (
-    <div className="tabs" role="tablist" aria-label={label}
-      onKeyDown={(event) => {
-        if (event.key === 'ArrowRight') { event.preventDefault(); move(1); }
-        if (event.key === 'ArrowLeft') { event.preventDefault(); move(-1); }
-        if (event.key === 'Home') { event.preventDefault(); onChange(tabs[0]?.id ?? active); }
-        if (event.key === 'End') { event.preventDefault(); onChange(tabs.at(-1)?.id ?? active); }
-      }}>
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          role="tab"
-          id={`${base}-${tab.id}`}
-          aria-selected={tab.id === active}
-          tabIndex={tab.id === active ? 0 : -1}
-          onClick={() => onChange(tab.id)}
-        >
-          {tab.icon ? <Glyph icon={tab.icon} /> : null}
-          {tab.label}
-          {tab.count !== undefined ? <span className="count">{tab.count}</span> : null}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -236,6 +152,3 @@ export function formatDuration(ms: number | null | undefined): string {
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
-
-/** Un número grande sin ruido: 1.240 en vez de 1240. */
-export const formatCount = (value: number): string => value.toLocaleString('es-ES');

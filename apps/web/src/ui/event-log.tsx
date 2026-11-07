@@ -11,13 +11,13 @@
  * El `seq` se conserva siempre: es la identidad durable de un evento —lo que permite reengancharse
  * a un stream sin repetir ni perder— y tiene que poder citarse.
  */
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { JsonView } from 'react-json-view-lite';
 import type { PermissionProfile, RunEvent } from '@jarvis/contracts';
 import { Empty } from './bits.jsx';
-import { Segmented } from './primitives.jsx';
+import { Markdown } from './markdown.jsx';
 import { EVENT_KIND, PERMISSION, RUN_STATUS } from './labels.js';
 import { ACTION_ICON, Glyph, RUN_STATUS_ICON, STATUS_ICON, type LucideIcon } from './icons.jsx';
 
@@ -111,6 +111,26 @@ function factsOf(payload: Record<string, unknown>): Fact[] {
 function describe(event: RunEvent): Rendered {
   const payload = event.payload as Record<string, unknown>;
 
+  /*
+   * El resultado va antes que la regla general del texto: también trae `text`, y si lo atrapara
+   * ella se perdían «terminado», los turnos y lo que costó, que es lo único que dice el resultado
+   * cuando su texto repite el último mensaje.
+   */
+  if (event.type === 'agent.result') {
+    const result = payload as { ok?: boolean; text?: string; turns?: number; costUsd?: number; durationMs?: number };
+    const extra = [
+      result.turns ? `${result.turns} turnos` : null,
+      result.durationMs ? `${Math.round(result.durationMs / 100) / 10} s` : null,
+      typeof result.costUsd === 'number' ? `$${result.costUsd.toFixed(2)}` : null,
+    ].filter(Boolean).join(' · ');
+    return {
+      kind: 'text',
+      headline: result.ok ? 'terminado' : 'terminado con error',
+      ...(result.text ? { body: result.text } : {}),
+      ...(extra ? { extra } : {}),
+    };
+  }
+
   if (typeof payload['text'] === 'string' && event.type !== 'agent.raw') {
     return { kind: 'text', body: payload['text'] };
   }
@@ -173,21 +193,6 @@ function describe(event: RunEvent): Rendered {
       headline: `${tool?.name ?? 'herramienta'}${tool?.status ? ` · ${tool.status}` : ''}`,
       ...(command || tool?.output ? { body: String(command ?? tool?.output) } : {}),
       ...(tool?.truncated ? { extra: 'salida recortada' } : {}),
-    };
-  }
-
-  if (event.type === 'agent.result') {
-    const result = payload as { ok?: boolean; text?: string; turns?: number; costUsd?: number; durationMs?: number };
-    const extra = [
-      result.turns ? `${result.turns} turnos` : null,
-      result.durationMs ? `${Math.round(result.durationMs / 100) / 10} s` : null,
-      typeof result.costUsd === 'number' ? `$${result.costUsd.toFixed(2)}` : null,
-    ].filter(Boolean).join(' · ');
-    return {
-      kind: 'text',
-      headline: result.ok ? 'terminado' : 'terminado con error',
-      ...(result.text ? { body: result.text } : {}),
-      ...(extra ? { extra } : {}),
     };
   }
 
@@ -286,24 +291,37 @@ function EventDetail({ event, onClose }: { event: RunEvent; onClose: () => void 
   );
 }
 
-function EventCard({ event, onOpen, repeats = 1 }: {
+function EventCard({ event, onOpen, repeats = 1, quiet = false }: {
   event: RunEvent;
   onOpen: () => void;
   /** Cuántas veces seguidas llegó lo mismo. Ver `cluster`. */
   repeats?: number;
+  /** El texto ya se ha leído justo encima: se cuenta en una línea y nada más. Ver `buildRows`. */
+  quiet?: boolean;
 }): JSX.Element {
   const visual = visualOf(event.type);
   const rendered = describe(event);
   const answer = isAnswer(event);
+  /*
+   * Una respuesta se lee entera y con su formato.
+   *
+   * Antes toda tarjeta era un botón que abría el JSON y el texto se cortaba a 600 caracteres: para
+   * un paso de herramienta da igual, pero una respuesta cortada es una respuesta que no se ha
+   * leído. Ahora la respuesta es texto —con sus enlaces, que dentro de un botón no se podían
+   * pulsar— y el JSON queda en el botoncito de la esquina, igual que en las demás.
+   */
+  const body = rendered.kind === 'text' && rendered.body && !quiet ? rendered.body : null;
 
   return (
-    <button type="button" className={`event-card ${visual.tone} ${answer ? 'answer' : ''}`}
-      onClick={onOpen} title="Ver el evento tal y como llegó">
-      <span className="event-head">
-        <span className={`badge ${visual.tone}`}>
-          <Glyph icon={isThinking(event) ? ACTION_ICON.session : visual.icon} />
-          {kindLabel(event)}
-        </span>
+    <div className={`event-card ${visual.tone} ${answer ? 'answer' : ''}`}>
+      <span className={`event-head ${event.type === 'agent.text' && repeats === 1 ? 'bare' : ''}`}>
+        {/* Una respuesta se reconoce por su forma; el distintivo sólo hace falta para lo demás. */}
+        {event.type === 'agent.text' ? null : (
+          <span className={`badge ${visual.tone}`}>
+            <Glyph icon={isThinking(event) ? ACTION_ICON.session : visual.icon} />
+            {kindLabel(event)}
+          </span>
+        )}
         {rendered.kind === 'text' && rendered.headline ? (
           <span className="event-headline truncate">{rendered.headline}</span>
         ) : null}
@@ -318,14 +336,16 @@ function EventCard({ event, onOpen, repeats = 1 }: {
             ×{repeats}
           </span>
         ) : null}
-        <span className="event-seq tiny faint mono">#{event.seq}</span>
-        <Glyph icon={ACTION_ICON.expandJson} size={13} className="event-more" />
+        <button type="button" className="event-more" onClick={onOpen}
+          title={`Ver el evento #${event.seq} tal y como llegó`} aria-label={`Ver el evento #${event.seq} en crudo`}>
+          <Glyph icon={ACTION_ICON.expandJson} size={13} />
+        </button>
       </span>
 
-      {rendered.kind === 'text' && rendered.body ? (
-        <span className="event-body">
-          {rendered.body.length > 600 ? `${rendered.body.slice(0, 600)}…` : rendered.body}
-        </span>
+      {body ? (
+        answer
+          ? <div className="event-body md-body"><Markdown source={body} /></div>
+          : <span className="event-body">{body.length > 600 ? `${body.slice(0, 600)}…` : body}</span>
       ) : null}
 
       {rendered.kind === 'facts' ? (
@@ -340,7 +360,7 @@ function EventCard({ event, onOpen, repeats = 1 }: {
           ))}
         </span>
       ) : null}
-    </button>
+    </div>
   );
 }
 
@@ -419,9 +439,10 @@ function UserMessageRow({ text, tail }: { text: string; tail: boolean }): JSX.El
 }
 
 /** Una fila de la línea de tiempo: un evento, con su hora y su punto en el carril. */
-function EventRow({ item, tail, nested, onOpen }: {
+function EventRow({ item, tail, nested, quiet, onOpen }: {
   item: Cluster;
   tail: boolean;
+  quiet?: boolean;
   /** Colgada de un tramo desplegado, no del hilo: se indenta para que se vea de quién es. */
   nested?: boolean;
   onOpen: () => void;
@@ -448,7 +469,7 @@ function EventRow({ item, tail, nested, onOpen }: {
         </span>
         {tail ? <span className="tl-line" /> : null}
       </div>
-      <EventCard event={item.event} repeats={item.count} onOpen={onOpen} />
+      <EventCard event={item.event} repeats={item.count} quiet={quiet} onOpen={onOpen} />
     </div>
   );
 }
@@ -472,7 +493,7 @@ interface Steps {
 type Row =
   | { key: string; kind: 'user'; text: string }
   | { key: string; kind: 'steps'; steps: Steps }
-  | { key: string; kind: 'event'; item: Cluster; nested: boolean };
+  | { key: string; kind: 'event'; item: Cluster; nested: boolean; quiet?: boolean };
 
 /**
  * El hilo, tramo a tramo.
@@ -511,10 +532,21 @@ function buildRows(
     pending = [];
   };
 
+  /*
+   * El resultado repite la última respuesta.
+   *
+   * Claude cierra cada turno con un evento de resultado que trae, otra vez, el texto de su último
+   * mensaje: pintado entero se leía la misma respuesta dos veces seguidas. Cuando es idéntico, el
+   * resultado se queda en su línea —«terminado · 3 turnos · 12 s»— y el texto sólo una vez.
+   */
+  let lastText = '';
   for (const item of clusters) {
     if (isAnswer(item.event)) {
       flush();
-      rows.push({ key: `e${item.event.seq}`, kind: 'event', item, nested: false });
+      const text = textOf(item.event);
+      const quiet = item.event.type === 'agent.result' && text !== '' && text === lastText;
+      if (item.event.type === 'agent.text') lastText = text;
+      rows.push({ key: `e${item.event.seq}`, kind: 'event', item, nested: false, quiet });
       continue;
     }
     pending.push(item);
@@ -522,6 +554,11 @@ function buildRows(
   flush();
   return rows;
 }
+
+const textOf = (event: RunEvent): string => {
+  const payload = event.payload as Record<string, unknown>;
+  return typeof payload['text'] === 'string' ? payload['text'].trim() : '';
+};
 
 /** Lo último que se sabe de un tramo, en una línea. Es lo que enseña la tarjeta mientras trabaja. */
 function summaryOf(event: RunEvent): string {
@@ -626,8 +663,10 @@ function StepsRow({ steps, live, open, tail, onToggle }: {
  * La hora va fuera de la tarjeta, en su propia columna: al recorrerla se busca «qué pasó», no «a
  * qué hora»; la hora sirve cuando ya has encontrado el sitio.
  */
-export function EventTimeline({ events, empty, limit, userMessage, live = false }: {
+export function EventTimeline({ events, empty, limit, userMessage, live = false, toolbar }: {
   events: RunEvent[];
+  /** Lo que quien la monta quiere en la misma línea que el resumen: estado, permiso, acciones. */
+  toolbar?: ReactNode;
   /** Qué explicar cuando no hay nada: por qué está vacío y qué lo llenará. */
   empty?: string;
   limit?: number;
@@ -677,6 +716,7 @@ export function EventTimeline({ events, empty, limit, userMessage, live = false 
   if (events.length === 0) {
     return (
       <>
+        {toolbar ? <div className="timeline-head">{toolbar}</div> : null}
         {userMessage ? <UserMessageRow text={userMessage} tail={false} /> : null}
         <Empty
           tight
@@ -698,23 +738,20 @@ export function EventTimeline({ events, empty, limit, userMessage, live = false 
         * abriendo tramo por tramo. Se ofrece sólo cuando hay bastante que plegar como para que
         * la diferencia entre los dos modos signifique algo.
         */}
-      {events.length > 4 ? (
+      {events.length > 4 || toolbar ? (
         <div className="timeline-head">
-          <span className="small muted">
+          {toolbar}
+          <span className="tiny faint">
             {answers.length === 0
               ? `${events.length} eventos, todavía sin respuesta`
-              : `${answers.length === 1 ? '1 respuesta' : `${answers.length} respuestas`}`
-                + ` entre ${events.length} eventos`}
+              : `${answers.length === 1 ? '1 respuesta' : `${answers.length} respuestas`} · ${events.length} eventos`}
           </span>
-          <Segmented
-            label="Cuánto detalle se enseña"
-            value={mode}
-            onChange={(value) => { setMode(value); setFlipped(new Set()); }}
-            options={[
-              { value: 'compacto', label: 'Compacto', icon: ACTION_ICON.exitFullscreen },
-              { value: 'todo', label: 'Todo', icon: STATUS_ICON.activity },
-            ]}
-          />
+          {events.length > 4 ? (
+            <button type="button" className="linklike tiny timeline-mode" aria-pressed={mode === 'todo'}
+              onClick={() => { setMode(mode === 'todo' ? 'compacto' : 'todo'); setFlipped(new Set()); }}>
+              {mode === 'todo' ? 'Plegar los pasos' : 'Desplegar todos los pasos'}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -740,6 +777,7 @@ export function EventTimeline({ events, empty, limit, userMessage, live = false 
               item={row.item}
               tail={tail}
               nested={row.nested}
+              quiet={row.quiet}
               onOpen={() => setOpen(row.item.event.seq)}
             />
           );

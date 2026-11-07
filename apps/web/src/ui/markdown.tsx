@@ -1,16 +1,17 @@
 /**
- * El markdown del asistente, acotado a mano.
+ * El markdown de las respuestas de los agentes, acotado a mano.
  *
- * No es un renderizador de CommonMark y no quiere serlo. El texto lo escribe **nuestro** modelo
- * con **nuestro** prompt, así que el subconjunto es un acuerdo entre las dos puntas y no un
- * estándar que haya que soportar entero.
+ * No es un renderizador de CommonMark y no quiere serlo. Nació para el asistente de la casa, que
+ * escribía con nuestro prompt; hoy pinta lo que contestan Claude, Codex y OpenCode en cada sesión,
+ * que usan el mismo puñado de formas —párrafos, listas, código, alguna tabla—. Lo raro sale en
+ * crudo, que se sigue leyendo.
  *
  * La razón de escribirlo en vez de traer una librería no es el tamaño —cabía— sino que **nunca
  * produce cadenas de HTML**. Devuelve nodos de React, así que no hay `dangerouslySetInnerHTML` en
  * ninguna parte y no hay nada que sanitizar: la clase de fallo entera deja de existir en lugar de
  * quedar sujeta a una configuración que alguien afloja dentro de tres meses para «que se vea el
- * HTML del informe». Y el texto que se pinta aquí salió de un modelo que acaba de leer el
- * transcript de una máquina, o sea contenido no confiable por construcción, no por accidente.
+ * HTML del informe». Y el texto que se pinta aquí salió de un agente que acaba de leer ficheros y
+ * salidas de una máquina, o sea contenido no confiable por construcción, no por accidente.
  *
  * El fichero va partido en dos a propósito: `parseMarkdown` es una función pura de cadena a
  * descriptores, sin React, y por eso se puede probar en `node` sin DOM ni una sola dependencia

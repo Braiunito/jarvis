@@ -1,41 +1,46 @@
 /**
- * El workspace: dónde se trabaja.
+ * Una sesión: su conversación y la caja para seguirla.
  *
- * Tres reglas gobiernan esta pantalla:
+ * La pantalla es un hilo, de arriba abajo, y nada más. Cada turno —lo que pediste y lo que hizo el
+ * agente hasta contestar— es una tarjeta plegada que se lee en dos líneas: lo que pediste y lo
+ * último que contestó. Al pulsarla se despliega el turno entero, con el proceso del agente en sus
+ * propias tarjetas compactas que a su vez se despliegan. El último turno ya viene abierto.
+ *
+ * Tres reglas que siguen igual que antes del rediseño:
  *   · el destino y el permiso se ven antes de pulsar Enviar;
  *   · el borrador no se pierde por navegar, fallar ni recargar, y sólo se borra cuando el
- *     servidor confirma que el run existe;
- *   · lo que escribió el agente remoto y lo que hizo Jarvis nunca se mezclan sin decirlo.
+ *     servidor confirma que el trabajo existe;
+ *   · lo que escribió el agente en la máquina y lo que lanzó Jarvis se funden en un hilo, pero el
+ *     turno de un trabajo de Jarvis lo dice y trae su proceso.
  *
- * Las pestañas separan cuatro preguntas distintas —qué está pasando, qué se dijo, con qué
- * contexto y con qué ajustes— pero el compositor no se esconde detrás de ninguna: mandar trabajo
- * es lo que se viene a hacer aquí.
+ * Lo que antes eran pestañas —contexto, ajustes, resumen, lista de trabajos— vive ahora en
+ * «Detalles», plegado: se consulta de vez en cuando y no tiene por qué ocupar la pantalla siempre.
  */
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Attachment, PermissionProfile, Run, TranscriptMessage } from '@jarvis/contracts';
+import type { Attachment, PermissionProfile, Run, TranscriptMessage, Workspace } from '@jarvis/contracts';
 import {
   useCancelRun, useCreateRun, useRenameWorkspace, useSaveDraft, useTarget, useTranscript,
   useUploadAttachment, useUsage, useWorkspace,
 } from '../api/queries.js';
 import { useRunStream } from '../api/run-stream.js';
 import { terminalHref } from '../api/links.js';
-import {
-  Empty, ErrorNote, Link, Loading, RunStatusBadge, StaleNote, TargetChip, relativeTime,
-} from '../ui/bits.jsx';
+import { Empty, ErrorNote, Link, Loading, RunStatusBadge, TargetChip, relativeTime } from '../ui/bits.jsx';
 import { useAnnounceOnChange } from '../ui/announce.jsx';
-import { AssistantPanel } from '../ui/assistant.jsx';
-import { AskAssistantButton } from '../ui/ask-assistant.jsx';
+import { Boundary } from '../ui/boundary.jsx';
 import { Composer } from '../ui/composer.jsx';
-import { PERMISSION, PROVENANCE, RUN_STATUS, isRunLive, runTitle } from '../ui/labels.js';
+import { PERMISSION, RUN_STATUS, isRunLive } from '../ui/labels.js';
 import {
-  ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVENANCE_ICON, PROVIDER_ICON, STATUS_ICON,
+  ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, RUN_STATUS_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
 import { EventTimeline } from '../ui/event-log.jsx';
+import { Markdown } from '../ui/markdown.jsx';
 import { openNewSession } from '../ui/new-session.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
-import { UsageBadge, messageBadgeText } from '../ui/usage.jsx';
-import { Card, DataRow, Segmented, Tabs, formatDuration, type SegmentOption } from '../ui/primitives.jsx';
+import { UsageBadge } from '../ui/usage.jsx';
+import { DataRow, Segmented, formatDuration, type SegmentOption } from '../ui/primitives.jsx';
+import { buildTurns, oneLine, type Turn } from '../ui/turns.js';
+import { folderName } from './explorer.jsx';
 
 const PROFILES: Array<SegmentOption<PermissionProfile>> = (['safe', 'auto', 'yolo'] as const).map((value) => ({
   value,
@@ -45,24 +50,14 @@ const PROFILES: Array<SegmentOption<PermissionProfile>> = (['safe', 'auto', 'yol
   hint: PERMISSION[value].help,
 }));
 
-/**
- * Atajos de lo que más se pide.
- *
- * Son plantillas, no acciones: rellenan el compositor para que se lean y se corrijan antes de
- * enviarse. Un chip que lanzara trabajo por sí solo se pulsaría sin mirar el permiso.
- */
-const SUGGESTIONS = [
-  'Resume en qué estado quedó esto y qué falta.',
-  'Revisa los cambios sin tocar nada y dime qué ves.',
-  'Explica el último error y propón cómo arreglarlo.',
-  'Sigue por donde lo dejaste.',
-];
+/** Cuántos turnos plegados se enseñan antes de pedir «ver anteriores». */
+const VISIBLE_TURNS = 6;
 
 /** Espejo local del borrador: cubre los segundos entre teclear y que el servidor confirme. */
 const draftMirrorKey = (workspaceId: string): string => `jarvis.draft.${workspaceId}`;
 
 const ATTACHMENT_STATE: Record<string, string> = {
-  staged: 'subido, sin usar todavía',
+  staged: 'sin usar todavía',
   claimed: 'usado por un trabajo',
   released: 'borrado de la máquina',
   release_pending: 'pendiente de borrar',
@@ -76,113 +71,465 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 };
 
-type TabId = 'actividad' | 'conversacion' | 'contexto' | 'ajustes';
-
-/**
- * Lo que pasó en la CLI, no lo que dijo nadie.
- *
- * Un `/model` tecleado en la terminal y su respuesta llegan al transcript con `role: "user"`
- * porque así los guarda el fichero de sesión. Pintarlos como mensajes —y encima marcados «escrito
- * en la máquina»— hace creer que alguien escribió `<command-name>/model</command-name>`. Ocupan una
- * línea, en su forma corta, y el texto entero sigue disponible al pasar por encima.
- */
-function CliLine({ message }: { message: TranscriptMessage }): JSX.Element {
-  const icon = message.kind === 'command'
-    ? ACTION_ICON.go
-    : message.kind === 'command-output'
-      ? NAV_ICON.terminal
-      : ACTION_ICON.error;
-  const what = message.kind === 'command'
-    ? 'comando'
-    : message.kind === 'command-output'
-      ? 'salida'
-      : 'aviso';
-
-  return (
-    <div className="cli-line" title={message.text}>
-      <span className="badge neutral">
-        <Glyph icon={icon} size={13} />
-        {what}
-      </span>
-      <span className={`truncate ${message.kind === 'note' ? '' : 'mono'}`}>{message.label}</span>
-      {message.at ? (
-        <span className="tiny faint nowrap">{new Date(message.at).toLocaleTimeString()}</span>
-      ) : null}
-    </div>
-  );
-}
+const durationOf = (run: Run | undefined): number | null =>
+  run?.startedAt && run.finishedAt ? Date.parse(run.finishedAt) - Date.parse(run.startedAt) : null;
 
 export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.Element {
   const detail = useWorkspace(workspaceId);
   const workspace = detail.data?.workspace;
   const transcript = useTranscript(workspace);
-  const usage = useUsage(workspace);
 
+  /*
+   * Arriba, dónde está: «Sesiones › app», y la miga lleva al grupo abierto. El nombre de la sesión
+   * va en la página, donde se puede cambiar; repetirlo en la cabecera era leerlo dos veces.
+   */
+  const folder = workspace ? folderName(workspace.cwd) : null;
+  usePageMeta({
+    title: folder ?? 'Sesión',
+    parent: { label: 'Sesiones', to: folder ? `/?g=${encodeURIComponent(folder)}` : '/' },
+    ...(workspace?.title ? { documentTitle: workspace.title } : {}),
+  });
+
+  if (detail.isLoading) {
+    return <div className="page narrow"><Loading rows={4} shape="list" label="Cargando la sesión…" /></div>;
+  }
+  if (detail.error) {
+    return (
+      <div className="page narrow">
+        <ErrorNote error={detail.error} onRetry={() => void detail.refetch()}
+          action={<Link to="/" className="btn small">Volver a Sesiones</Link>} />
+      </div>
+    );
+  }
+  if (!workspace || !detail.data) {
+    return (
+      <div className="page narrow">
+        <ErrorNote
+          error={{ code: 'NOT_FOUND', message: 'Esta sesión ya no existe en Jarvis o nunca existió.' }}
+          action={<Link to="/" className="btn small">Buscar la sesión</Link>}
+        />
+      </div>
+    );
+  }
+
+  const runs = detail.data.runs;
+  const messages = transcript.data?.messages ?? [];
+  /*
+   * Una sesión que no se puede continuar ni estrenar. Lo dice el core, que lo comprobó contra la
+   * máquina: las que sólo guardan un `/comando` tienen turnos que no son turnos.
+   */
+  const deadSession = transcript.data?.resumable === false;
+
+  return (
+    <div className="page narrow workspace-page">
+      <Header workspace={workspace} runs={runs} attachments={detail.data.attachments}
+        messageCount={transcript.data?.messageCount ?? null} />
+
+      {/* Por sesión: lo abierto a mano en una no tiene nada que ver con otra. */}
+      <Thread
+        key={workspaceId}
+        workspace={workspace}
+        runs={runs}
+        messages={messages}
+        loading={transcript.isLoading}
+        error={transcript.error}
+        truncated={Boolean(transcript.data?.truncated)}
+        onRetry={() => void transcript.refetch()}
+      />
+
+      {deadSession ? (
+        <Empty
+          icon={ACTION_ICON.empty}
+          title="Aquí no hay conversación que continuar"
+          hint={`La sesión existe en ${workspace.ref.host} pero no guarda ningún turno, así que no se puede reanudar. Sí se puede empezar otra en la misma carpeta.`}
+          action={
+            <button type="button" className="btn primary" onClick={() => openNewSession({
+              host: workspace.ref.host, provider: workspace.ref.provider, cwd: workspace.cwd,
+            })}>
+              <Glyph icon={ACTION_ICON.new} />
+              Empezar una aquí
+            </button>
+          }
+        />
+      ) : (
+        <WorkspaceComposer key={workspaceId} workspaceId={workspaceId} draftBody={detail.data.draft.body}
+          draftVersion={detail.data.draft.version} attachments={detail.data.attachments} />
+      )}
+    </div>
+  );
+}
+
+// ---- cabecera -----------------------------------------------------------------
+
+function Header({ workspace, runs, attachments, messageCount }: {
+  workspace: Workspace;
+  runs: Run[];
+  attachments: Attachment[];
+  messageCount: number | null;
+}): JSX.Element {
+  const usage = useUsage(workspace);
+  const rename = useRenameWorkspace(workspace.id);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [details, setDetails] = useState(false);
+  // El destino de los detalles es el del perfil por defecto: el del compositor se ve en el compositor.
+  const target = useTarget(details ? workspace.id : null, 'safe');
+
+  const terminal = terminalHref({
+    host: workspace.ref.host,
+    provider: workspace.ref.provider,
+    sessionId: workspace.ref.sessionId,
+    from: workspace.id,
+  });
+
+  return (
+    <header className="ws-head">
+      <div className="ws-head-main">
+        {editing === null ? (
+          <h2 className="ws-title">
+            <button type="button" className="title-edit" title="Cambiar el nombre"
+              onClick={() => setEditing(workspace.title ?? '')}>
+              {workspace.title ?? 'Sin nombre todavía'}
+              <Glyph icon={ACTION_ICON.rename} size={13} />
+            </button>
+          </h2>
+        ) : (
+          <form className="row" onSubmit={(event) => {
+            event.preventDefault();
+            if (editing.trim()) rename.mutate(editing.trim());
+            setEditing(null);
+          }}>
+            <input className="input" autoFocus value={editing} aria-label="Nombre de la sesión"
+              onChange={(event) => setEditing(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Escape') setEditing(null); }} />
+            <button type="submit" className="btn small primary">Guardar</button>
+          </form>
+        )}
+
+        <div className="ws-meta">
+          <button type="button" className="meta-item linklike-plain" onClick={() => setDetails((value) => !value)}
+            title={workspace.cwd ?? 'sin carpeta'} aria-expanded={details}>
+            <Glyph icon={STATUS_ICON.folder} size={13} />
+            {folderName(workspace.cwd)}
+          </button>
+          <span className="meta-item">
+            <Glyph icon={STATUS_ICON.host} size={13} />
+            {workspace.ref.host}
+          </span>
+          <span className="meta-item">
+            <Glyph icon={PROVIDER_ICON[workspace.ref.provider] ?? NAV_ICON.terminal} size={13} />
+            {workspace.ref.provider}
+          </span>
+          {workspace.sessionLaunched === false ? (
+            <span className="meta-item warn" title="El agente todavía no ha abierto esta sesión en la máquina">
+              sin estrenar
+            </span>
+          ) : null}
+          <UsageBadge query={usage} />
+        </div>
+      </div>
+
+      <div className="ws-actions">
+        <Link to={terminal} className="btn small" title="Abrir esta sesión en la terminal">
+          <Glyph icon={NAV_ICON.terminal} />
+          <span className="chip-text">Terminal</span>
+        </Link>
+        <button type="button" className="btn small ghost" aria-expanded={details}
+          onClick={() => setDetails((value) => !value)}>
+          <Glyph icon={ACTION_ICON.info} />
+          <span className="chip-text">Detalles</span>
+        </button>
+      </div>
+
+      {details ? (
+        <div className="ws-details">
+          <DataRow label="Carpeta">
+            <span className="mono">{workspace.cwd ?? 'sin carpeta'}</span>
+            {workspace.cwdSource === 'derived' ? <span className="faint"> · deducida</span> : null}
+          </DataRow>
+          <DataRow label="Sesión del agente">
+            <span className="mono">{workspace.sessionPending ? 'asignándose…' : workspace.ref.sessionId}</span>
+          </DataRow>
+          <DataRow label="Destino al enviar">
+            <span className="row tight" style={{ justifyContent: 'flex-end' }}>
+              <TargetChip target={target.data?.target} />
+            </span>
+          </DataRow>
+          <DataRow label="Mensajes">{messageCount ?? '—'}</DataRow>
+          <DataRow label="Trabajos desde Jarvis">
+            {runs.length}
+            {runs[0] ? ` · el último duró ${formatDuration(durationOf(runs[0]))}` : ''}
+          </DataRow>
+          <DataRow label="En Jarvis desde">{relativeTime(workspace.createdAt)}</DataRow>
+          {attachments.length ? (
+            <div className="stack" style={{ gap: 4 }}>
+              <span className="small muted">Adjuntos</span>
+              {attachments.map((file) => (
+                <span key={file.id} className="row tight small">
+                  <Glyph icon={ACTION_ICON.attach} size={13} />
+                  <span className="truncate">{file.displayName}</span>
+                  <span className="faint">{formatBytes(file.sizeBytes)} · {ATTACHMENT_STATE[file.state] ?? file.state}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <p className="tiny faint" style={{ margin: 0 }}>
+            <span className="mono">{workspace.id}</span>
+            {' · '}
+            <Link to="/runs">ver todo el trabajo</Link>
+          </p>
+        </div>
+      ) : null}
+      <ErrorNote error={rename.error} />
+    </header>
+  );
+}
+
+// ---- el hilo --------------------------------------------------------------------
+
+function Thread({ workspace, runs, messages, loading, error, truncated, onRetry }: {
+  workspace: Workspace;
+  runs: Run[];
+  messages: TranscriptMessage[];
+  loading: boolean;
+  error: unknown;
+  truncated: boolean;
+  onRetry: () => void;
+}): JSX.Element {
+  const turns = useMemo(() => buildTurns(messages, runs), [messages, runs]);
+  const [showAll, setShowAll] = useState(false);
+  /** Lo que se ha abierto o cerrado a mano. Lo que no está aquí sigue la regla por defecto. */
+  const [manual, setManual] = useState<Record<string, boolean>>({});
+
+  const last = turns.at(-1);
+  const isOpen = (turn: Turn): boolean => manual[turn.key]
+    ?? (turn === last || (turn.kind === 'run' && isRunLive(turn.run.status)));
+  const toggle = (turn: Turn): void => setManual((previous) => ({ ...previous, [turn.key]: !isOpen(turn) }));
+
+  const hidden = showAll ? 0 : Math.max(0, turns.length - VISIBLE_TURNS);
+  const shown = turns.slice(hidden);
+
+  // Lo que se paró mal y nadie ha mirado: se avisa una vez, arriba, con un atajo al turno.
+  const failing = turns.filter((turn): turn is Extract<Turn, { kind: 'run' }> =>
+    turn.kind === 'run' && !turn.run.acknowledgedAt && ['failed', 'timed_out', 'waiting'].includes(turn.run.status));
+  const lastFailing = failing.at(-1);
+
+  const activeRun = runs.find((run) => isRunLive(run.status));
+  useAnnounceOnChange(
+    activeRun ? `${activeRun.id}:${activeRun.status}` : null,
+    (value) => (value && activeRun ? `El trabajo está ${RUN_STATUS[activeRun.status].name.toLowerCase()}.` : null),
+  );
+
+  if (loading && turns.length === 0) return <Loading rows={3} shape="list" label="Cargando la conversación…" />;
+
+  return (
+    <section className="thread" aria-label="Conversación">
+      {error ? <ErrorNote error={error} onRetry={onRetry} /> : null}
+
+      {lastFailing && !isOpen(lastFailing) ? (
+        <button type="button" className="notice danger" onClick={() => {
+          setShowAll(true);
+          setManual((previous) => ({ ...previous, [lastFailing.key]: true }));
+          window.setTimeout(() => document.getElementById(`turn-${lastFailing.key}`)?.scrollIntoView({ block: 'start' }), 0);
+        }}>
+          <Glyph icon={ACTION_ICON.error} size={15} />
+          {failing.length === 1 ? 'Un trabajo se paró mal' : `${failing.length} trabajos se pararon mal`}
+          <span className="notice-go">ver →</span>
+        </button>
+      ) : null}
+
+      {hidden > 0 || truncated ? (
+        <button type="button" className="thread-more" onClick={() => setShowAll(true)} disabled={hidden === 0}>
+          {hidden > 0
+            ? `Ver ${hidden} ${hidden === 1 ? 'turno anterior' : 'turnos anteriores'}`
+            : 'Lo anterior de la sesión está en la terminal'}
+        </button>
+      ) : null}
+
+      {shown.map((turn) => (
+        <Boundary key={turn.key} what="este turno">
+          <TurnCard turn={turn} open={isOpen(turn)} onToggle={() => toggle(turn)} />
+        </Boundary>
+      ))}
+
+      {!loading && !error && turns.length === 0 ? (
+        <Empty
+          tight
+          icon={ACTION_ICON.message}
+          title={workspace.sessionLaunched === false ? 'Sesión nueva' : 'Todavía no hay mensajes'}
+          hint="Escribe abajo lo que quieres que haga el agente."
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function TurnStatus({ turn }: { turn: Turn }): JSX.Element | null {
+  if (turn.kind !== 'run') return null;
+  const status = turn.run.status;
+  const label = RUN_STATUS[status];
+  return (
+    <span className={`turn-status ${label.tone}`} title={`${label.name}. ${label.help}`}>
+      <Glyph icon={RUN_STATUS_ICON[status]} size={14} className={status === 'running' ? 'spin' : undefined} />
+      <span className="visually-hidden">{label.name}</span>
+    </span>
+  );
+}
+
+function TurnCard({ turn, open, onToggle }: { turn: Turn; open: boolean; onToggle: () => void }): JSX.Element {
+  const when = turn.at ? relativeTime(turn.at) : null;
+  const prompt = turn.prompt
+    ? (open ? turn.prompt.trim() : oneLine(turn.prompt, 160))
+    : '(continúa de antes)';
+  const answer = turn.answer ? oneLine(turn.answer, 260) : null;
+  const live = turn.kind === 'run' && isRunLive(turn.run.status);
+
+  return (
+    <article id={`turn-${turn.key}`} className={`turn ${open ? 'open' : ''} ${turn.kind}`}>
+      <button type="button" className="turn-head" aria-expanded={open} onClick={onToggle}>
+        <span className="turn-prompt">
+          <span className="turn-you" aria-hidden="true">Tú</span>
+          <span className={open ? 'turn-prompt-text' : 'turn-prompt-text truncate'}>{prompt}</span>
+        </span>
+        <span className="turn-meta">
+          <TurnStatus turn={turn} />
+          {when ? <span className="tiny faint nowrap">{when}</span> : null}
+          <Glyph icon={open ? ACTION_ICON.scrollUp : ACTION_ICON.scrollDown} size={14} className="faint" />
+        </span>
+        {!open ? (
+          <span className={`turn-answer ${answer ? '' : 'faint'}`}>
+            {answer ?? (live ? 'trabajando…' : 'sin respuesta')}
+          </span>
+        ) : null}
+      </button>
+
+      {open ? (
+        <div className="turn-body">
+          {turn.kind === 'run'
+            ? <RunTurnBody run={turn.run} />
+            : <TranscriptTurnBody messages={turn.messages} prompt={turn.prompt} />}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+/** El turno de un trabajo de Jarvis: su línea de eventos, en directo si sigue vivo. */
+function RunTurnBody({ run }: { run: Run }): JSX.Element {
+  const stream = useRunStream(run.id);
+  const cancel = useCancelRun();
+  const live = isRunLive(run.status);
+
+  const toolbar = (
+    <span className="turn-tools">
+      <RunStatusBadge status={run.status} />
+      <span className={`badge ${PERMISSION[run.permissionProfile].tone}`} title={PERMISSION[run.permissionProfile].help}>
+        <Glyph icon={PERMISSION_ICON[run.permissionProfile]} />
+        {PERMISSION[run.permissionProfile].name}
+      </span>
+      {live && !stream.connected && !stream.ended ? <span className="badge warn">reconectando…</span> : null}
+      {['queued', 'preparing', 'running', 'waiting'].includes(run.status) ? (
+        <button type="button" className="btn small danger" onClick={() => cancel.mutate(run.id)}>
+          <Glyph icon={ACTION_ICON.stop} />
+          Parar
+        </button>
+      ) : null}
+      <Link to={`/runs/${run.id}`} className="btn small icon ghost" title="Abrir en Trabajo" aria-label="Abrir este trabajo en Trabajo">
+        <Glyph icon={ACTION_ICON.external} />
+      </Link>
+    </span>
+  );
+
+  return (
+    <>
+      <ErrorNote error={cancel.error} />
+      {/*
+        * Lo que se pidió ya está en la cabecera del turno: repetirlo como primera fila del hilo era
+        * leerlo dos veces. Cambiar de trabajo empieza de cero: compacto y todo plegado.
+        */}
+      <EventTimeline
+        key={run.id}
+        events={stream.events}
+        toolbar={toolbar}
+        live={live}
+        empty={live
+          ? 'Ya está lanzado; en cuanto el agente diga algo aparece aquí.'
+          : (run.errorMessage ?? 'Este trabajo no dejó eventos.')}
+      />
+    </>
+  );
+}
+
+/**
+ * Lo que vino del transcript de la máquina.
+ *
+ * Un `/model` tecleado en la terminal y su respuesta llegan con `role: "user"` porque así los
+ * guarda el fichero de sesión; se pintan como una línea pequeña, no como un mensaje de nadie.
+ */
+function TranscriptTurnBody({ messages, prompt }: { messages: TranscriptMessage[]; prompt: string | null }): JSX.Element {
+  // El primer mensaje es lo que se pidió, y eso ya está escrito entero en la cabecera del turno.
+  const rest = prompt && messages[0]?.role === 'user' ? messages.slice(1) : messages;
+  return (
+    <div className="messages">
+      {rest.map((message, index) => {
+        if (message.kind !== 'text') {
+          return (
+            <div key={index} className="cli-line" title={message.text}>
+              <Glyph icon={message.kind === 'command' ? ACTION_ICON.go : NAV_ICON.terminal} size={13} />
+              <span className="truncate mono">{message.label}</span>
+            </div>
+          );
+        }
+        return (
+          <div key={index} className={`message ${message.role}`}>
+            <div className="who">
+              <span>{message.role === 'user' ? 'Tú' : message.role === 'assistant' ? 'Agente' : message.role}</span>
+              {message.at ? (
+                <span className="faint" title={new Date(message.at).toLocaleString()}>{relativeTime(message.at)}</span>
+              ) : null}
+            </div>
+            <div className="body">
+              {message.role === 'assistant' ? <Markdown source={message.text} /> : message.text}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---- el compositor --------------------------------------------------------------
+
+function WorkspaceComposer({ workspaceId, draftBody, draftVersion, attachments }: {
+  workspaceId: string;
+  draftBody: string;
+  draftVersion: number;
+  attachments: Attachment[];
+}): JSX.Element {
   const [profile, setProfile] = useState<PermissionProfile>('safe');
   const target = useTarget(workspaceId, profile);
   const createRun = useCreateRun(workspaceId);
   const upload = useUploadAttachment(workspaceId);
+  const saveDraft = useSaveDraft(workspaceId);
   /**
-   * Qué adjuntos van con el próximo envío.
-   *
-   * Se excluye aquí y no se borra allí a propósito: un fichero ya subido vive en la máquina y
-   * caduca solo, y borrarlo de verdad sería otra acción con otras consecuencias. Lo que esta lista
-   * decide es qué se le pasa al agente, que es la pregunta que se hace al escribir.
+   * Qué adjuntos van con el próximo envío. Se excluye aquí y no se borra allí: un fichero subido
+   * vive en la máquina y caduca solo; lo que se decide aquí es qué se le pasa al agente.
    */
   const [excluded, setExcluded] = useState<string[]>([]);
-  const cancelRun = useCancelRun();
-  const saveDraft = useSaveDraft(workspaceId);
-
-  const rename = useRenameWorkspace(workspaceId);
-  const [editingTitle, setEditingTitle] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabId>('actividad');
-
   const [body, setBody] = useState('');
   const [dirty, setDirty] = useState(false);
-  const version = detail.data?.draft.version ?? 0;
-  const textarea = useRef<HTMLTextAreaElement | null>(null);
-
-  // El run que se está mirando: el más reciente, salvo que el usuario elija otro.
-  const [pinnedRunId, setPinnedRunId] = useState<string | null>(null);
-  const runs = detail.data?.runs ?? [];
-  const attachments: Attachment[] = detail.data?.attachments ?? [];
-  const activeRun: Run | undefined = useMemo(() => {
-    if (pinnedRunId) return runs.find((run) => run.id === pinnedRunId);
-    return runs[0];
-  }, [pinnedRunId, runs]);
-  const stream = useRunStream(activeRun ? activeRun.id : null);
-
-  useAnnounceOnChange(
-    activeRun ? `${activeRun.id}:${activeRun.status}` : null,
-    (value) => {
-      if (!value || !activeRun) return null;
-      const label = RUN_STATUS[activeRun.status];
-      return `El trabajo ${activeRun.id.slice(0, 8)} está ${label.name.toLowerCase()}. ${label.help}`;
-    },
-  );
-
-  usePageMeta({
-    title: workspace?.title ?? 'Workspace',
-    ...(workspace ? { subtitle: `${workspace.ref.provider} en ${workspace.ref.host}` } : {}),
-    parent: PARENT,
-  });
 
   /**
-   * Al cambiar de workspace se recarga el borrador del servidor, con el espejo local sólo como
-   * red de seguridad de los últimos segundos. Cambiar de contexto no puede arrastrar el texto de
-   * otro sitio.
+   * Al cambiar de sesión se recarga el borrador del servidor, con el espejo local sólo como red
+   * de seguridad de los últimos segundos. Cambiar de contexto no puede arrastrar texto de otro sitio.
    */
   useEffect(() => {
-    if (!detail.data) return;
     const mirrored = window.localStorage.getItem(draftMirrorKey(workspaceId));
-    setBody(mirrored && mirrored !== detail.data.draft.body ? mirrored : detail.data.draft.body);
-    setDirty(Boolean(mirrored && mirrored !== detail.data.draft.body));
-    setPinnedRunId(null);
-    setTab('actividad');
-  }, [workspaceId, detail.data?.workspace.id]);
+    setBody(mirrored && mirrored !== draftBody ? mirrored : draftBody);
+    setDirty(Boolean(mirrored && mirrored !== draftBody));
+    // Sólo al cambiar de sesión: el borrador del servidor se refresca solo y no debe pisar lo escrito.
+  }, [workspaceId]);
 
-  // Guardado con retardo: escribir no puede costar una petición por tecla, y perder lo escrito
-  // por navegar no es aceptable.
+  // Guardado con retardo: escribir no puede costar una petición por tecla.
   const timer = useRef<number | null>(null);
   const onChangeBody = useCallback((value: string) => {
     setBody(value);
@@ -190,652 +537,98 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
     window.localStorage.setItem(draftMirrorKey(workspaceId), value);
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
-      saveDraft.mutate({ body: value, expectedVersion: version }, {
-        onSuccess: () => setDirty(false),
-      });
+      saveDraft.mutate({ body: value, expectedVersion: draftVersion }, { onSuccess: () => setDirty(false) });
     }, 600);
-  }, [saveDraft, version, workspaceId]);
+  }, [saveDraft, draftVersion, workspaceId]);
+
+  const staged = attachments.filter((file) => file.state === 'staged');
+  const attached = staged.filter((file) => !excluded.includes(file.id));
 
   async function send(): Promise<void> {
     if (!body.trim()) return;
     // La clave de idempotencia es del envío, no del render: un doble toque manda la misma.
-    const idempotencyKey = `${workspaceId}:${version}:${body.length}:${body.slice(0, 24)}`;
-    const created = await createRun.mutateAsync({
+    const idempotencyKey = `${workspaceId}:${draftVersion}:${body.length}:${body.slice(0, 24)}`;
+    await createRun.mutateAsync({
       prompt: body,
       permissionProfile: profile,
       idempotencyKey,
       ...(attached.length ? { attachmentIds: attached.map((file) => file.id) } : {}),
     });
-    // El borrador sólo se limpia cuando el servidor ya tiene el run.
+    // El borrador sólo se limpia cuando el servidor ya tiene el trabajo.
     setBody('');
     setDirty(false);
     window.localStorage.removeItem(draftMirrorKey(workspaceId));
-    saveDraft.mutate({ body: '', expectedVersion: version });
-    setPinnedRunId(created.run.id);
-    setTab('actividad');
+    saveDraft.mutate({ body: '', expectedVersion: draftVersion });
   }
-
-  if (detail.isLoading) {
-    return <div className="page"><Loading rows={4} shape="list" label="Cargando el workspace…" /></div>;
-  }
-  if (detail.error) {
-    return (
-      <div className="page">
-        <ErrorNote error={detail.error} onRetry={() => void detail.refetch()}
-          action={<Link to="/sessions" className="btn small">Volver a Sesiones</Link>} />
-      </div>
-    );
-  }
-  if (!workspace) {
-    return (
-      <div className="page">
-        <ErrorNote
-          error={{ code: 'NOT_FOUND', message: 'Este workspace ya no existe o nunca existió.' }}
-          action={<Link to="/sessions" className="btn small">Buscar la sesión</Link>}
-        />
-      </div>
-    );
-  }
-
-  const events = stream.events;
-  const terminal = terminalHref({
-    host: workspace.ref.host,
-    provider: workspace.ref.provider,
-    sessionId: workspace.ref.sessionId,
-    from: workspace.id,
-  });
-  const attention = runs.filter((run) => ['failed', 'timed_out', 'waiting'].includes(run.status));
-  const messages = transcript.data?.messages ?? [];
-
-  /**
-   * Una sesión que no se puede continuar ni estrenar.
-   *
-   * Lo dice el core, que lo comprobó contra la máquina y lleva dentro la excepción de la sesión
-   * estrenada aquí —también vacía, pero funciona, porque su primer trabajo la crea—. Se deducía en
-   * esta pantalla mirando el número de mensajes, y eso fallaba justo en las sesiones que sólo
-   * guardan un `/comando`: dos turnos de usuario, ninguno que diga nada, y nada que reanudar.
-   */
-  const deadSession = transcript.data?.resumable === false;
-  // Los que tiene la sesión, no los que caben en la página que se ha traído.
-  const messageBadge = messageBadgeText({
-    shown: messages.length, total: transcript.data?.messageCount ?? null,
-  });
-
-  /** Subidos y todavía sin usar: lo que se puede mandar con el próximo trabajo. */
-  const staged = attachments.filter((file) => file.state === 'staged');
-  const attached = staged.filter((file) => !excluded.includes(file.id));
-
-  const suggest = (text: string): void => {
-    onChangeBody(body.trim() ? `${body.trim()}\n${text}` : text);
-    textarea.current?.focus();
-  };
 
   return (
-    <div className="page">
-      {/* Cabecera: qué es esto, dónde vive y qué se puede hacer con ello. */}
-      <Card>
-        <div className="spread" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 0 }}>
-            {editingTitle === null ? (
-              <h2 style={{ margin: '0 0 6px', fontSize: 17 }}>
-                <button type="button" className="title-edit"
-                  title="Cambiar el nombre de este workspace"
-                  onClick={() => setEditingTitle(workspace.title ?? '')}>
-                  {workspace.title ?? 'Sin nombre todavía'}
-                  <Glyph icon={ACTION_ICON.rename} size={13} />
-                </button>
-              </h2>
-            ) : (
-              <form className="row" style={{ marginBottom: 6 }}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (editingTitle.trim()) rename.mutate(editingTitle.trim());
-                  setEditingTitle(null);
-                }}>
-                <input className="input" autoFocus value={editingTitle} aria-label="Nombre del workspace"
-                  onChange={(event) => setEditingTitle(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Escape') setEditingTitle(null); }} />
-                <button type="submit" className="btn small primary">
-                  <Glyph icon={ACTION_ICON.approve} />
-                  Guardar
-                </button>
-              </form>
-            )}
-
-            <div className="row" style={{ gap: 6 }}>
-              <span className="badge neutral">
-                <Glyph icon={PROVIDER_ICON[workspace.ref.provider] ?? NAV_ICON.terminal} />
-                {workspace.ref.provider}
+    <section className="ws-composer" aria-label="Mandar trabajo">
+      <Composer
+        value={body}
+        onChange={onChangeBody}
+        onSubmit={() => void send()}
+        placeholder="¿Qué quieres que haga?"
+        label="Qué quieres que haga el agente"
+        submitLabel="Enviar"
+        submitting={createRun.isPending}
+        disabled={upload.isPending}
+        rows={2}
+        uploading={upload.isPending}
+        onFiles={(chosen) => {
+          // De uno en uno: el core reserva cuota por fichero y así un rechazo dice cuál falló.
+          void chosen.reduce(
+            (chain, file) => chain.then(() => upload.mutateAsync(file).then(() => undefined)),
+            Promise.resolve(),
+          ).catch(() => undefined);
+        }}
+        after={
+          <>
+            {staged.length ? (
+              <div className="facts">
+                {staged.map((file) => {
+                  const off = excluded.includes(file.id);
+                  return (
+                    <span key={file.id} className={`fact ${off ? '' : 'ok'}`}>
+                      <span className="fact-label"><Glyph icon={ACTION_ICON.attach} size={12} /></span>
+                      <span className={`fact-value ${off ? 'faint' : ''}`} title={file.displayName}>
+                        {file.displayName} · {formatBytes(file.sizeBytes)}
+                      </span>
+                      <button type="button" className="linklike tiny"
+                        aria-label={`${off ? 'Incluir' : 'Quitar'} ${file.displayName}`}
+                        onClick={() => setExcluded((list) => (
+                          off ? list.filter((id) => id !== file.id) : [...list, file.id]
+                        ))}>
+                        {off ? 'incluir' : 'quitar'}
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
+            <ErrorNote error={upload.error} />
+            {/*
+              * El permiso se queda a la vista y entero: es lo que decide qué puede tocar el agente
+              * en una máquina de verdad. Lo único que se compacta es la explicación, a una línea.
+              */}
+            <div className="composer-foot">
+              <Segmented label="Qué puede hacer el agente" options={PROFILES} value={profile} onChange={setProfile} />
+              <span className="composer-target small" title={target.data?.target.reason ?? undefined}>
+                {target.data?.target
+                  ? `${target.data.target.provider} · en ${target.data.target.executionHost}`
+                    + (target.data.target.strategy === 'A' ? ` sobre ${target.data.target.workHost}` : '')
+                  : target.isLoading ? 'resolviendo destino…' : 'destino no disponible'}
+                {dirty ? ' · guardando…' : ''}
               </span>
-              <span className="badge neutral">
-                <Glyph icon={STATUS_ICON.host} />
-                {workspace.ref.host}
-              </span>
-              {/*
-                * Una sesión estrenada aquí no existe al otro lado hasta el primer trabajo, y su
-                * identificador puede cambiar si el agente elige el suyo. Decirlo evita dos malas
-                * lecturas: que el historial vacío parezca perdido, y que alguien copie un id que
-                * dentro de un minuto no valdrá.
-                */}
-              {workspace.sessionLaunched === false ? (
-                <span className="badge warn" title="El agente todavía no ha abierto esta sesión en la máquina">
-                  <Glyph icon={ACTION_ICON.new} />
-                  sin estrenar
-                </span>
-              ) : null}
-              {workspace.sessionPending ? (
-                <span className="badge neutral" title={`${workspace.ref.provider} elige su propio identificador y lo dirá al arrancar`}>
-                  <Glyph icon={STATUS_ICON.clock} />
-                  id asignándose
-                </span>
-              ) : null}
-              {workspace.cwd ? (
-                <span
-                  className={`badge ${workspace.cwdSource === 'derived' ? 'warn' : 'neutral'} mono`}
-                  title={workspace.cwdSource === 'derived'
-                    ? `${workspace.cwd} · deducido del nombre del proyecto y comprobado en la máquina: existe. Si te consta otra ruta, cámbiala.`
-                    : workspace.cwd}
-                >
-                  <Glyph icon={STATUS_ICON.folder} />
-                  {workspace.cwd}
-                  {/*
-                    * Una ruta deducida es fiable pero es una deducción: si se equivocara, el agente
-                    * leería y editaría los ficheros de otra carpeta. Se dice en voz baja —no es una
-                    * alarma— pero se dice.
-                    */}
-                  {workspace.cwdSource === 'derived' ? (
-                    <span className="tiny" style={{ fontWeight: 600 }}>· deducida</span>
-                  ) : null}
-                </span>
-              ) : null}
-              {messages.length ? (
-                <span className="badge neutral" title={messageBadge.title}>
-                  <Glyph icon={STATUS_ICON.message} />
-                  {messageBadge.text}
-                </span>
-              ) : null}
-              <UsageBadge query={usage} />
             </div>
-          </div>
-
-          <div className="row">
-            <Link to={terminal} className="btn">
-              <Glyph icon={NAV_ICON.terminal} />
-              Abrir terminal
-            </Link>
-            <Link to="/runs" className="btn">
-              <Glyph icon={NAV_ICON.runs} />
-              Ver todo el trabajo
-            </Link>
-          </div>
-        </div>
-        <ErrorNote error={rename.error} />
-      </Card>
-
-      {attention.length ? (
-        <p className="note" role="status">
-          <Glyph icon={ACTION_ICON.error} size={16} />
-          <span>
-            {attention.length === 1
-              ? 'Un trabajo de este workspace se paró mal. '
-              : `${attention.length} trabajos de este workspace se pararon mal. `}
-            <button type="button" className="linklike"
-              onClick={() => { setPinnedRunId(attention[0]?.id ?? null); setTab('actividad'); }}>
-              Ver el último
-            </button>
-          </span>
-        </p>
-      ) : null}
-
-      <div className="grid main-side">
-        <div className="stack" style={{ gap: 14 }}>
-          <Card>
-            <Tabs
-              label="Vistas del workspace"
-              active={tab}
-              onChange={(id) => setTab(id as TabId)}
-              tabs={[
-                { id: 'actividad', label: 'Actividad', icon: STATUS_ICON.activity },
-                { id: 'conversacion', label: 'Conversación', icon: ACTION_ICON.message, count: messages.length },
-                { id: 'contexto', label: 'Archivos y contexto', icon: ACTION_ICON.attach, count: attachments.length },
-                { id: 'ajustes', label: 'Configuración', icon: ACTION_ICON.settings },
-              ]}
-            />
-
-            {tab === 'actividad' ? (
-              activeRun ? (
-                <>
-                  <div className="row" style={{ marginBottom: 12 }}>
-                    <RunStatusBadge status={activeRun.status} />
-                    <span className="small muted mono">{activeRun.id.slice(0, 10)}</span>
-                    <span className="small muted">{relativeTime(activeRun.startedAt ?? activeRun.createdAt)}</span>
-                    <span className="badge neutral">
-                      <Glyph icon={STATUS_ICON.host} />
-                      {activeRun.executionHost}
-                    </span>
-                    {activeRun.strategy === 'A' ? (
-                      <span className="badge warn">trabaja sobre {activeRun.workHost}</span>
-                    ) : null}
-                    <span className={`badge ${PERMISSION[activeRun.permissionProfile].tone}`}>
-                      <Glyph icon={PERMISSION_ICON[activeRun.permissionProfile]} />
-                      {PERMISSION[activeRun.permissionProfile].name}
-                    </span>
-                    {!stream.connected && !stream.ended ? (
-                      <span className="badge warn">
-                        <Glyph icon={ACTION_ICON.connect} />
-                        reconectando…
-                      </span>
-                    ) : null}
-                    <span className="row" style={{ marginLeft: 'auto' }}>
-                      <Link to={`/runs/${activeRun.id}`} className="btn small">
-                        <Glyph icon={ACTION_ICON.external} />
-                        Abrir el trabajo
-                      </Link>
-                      {['queued', 'preparing', 'running', 'waiting'].includes(activeRun.status) ? (
-                        <button type="button" className="btn small danger"
-                          onClick={() => cancelRun.mutate(activeRun.id)}>
-                          <Glyph icon={ACTION_ICON.stop} />
-                          Parar
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
-                  {/* Cambiar de trabajo empieza de cero: compacto y todo plegado. Ver `runs.tsx`. */}
-                  <EventTimeline
-                    key={activeRun.id}
-                    events={events}
-                    userMessage={activeRun.promptPreview}
-                    live={isRunLive(activeRun.status)}
-                    empty="El trabajo ya está lanzado; en cuanto el agente diga algo aparece aquí, y se queda guardado."
-                  />
-                </>
-              ) : (
-                <Empty
-                  icon={ACTION_ICON.send}
-                  title="Todavía no has mandado nada aquí"
-                  hint="Lo que escribas abajo se ejecuta en la máquina de la cabecera, con el permiso que elijas. Aquí verás lo que vaya haciendo, paso a paso."
-                  action={
-                    <button type="button" className="btn primary"
-                      onClick={() => textarea.current?.focus()}>
-                      <Glyph icon={ACTION_ICON.send} />
-                      Escribir la primera tarea
-                    </button>
-                  }
-                />
-              )
-            ) : null}
-
-            {tab === 'conversacion' ? (
-              <>
-                <p className="small muted" style={{ margin: '0 0 10px' }}>
-                  Escrito por el agente en {workspace.ref.host}. Jarvis sólo lo lee.
-                </p>
-                <StaleNote stale={Boolean(transcript.error)} />
-                {transcript.isLoading ? <Loading rows={3} shape="text" label="Cargando la conversación…" /> : null}
-                {transcript.error ? (
-                  <ErrorNote error={transcript.error} onRetry={() => void transcript.refetch()} />
-                ) : null}
-                {/*
-                  * Una zona con scroll propio necesita ser alcanzable con el teclado: sin
-                  * `tabindex` no hay forma de bajar por ella sin ratón.
-                  */}
-                <div className="messages" tabIndex={0} role="region"
-                  aria-label="Conversación de la sesión">
-                  {messages.map((message, index) => (
-                    message.kind === 'text'
-                      ? (
-                        <div key={index} className={`message ${message.role}`}>
-                          <div className="who">
-                            <span>{message.role}</span>
-                            <span className="badge neutral">
-                              <Glyph icon={PROVENANCE_ICON[message.provenance] ?? PROVENANCE_ICON['system'] as never} size={13} />
-                              {PROVENANCE[message.provenance] ?? message.provenance}
-                            </span>
-                            {message.at ? <span>{new Date(message.at).toLocaleString()}</span> : null}
-                          </div>
-                          <div className="body">{message.text}</div>
-                        </div>
-                      )
-                      : <CliLine key={index} message={message} />
-                  ))}
-                  {!transcript.isLoading && !transcript.error && messages.length === 0 ? (
-                    <Empty
-                      tight
-                      icon={ACTION_ICON.message}
-                      title={workspace.sessionLaunched === false
-                        ? 'Esta sesión todavía no existe en la máquina'
-                        : 'Esta sesión todavía no tiene mensajes'}
-                      hint={workspace.sessionLaunched === false
-                        ? 'Se estrenó desde aquí y el agente la abrirá con la primera tarea que le mandes. Hasta entonces no hay nada que traer.'
-                        : 'Aparecerán aquí en cuanto el agente hable en la máquina, lo mandes tú desde abajo o alguien trabaje en esa sesión por su cuenta.'}
-                    />
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-
-            {tab === 'contexto' ? (
-              <div className="stack">
-                <p className="small muted" style={{ margin: 0 }}>
-                  Lo que el agente puede ver: la carpeta donde trabaja y los ficheros que le subiste.
-                  Jarvis les da un nombre propio en la máquina y los borra al terminar.
-                </p>
-                <div className="stack" style={{ gap: 7 }}>
-                  <DataRow label="Carpeta de trabajo">
-                    <span className="mono">{workspace.cwd ?? 'sin carpeta'}</span>
-                  </DataRow>
-                  <DataRow label="Sesión del agente">
-                    <span className="mono">
-                      {workspace.sessionPending ? 'asignándose…' : workspace.ref.sessionId}
-                    </span>
-                  </DataRow>
-                </div>
-
-                <div>
-                  <div className="spread" style={{ marginBottom: 8 }}>
-                    <span className="small muted">Adjuntos</span>
-                    <span className="tiny faint">{attachments.length}</span>
-                  </div>
-                  {attachments.length === 0 ? (
-                    <Empty
-                      tight
-                      icon={ACTION_ICON.attach}
-                      title="Sin adjuntos"
-                      hint="Se suben desde el compositor, con «Adjuntar ficheros». Viven en la máquina con un nombre que pone Jarvis y caducan solos."
-                    />
-                  ) : (
-                    <div className="list">
-                      {attachments.map((file) => (
-                        <div key={file.id} className="list-item" style={{ cursor: 'default' }}>
-                          <span className="row tight nowrap" style={{ minWidth: 0 }}>
-                            <Glyph icon={ACTION_ICON.attach} />
-                            <span className="truncate">{file.displayName}</span>
-                            <span className="tiny faint">{formatBytes(file.sizeBytes)}</span>
-                          </span>
-                          <span className="row tight nowrap">
-                            <span className={`badge ${file.state === 'failed' ? 'danger' : file.state === 'expired' ? 'warn' : 'neutral'}`}>
-                              {ATTACHMENT_STATE[file.state] ?? file.state}
-                            </span>
-                            <span className="tiny faint">{relativeTime(file.createdAt)}</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {tab === 'ajustes' ? (
-              <div className="stack">
-                <div className="stack" style={{ gap: 7 }}>
-                  <DataRow label="Identificador">
-                    <span className="mono">{workspace.id}</span>
-                  </DataRow>
-                  <DataRow label="Máquina">{workspace.ref.host}</DataRow>
-                  <DataRow label="Agente">{workspace.ref.provider}</DataRow>
-                  <DataRow label="Sesión">
-                    <span className="mono">
-                      {workspace.sessionPending ? 'asignándose…' : workspace.ref.sessionId}
-                    </span>
-                  </DataRow>
-                  <DataRow label="Creado">{relativeTime(workspace.createdAt)}</DataRow>
-                </div>
-
-                <div>
-                  <p className="small muted" style={{ margin: '0 0 8px' }}>Destino que se usará al enviar</p>
-                  <div className="composer-target">
-                    <TargetChip target={target.data?.target} />
-                  </div>
-                  {target.data?.target.reason ? (
-                    <p className="tiny faint" style={{ margin: '8px 0 0' }}>{target.data.target.reason}</p>
-                  ) : null}
-                </div>
-
-                <p className="note">
-                  <Glyph icon={ACTION_ICON.secure} size={16} />
-                  <span>
-                    El nombre del workspace es tuyo: si lo cambias, Jarvis deja de reescribirlo con
-                    el título que trae la sesión.
-                  </span>
-                </p>
-              </div>
-            ) : null}
-          </Card>
-
-          {/*
-            * Una sesión sin nada que continuar.
-            *
-            * Las que dejó el puente del stack anterior tienen el fichero pero ni un turno: el
-            * agente no las reanuda («No conversation found») ni las estrena («Session ID already
-            * in use»). Ofrecer el compositor ahí es ofrecer un fallo garantizado veinte segundos
-            * después. Lo único que se puede hacer es empezar una conversación nueva, así que es lo
-            * que se ofrece, con la máquina y la carpeta ya puestas.
-            *
-            * No aplica a las estrenadas desde aquí: ésas están vacías porque todavía no se han
-            * usado, y su primer trabajo las crea.
-            */}
-          {deadSession ? (
-            <Card>
-              <Empty
-                icon={ACTION_ICON.empty}
-                title="Aquí no hay conversación que continuar"
-                hint={`Esta sesión existe en ${workspace.ref.host} pero no guarda ningún turno, así que ${workspace.ref.provider} no puede reanudarla ni reutilizar su identificador. Lo que sí se puede es empezar una conversación nueva en la misma carpeta.`}
-                action={
-                  <button type="button" className="btn primary" onClick={() => openNewSession({
-                    host: workspace.ref.host,
-                    provider: workspace.ref.provider,
-                    cwd: workspace.cwd,
-                  })}>
-                    <Glyph icon={ACTION_ICON.new} />
-                    Empezar una conversación aquí
-                  </button>
-                }
-              />
-            </Card>
-          ) : null}
-
-          {/* El compositor no vive dentro de una pestaña: es lo que se viene a hacer aquí. */}
-          {!deadSession && (tab === 'actividad' || tab === 'conversacion') ? (
-            <Card className="composer">
-              <div className="composer-target">
-                <TargetChip target={target.data?.target} />
-                {target.isLoading ? <span className="small muted">resolviendo destino…</span> : null}
-                {target.error ? <span className="badge danger">destino no disponible</span> : null}
-              </div>
-              <ErrorNote error={target.error} />
-
-              {/*
-                * La misma barra que el hilo del asistente: textarea, clip y envío juntos.
-                *
-                * Lo que **no** se comparte es la forma de conversación. Aquí no hay burbujas y no
-                * las va a haber: esto es un borrador que se guarda con versión y que al enviarse
-                * lanza trabajo en una máquina con un permiso. Parecer un chat prometería un ida y
-                * vuelta que no existe, y sobre todo empujaría el perfil de permiso fuera de la
-                * vista, que es lo último que puede pasar en esta pantalla.
-                *
-                * Enter **no** envía aquí, y es la única diferencia de comportamiento: se escriben
-                * tareas de varias líneas, y un Enter de más lanzaría trabajo en un servidor.
-                */}
-              <Composer
-                value={body}
-                onChange={onChangeBody}
-                onSubmit={() => void send()}
-                placeholder="Describe la tarea. Se manda a la máquina de arriba con el permiso que elijas."
-                label="Qué quieres que haga el agente"
-                submitLabel="Enviar"
-                submitting={createRun.isPending}
-                disabled={upload.isPending}
-                rows={4}
-                uploading={upload.isPending}
-                onFiles={(chosen) => {
-                  // De uno en uno: el core reserva cuota por fichero y así un rechazo dice cuál
-                  // falló, en vez de dejar media subida a medias sin saber de quién es.
-                  void chosen.reduce(
-                    (chain, file) => chain.then(() => upload.mutateAsync(file).then(() => undefined)),
-                    Promise.resolve(),
-                  ).catch(() => undefined);
-                }}
-                before={
-                  <>
-                    <div className="spread" style={{ flexWrap: 'wrap', gap: 8 }}>
-                      <span className="small muted">
-                        Qué quieres que haga
-                        {dirty ? ' · guardando borrador…' : version ? ' · borrador guardado' : ''}
-                      </span>
-                      {staged.length ? (
-                        <span className="tiny faint">
-                          {attached.length} de {staged.length} irán con este envío
-                        </span>
-                      ) : null}
-                    </div>
-              {/*
-                * El permiso se queda donde estaba y **entero**.
-                *
-                * Es lo único de esta pantalla que no se compacta: es lo que decide qué puede tocar
-                * el agente en una máquina de verdad, y su explicación va debajo sin plegar. El
-                * botón de envío se fue a la barra, pero esto no se va con él.
-                */}
-              <Segmented
-                label="Qué puede hacer el agente"
-                options={PROFILES}
-                value={profile}
-                onChange={setProfile}
-              />
-                    <p className="small muted permission-help" style={{ margin: 0 }}>
-                      <Glyph icon={PERMISSION_ICON[profile]} />
-                      <span>{PERMISSION[profile].help}</span>
-                    </p>
-                  </>
-                }
-                after={
-                  <>
-              {staged.length ? (
-                <div className="facts">
-                  {staged.map((file) => {
-                    const off = excluded.includes(file.id);
-                    return (
-                      <span key={file.id} className={`fact ${off ? '' : 'ok'}`}>
-                        <span className="fact-label">
-                          <Glyph icon={ACTION_ICON.attach} size={12} />
-                        </span>
-                        <span className={`fact-value ${off ? 'faint' : ''}`} title={file.displayName}>
-                          {file.displayName} · {formatBytes(file.sizeBytes)}
-                        </span>
-                        <button type="button" className="linklike tiny"
-                          aria-label={`${off ? 'Incluir' : 'Quitar'} ${file.displayName}`}
-                          onClick={() => setExcluded((list) => (
-                            off ? list.filter((id) => id !== file.id) : [...list, file.id]
-                          ))}>
-                          {off ? 'incluir' : 'quitar'}
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
-              ) : null}
-              <ErrorNote error={upload.error} />
-
-              <div className="suggestions">
-                {SUGGESTIONS.map((text) => (
-                  <button key={text} type="button" className="suggestion" onClick={() => suggest(text)}>
-                    <Glyph icon={ACTION_ICON.go} size={13} />
-                    {text}
-                  </button>
-                ))}
-              </div>
-                  </>
-                }
-              />
-
-              <ErrorNote error={createRun.error} />
-            </Card>
-          ) : null}
-        </div>
-
-        <div className="stack" style={{ gap: 14 }}>
-          {/*
-            * La otra puerta al asistente.
-            *
-            * El panel de abajo delega un objetivo y devuelve un plan; esto abre una conversación
-            * sobre esta sesión, que es lo que se quiere cuando la pregunta es «¿de qué iba esto?».
-            * Va con el workspace pegado: sin él la conversación es sobre la casa, no alcanza el
-            * trabajo de aquí y la terminal que acabe ofreciendo abriría en el home.
-            */}
-          <div className="row">
-            <AskAssistantButton
-              className="btn"
-              workspaceId={workspaceId}
-              prompt={'¿De qué va esta sesión y en qué punto está? Léela entera, no te quedes en el título.'}
-            >
-              Pregúntale sobre esta sesión
-            </AskAssistantButton>
-          </div>
-
-          <AssistantPanel workspaceId={workspaceId} />
-
-          <Card title="Trabajos de este workspace" icon={NAV_ICON.runs} count={runs.length}
-            {...(attention.length ? { countTone: 'attention' as const } : {})}>
-            <div className="list">
-              {runs.map((run) => (
-                <button key={run.id} type="button" className="list-item"
-                  aria-current={activeRun?.id === run.id}
-                  title={run.promptPreview ?? undefined}
-                  onClick={() => { setPinnedRunId(run.id); setTab('actividad'); }}>
-                  <span className="row tight nowrap" style={{ minWidth: 0 }}>
-                    <RunStatusBadge status={run.status} />
-                    <span className="cell-main">
-                      <span className="title truncate">{runTitle(run)}</span>
-                      <span className="tiny faint mono truncate">{run.id.slice(0, 8)}</span>
-                    </span>
-                  </span>
-                  <span className="row tight nowrap">
-                    <span className={`badge ${PERMISSION[run.permissionProfile].tone}`}>
-                      <Glyph icon={PERMISSION_ICON[run.permissionProfile]} size={13} />
-                      {PERMISSION[run.permissionProfile].name}
-                    </span>
-                    <span className="tiny faint">{relativeTime(run.createdAt)}</span>
-                  </span>
-                </button>
-              ))}
-              {runs.length === 0 ? (
-                <Empty
-                  tight
-                  icon={NAV_ICON.runs}
-                  title="Ningún trabajo todavía"
-                  hint="Cada cosa que mandes desde abajo deja aquí su registro, con su permiso y su evidencia."
-                />
-              ) : null}
-            </div>
-          </Card>
-
-          <Card title="Resumen" icon={ACTION_ICON.session}>
-            <div className="stack" style={{ gap: 7 }}>
-              <DataRow label="Mensajes en la sesión">
-                {transcript.data?.messageCount ?? messages.length ?? '—'}
-                {transcript.data && transcript.data.messageCount !== null
-                  && transcript.data.messageCount > messages.length
-                  ? <span className="muted small"> · aquí se ven los {messages.length} últimos</span>
-                  : null}
-              </DataRow>
-              <DataRow label="Trabajos lanzados">{runs.length}</DataRow>
-              <DataRow label="Último trabajo">{relativeTime(runs[0]?.createdAt ?? null)}</DataRow>
-              <DataRow label="Duración del último">
-                {formatDuration(durationOf(runs[0]))}
-              </DataRow>
-              <DataRow label="Adjuntos vivos">
-                {attachments.filter((file) => file.state === 'staged' || file.state === 'claimed').length}
-              </DataRow>
-            </div>
-          </Card>
-        </div>
-      </div>
-    </div>
+            <p className="tiny muted permission-help">
+              <Glyph icon={PERMISSION_ICON[profile]} size={13} />
+              <span>{PERMISSION[profile].help}</span>
+            </p>
+            <ErrorNote error={target.error} />
+          </>
+        }
+      />
+      <ErrorNote error={createRun.error} />
+    </section>
   );
 }
-
-/** Constante para que las migas no sean un objeto nuevo en cada render. */
-const PARENT = { label: 'Sesiones', to: '/sessions' } as const;
-
-const durationOf = (run: Run | undefined): number | null =>
-  run?.startedAt && run.finishedAt ? Date.parse(run.finishedAt) - Date.parse(run.startedAt) : null;

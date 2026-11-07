@@ -19,11 +19,12 @@ test('capturas', async ({ page }, testInfo) => {
   await page.waitForTimeout(1200);
   await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-sesiones-lista.png` });
 
-  await page.getByRole('row', { name: /timeout del pool/i }).click();
+  await page.locator('.group-head').first().click();
+  await page.locator('.session-head', { hasText: /timeout del pool/i }).click();
   await page.waitForTimeout(600);
   await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-sesiones.png` });
 
-  await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
+  await page.getByRole('button', { name: 'Abrir', exact: true }).click();
   // Un trabajo de verdad: sin eventos, la línea de tiempo no se puede mirar.
   await page.getByLabel('Qué quieres que haga el agente').fill('@@slow:4 revisa el pool');
   await page.getByRole('button', { name: 'Enviar' }).click();
@@ -32,9 +33,9 @@ test('capturas', async ({ page }, testInfo) => {
   await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-workspace.png`, fullPage: false });
 
   // El detalle en crudo de un evento: lo que sustituye al volcado de JSON en la línea de tiempo.
-  const card = page.locator('.event-card').first();
-  if (await card.count()) {
-    await card.click();
+  const raw = page.locator('.event-more').first();
+  if (await raw.count()) {
+    await raw.click();
     await page.waitForTimeout(600);
     await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-evento.png`, fullPage: false });
     await page.keyboard.press('Escape');
@@ -47,19 +48,4 @@ test('capturas', async ({ page }, testInfo) => {
   await nav(page, /^Salud/).click();
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-salud.png`, fullPage: false });
-
-  /*
-   * El Asistente, que es donde más se nota el ancho.
-   *
-   * En estrecho la lista de conversaciones es una hoja que se pide, no una tira permanente: la
-   * captura sirve justo para ver que el hilo se queda con la pantalla y que el compositor no se ha
-   * ido debajo del pulgar.
-   */
-  await nav(page, /^Asistente/).click();
-  await page.waitForTimeout(800);
-  await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-asistente.png` });
-
-  await nav(page, /^Inicio/).click();
-  await page.waitForTimeout(1000);
-  await page.screenshot({ path: `evidence/ui-${testInfo.project.name}-inicio.png`, fullPage: false });
 });

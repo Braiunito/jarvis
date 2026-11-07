@@ -12,6 +12,8 @@ export interface PageMeta {
   subtitle?: string;
   /** Migas: de dónde viene esta pantalla, cuando venir de algún sitio significa algo. */
   parent?: { label: string; to: string };
+  /** El título de la pestaña del navegador, cuando no es el de la cabecera. */
+  documentTitle?: string;
 }
 
 interface Store {
@@ -33,10 +35,10 @@ export function usePageMetaValue(): PageMeta {
 
 export function usePageMeta(meta: PageMeta): void {
   const store = useContext(PageMetaContext);
-  const { title, subtitle, parent } = meta;
+  const { title, subtitle, parent, documentTitle } = meta;
   useEffect(() => {
     store?.set({ title, ...(subtitle ? { subtitle } : {}), ...(parent ? { parent } : {}) });
-    document.title = `${title} · Jarvis`;
+    document.title = `${documentTitle ?? title} · Jarvis`;
     // Las dependencias son los valores, no el objeto: si no, esto se dispararía en cada render.
-  }, [store, title, subtitle, parent?.label, parent?.to]);
+  }, [store, title, subtitle, parent?.label, parent?.to, documentTitle]);
 }

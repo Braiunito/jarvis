@@ -4,6 +4,28 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 
 ## [0.1.0] — en curso · migración desde LiteChat
 
+### Cambiado — la interfaz, compacta (2026-11-07)
+
+- **Fuera la sección Asistente** y todo lo que colgaba de ella en las demás pantallas: el panel de
+  objetivos del workspace, los botones «Pregúntale», el aviso de permisos pendientes de la
+  cabecera. El core no se ha tocado: sus rutas siguen ahí, pero la consola ya no las usa.
+- **Sesiones es la portada**, y la portada de cifras desaparece. Las sesiones se agrupan por la
+  carpeta donde se ejecutaron, con el nombre corto —`jarvis`, no `/var/www/jarvis`—: todas las de
+  `jarvis` juntas aunque sean de máquinas distintas, grupos y sesiones ordenados por lo último que
+  se movió. Se abre el grupo, se pulsa la sesión y ahí están su ruta completa, de qué iba y «Abrir».
+  El grupo abierto va en la URL, así que la miga «Sesiones › jarvis» vuelve a él.
+- **Una sesión es un hilo**, sin pestañas. Cada turno —lo que pediste y lo que hizo el agente hasta
+  contestar— es una tarjeta plegada que se lee en dos líneas; el último viene abierto, y abrir uno
+  enseña el turno entero con su proceso en tarjetas compactas que también se despliegan. Lo hablado
+  desde la terminal y los trabajos lanzados desde Jarvis van en el mismo hilo, sin repetirse.
+  Contexto, ajustes, adjuntos y la lista de trabajos pasan a «Detalles», plegado.
+- **Las respuestas del agente se leen enteras y con formato**: antes se cortaban a 600 caracteres y
+  el «resultado» repetía el último mensaje.
+- **Trabajo** pierde las cifras de 24 h, la explicación plegada y los filtros por agente, máquina y
+  fecha; queda la lista con «Todos / En marcha / Atención» y el detalle. **Salud** pliega lo que va
+  bien y recoge la cuota de las cuentas y los datos del sistema, que antes vivían en la portada y en
+  la barra de abajo, que también se va.
+
 ### Añadido
 
 - **El asistente piensa en casa** (ADR-009): el cerebro deja de ser una API de pago y pasa a ser el

@@ -281,18 +281,17 @@ a:hover { text-decoration: underline; }
 }
 
 .nav a .count.attention { background: var(--danger); }
+.nav a .count.warn { background: var(--warn); color: #1a1300; }
 
 .rail-status {
-  display: grid;
-  gap: 3px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 12px;
   font-size: 12px;
+  color: var(--text-muted);
 }
-
-.rail-status .line { display: flex; align-items: center; gap: 7px; color: var(--text); }
 
 .rail-collapse {
   display: flex;
@@ -336,7 +335,9 @@ a:hover { text-decoration: underline; }
   padding-top: max(12px, env(safe-area-inset-top));
 }
 
-.page-heading { display: grid; gap: 1px; min-width: 0; }
+.page-heading { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.crumb { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; font-size: 17px; color: var(--text-faint); }
+.crumb a { color: var(--text-muted); }
 .page-heading h1 { margin: 0; font-size: 19px; letter-spacing: -0.02em; color: var(--text-strong); }
 .page-heading p { margin: 0; font-size: 12.5px; color: var(--text-muted); }
 
@@ -397,33 +398,16 @@ a:hover { text-decoration: underline; }
   flex: 0 0 auto;
 }
 
-.statusbar {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-  padding: 9px 18px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-rail);
-  font-size: 12px;
-  color: var(--text-muted);
-  padding-bottom: max(9px, env(safe-area-inset-bottom));
-}
-.statusbar .item { display: inline-flex; align-items: center; gap: 7px; }
-.statusbar .item strong { color: var(--text); font-weight: 600; }
-
 /* -------------------------------------------------------------- contenedores */
 
 .page { padding: 18px; display: grid; gap: 14px; align-content: start; min-width: 0; }
 
 .grid { display: grid; gap: 14px; min-width: 0; }
-.grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
 .grid.main-side { grid-template-columns: minmax(0, 1.75fr) minmax(320px, 1fr); align-items: start; }
 
 @media (max-width: 1180px) {
-  .grid.cols-3, .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
   .grid.main-side { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -483,21 +467,6 @@ a:hover { text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) {
   .card.detail-sheet.is-open, .detail-sheet-backdrop { animation: none; }
-}
-@media (max-width: 760px) {
-  .grid.cols-3, .grid.cols-2, .grid.cols-4 { grid-template-columns: minmax(0, 1fr); }
-
-  /*
-   * Las cifras se quedan en dos columnas, aunque el resto se apile.
-   *
-   * Una cifra es un número grande y tres palabras: cabe de sobra en media pantalla de teléfono.
-   * Apiladas de una en una, las tres tarjetas de arriba del explorador ocupaban unos 270 px y
-   * empujaban la primera sesión fuera de la vista, en la pantalla cuyo trabajo es enseñar
-   * sesiones. Se distinguen por lo que llevan dentro y no por una clase nueva, para que valga
-   * igual en las cuatro pantallas que las usan sin tener que acordarse de ponerla.
-   */
-  .grid.cols-3:has(> .card > .stat),
-  .grid.cols-4:has(> .card > .stat) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .card {
@@ -595,7 +564,6 @@ a:hover { text-decoration: underline; }
 .btn.small { min-height: 32px; padding: 0 10px; font-size: 12.5px; }
 .btn.icon { min-height: 34px; width: 34px; padding: 0; }
 .btn.block { width: 100%; }
-.btn.tall { min-height: 56px; justify-content: flex-start; }
 
 .input, .textarea, .select {
   width: 100%;
@@ -611,7 +579,7 @@ a:hover { text-decoration: underline; }
 
 .input:focus, .textarea:focus, .select:focus,
 .btn:focus-visible, .nav a:focus-visible, .list-item:focus-visible, .topbar-search:focus-visible,
-.segmented button:focus-visible, .tabs button:focus-visible, .table tbody tr:focus-visible {
+.segmented button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -692,11 +660,6 @@ a:hover { text-decoration: underline; }
 .spin { animation: spin 1.1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.delta { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; }
-.delta.up { color: var(--ok); }
-.delta.down { color: var(--danger); }
-.delta.flat { color: var(--text-muted); }
-
 /* ------------------------------------------------------------------- listas */
 
 .list { display: grid; gap: 7px; }
@@ -738,115 +701,12 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
   text-align: left;
 }
-.list-item.plain { cursor: default; }
-.list-item.plain:hover { border-color: var(--border); background: var(--bg-sunken); }
-
-/* Fila con marca a la izquierda: se recorre la lista mirando una sola columna. */
-.lead { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px; align-items: start; }
-.lead-mark {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  flex: 0 0 auto;
-}
-.lead-mark.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
-.lead-mark.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
-.lead-mark.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-.lead-mark.running { color: var(--running); border-color: color-mix(in srgb, var(--running) 35%, transparent); }
-.lead-mark.accent { color: var(--accent); border-color: var(--border-accent); }
-.lead-mark.big { width: 52px; height: 52px; border-radius: var(--radius); }
-
-/* --------------------------------------------------------------------- tabla */
-
-.table { width: 100%; border-collapse: collapse; }
-.table th {
-  text-align: left;
-  font-size: 11.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.table tbody tr { cursor: pointer; }
-.table tbody tr:hover { background: var(--bg-elevated); }
-.table tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 5%, var(--bg-card)); }
-.table tbody tr[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-/*
- * Dos líneas apiladas en una celda o en una fila.
- *
- * Estaba definida sólo dentro de `.table`, así que fuera de una tabla las dos líneas se pegaban en
- * una sola y el texto se salía de la tarjeta —se vio en la evidencia de la síntesis del Assistant—.
- * Es un patrón de fila, no de tabla.
- */
-.cell-main { display: grid; gap: 2px; min-width: 0; }
-.cell-main > * { min-width: 0; }
-.table-wrap { overflow-x: auto; }
-
-@media (max-width: 900px) {
-  /* En estrecho la tabla deja de serlo: cada fila es una tarjeta con lo que de verdad importa. */
-  .table thead { display: none; }
-  .table tbody tr { display: grid; gap: 6px; padding: 11px 12px; }
-  .table td { border: 0; padding: 0; }
-  .table td.optional { display: none; }
-  .table tbody tr[aria-selected="true"] td:first-child { box-shadow: none; }
-  .table tbody tr[aria-selected="true"] { box-shadow: inset 3px 0 0 var(--accent); }
-}
-
-/* ------------------------------------------------------------------- gráficos */
-
-.spark { display: block; width: 100%; height: 44px; overflow: visible; }
-.donut { display: block; }
-.legend { display: grid; gap: 7px; font-size: 12.5px; }
-.legend .row-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 9px; align-items: center; }
-.legend .swatch { width: 8px; height: 8px; border-radius: 2px; }
 
 .meter { height: 6px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; border: 1px solid var(--border); }
 .meter > span { display: block; height: 100%; background: var(--accent); }
 .meter.ok > span { background: var(--ok); }
 .meter.warn > span { background: var(--warn); }
 .meter.danger > span { background: var(--danger); }
-
-.stat { display: grid; gap: 6px; }
-.stat .value { font-size: 27px; font-weight: 680; letter-spacing: -0.03em; color: var(--text-strong); line-height: 1.1; }
-.stat .label { font-size: 12.5px; color: var(--text-muted); }
-
-/* ---------------------------------------------------------------- pestañas */
-
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; overflow-x: auto; }
-.tabs button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 13px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.tabs button:hover { color: var(--text); }
-.tabs button[aria-selected="true"] { color: var(--text-strong); border-bottom-color: var(--accent); font-weight: 600; }
-.tabs .count {
-  min-width: 19px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  font-size: 11px;
-  font-weight: 700;
-}
 
 /* ------------------------------------------------------------------ timeline */
 
@@ -872,26 +732,6 @@ a:hover { text-decoration: underline; }
 .tl-dot.running { color: var(--running); border-color: color-mix(in srgb, var(--running) 45%, transparent); }
 .tl-dot.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 .tl-line { width: 1px; height: 100%; background: var(--border); min-height: 8px; }
-.tl-body {
-  margin: 7px 0 11px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-sunken);
-  min-width: 0;
-}
-.tl-body .head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 6px; }
-.tl-body pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 12.5px;
-  color: var(--text);
-}
-.tl-body.error { border-left: 3px solid var(--danger); }
-.tl-body.tool { border-left: 3px solid var(--warn); }
-.tl-body.text { border-left: 3px solid var(--running); }
 
 @media (max-width: 620px) {
   .tl-row { grid-template-columns: auto minmax(0, 1fr); }
@@ -930,24 +770,12 @@ a:hover { text-decoration: underline; }
 }
 
 .event-card.answer {
-  padding: 14px 15px;
-  margin: 8px 0;
+  padding: 10px 13px;
+  margin: 5px 0;
   border-left-width: 3px;
   border-left-color: var(--running);
   border-color: color-mix(in srgb, var(--running) 28%, var(--border));
-  background: color-mix(in srgb, var(--running) 7%, var(--bg-card));
-  box-shadow: var(--shadow);
-}
-/*
- * El hover cambia el borde, no el fondo.
- *
- * Oscurecer más el tinte hundía el gris de las notas al pie por debajo de AA justo mientras el
- * ratón está encima. El realce se consigue igual con el borde y el anillo, y el contraste del
- * texto no depende de dónde esté el puntero.
- */
-.event-card.answer:hover {
-  border-color: var(--running);
-  box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--running) 35%, transparent);
+  background: color-mix(in srgb, var(--running) 6%, var(--bg-card));
 }
 .event-card.answer .event-body {
   font-size: 14px;
@@ -985,20 +813,11 @@ a:hover { text-decoration: underline; }
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-card));
 }
 
-/* La síntesis del Assistant es la respuesta de un plan entero: mismo tratamiento. */
-.answer-card {
-  border-left: 3px solid var(--running);
-  border-color: color-mix(in srgb, var(--running) 28%, var(--border));
-  background: color-mix(in srgb, var(--running) 7%, var(--bg-card));
-}
-.answer-card h3 { color: var(--running); }
-.answer-card p { font-size: 13.5px; line-height: 1.65; color: var(--text-strong); }
-
 /*
  * Un evento del agente es una tarjeta, no una línea de log.
  *
- * Se pincha entera porque el crudo tiene que estar siempre a un clic, pero el afordance es
- * discreto: sale al pasar por encima. Lo que se ve sin tocar nada es qué pasó.
+ * El crudo está siempre a un clic, en el botoncito de la esquina. Lo que se ve sin tocar nada es
+ * qué pasó.
  */
 .event-card {
   display: grid;
@@ -1008,7 +827,6 @@ a:hover { text-decoration: underline; }
   text-align: left;
   font: inherit;
   color: var(--text);
-  cursor: pointer;
   padding: 10px 12px;
   margin: 5px 0;
   border: 1px solid var(--border);
@@ -1017,7 +835,8 @@ a:hover { text-decoration: underline; }
   background: var(--bg-sunken);
   transition: border-color 0.12s ease, background 0.12s ease;
 }
-.event-card:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
+button.event-card { cursor: pointer; }
+button.event-card:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
 .event-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .event-card.ok { border-left-color: var(--ok); }
 .event-card.warn { border-left-color: var(--warn); }
@@ -1028,10 +847,30 @@ a:hover { text-decoration: underline; }
 .event-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-width: 0; }
 .event-head > .badge { flex: 0 0 auto; }
 .event-headline { font-weight: 600; color: var(--text-strong); font-size: 13px; min-width: 0; flex: 0 1 auto; }
-/* Empuja el número de secuencia a la derecha, pero sin abrir un hueco si la línea ya envolvió. */
-.event-seq { margin-left: auto; flex: 0 0 auto; }
-.event-more { color: var(--text-faint); opacity: 0; transition: opacity 0.12s ease; }
-.event-card:hover .event-more, .event-card:focus-visible .event-more { opacity: 1; }
+
+/* El crudo, a un clic y en la esquina: se ve sin estorbar. */
+.event-more {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0.6;
+}
+.event-more:hover, .event-more:focus-visible { opacity: 1; background: var(--bg-elevated); color: var(--text); }
+.event-body.md-body { white-space: normal; }
+.event-card { position: relative; }
+/* Una respuesta sin distintivo: el botón del crudo flota en la esquina y no gasta una fila. */
+.event-head.bare { position: absolute; top: 6px; right: 6px; }
+.event-head.bare + .event-body { padding-right: 24px; }
+.timeline-head .turn-tools { margin-right: auto; }
+.timeline-mode { flex: 0 0 auto; }
 .event-body {
   white-space: pre-wrap;
   word-break: break-word;
@@ -1212,7 +1051,7 @@ a:hover { text-decoration: underline; }
 
 /* -------------------------------------------------------------- conversación */
 
-.messages { display: grid; gap: 10px; max-height: 52dvh; overflow-y: auto; padding-right: 4px; }
+.messages { display: grid; gap: 8px; }
 .message { display: grid; gap: 5px; padding: 11px 12px; border-radius: var(--radius); background: var(--bg-sunken); border: 1px solid var(--border); }
 .message .who { font-size: 11.5px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .message .body { white-space: pre-wrap; word-break: break-word; }
@@ -1227,7 +1066,7 @@ a:hover { text-decoration: underline; }
   background: color-mix(in srgb, var(--running) 7%, var(--bg-card));
   padding: 13px 14px;
 }
-.message.assistant .body { font-size: 14px; line-height: 1.68; color: var(--text-strong); }
+.message.assistant .body { font-size: 14px; line-height: 1.68; color: var(--text-strong); white-space: normal; }
 .message.assistant .who { color: var(--running); font-weight: 600; }
 
 /* Una línea de CLI: pesa lo que tiene que pesar, que es poco. */
@@ -1261,21 +1100,6 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
   font-size: 12.5px;
 }
-.suggestions { display: flex; gap: 7px; flex-wrap: wrap; }
-.suggestion {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 32px;
-  padding: 0 11px;
-  border-radius: 999px;
-  border: 1px dashed var(--border-strong);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12.5px;
-}
-.suggestion:hover { color: var(--text); border-color: var(--accent); border-style: solid; }
 
 .permission-help { display: flex; align-items: flex-start; gap: 7px; }
 .permission-help svg { margin-top: 2px; }
@@ -1305,54 +1129,6 @@ a:hover { text-decoration: underline; }
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-
-/* Una tarjeta que pide algo: se distingue del resto sin gritar. */
-.warn-card {
-  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
-  background: color-mix(in srgb, var(--warn) 7%, var(--bg-card));
-}
-
-/*
- * Una explicación que no estorba.
- *
- * Plegada por defecto: quien ya sabe la diferencia entre una sesión y un trabajo no tiene que
- * leerla en cada visita, y quien no la sabe la encuentra donde le surge la duda.
- */
-.explainer {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-card);
-  padding: 0 14px;
-}
-.explainer > summary {
-  cursor: pointer;
-  padding: 11px 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: var(--touch);
-}
-.explainer > summary::-webkit-details-marker { display: none; }
-.explainer > summary::before {
-  content: '?';
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-  flex: 0 0 auto;
-}
-.explainer[open] > summary { border-bottom: 1px solid var(--border); }
-.explainer-body { padding: 12px 0 14px; display: grid; gap: 10px; max-width: 78ch; }
-.explainer-body p { margin: 0; font-size: 13px; line-height: 1.65; }
 
 /* ------------------------------------------------------------------- avisos */
 
@@ -1514,7 +1290,6 @@ a:hover { text-decoration: underline; }
  */
 .keyboard-open .rail,
 .keyboard-open .topbar,
-.keyboard-open .statusbar,
 .keyboard-open .terminal-setup { display: none; }
 .keyboard-open .workarea { padding-bottom: 8px; }
 .keyboard-open .page { padding: 8px; gap: 8px; }
@@ -1558,7 +1333,6 @@ a:hover { text-decoration: underline; }
  */
 .terminal-immersive .rail,
 .terminal-immersive .topbar,
-.terminal-immersive .statusbar,
 .terminal-immersive .terminal-setup { display: none; }
 .terminal-immersive .workarea { padding: 0; }
 .terminal-immersive .page { padding: 0; gap: 0; }
@@ -1671,23 +1445,14 @@ a:hover { text-decoration: underline; }
    */
   .kbd { display: none; }
 
-  /*
-   * En un teléfono, de la línea de estado sobra el recuento de capacidades.
-   *
-   * El número entero se lee en Salud; lo que aquí importa es si responden las máquinas y si queda
-   * margen. Con datos de producción la línea pedía 290 px y en un móvil hay 212: escrita de una
-   * pieza, lo que se perdía era el aviso del final.
-   */
-  .chat-status-count { display: none; }
-
   .btn, .btn.small, .btn.icon { min-height: var(--touch); }
   .btn.icon { width: var(--touch); }
   .input, .select, .textarea { min-height: var(--touch); }
-  .tabs button { min-height: var(--touch); }
+
   .segmented button { min-height: 40px; }
-  .suggestion { min-height: 38px; }
+
   .list-item, .list-open { min-height: var(--touch); }
-  .table tbody td { padding-top: 12px; padding-bottom: 12px; }
+
   .topbar-search { min-height: var(--touch); }
   .rail-collapse { min-height: var(--touch); }
 }
@@ -1728,7 +1493,6 @@ a:hover { text-decoration: underline; }
   .workarea { padding-bottom: 62px; }
   .page { padding: 12px; }
 
-
   /*
    * La cabecera del teléfono es opaca, no translúcida.
    *
@@ -1746,25 +1510,9 @@ a:hover { text-decoration: underline; }
   .topbar-search { order: 3; flex: 1 1 100%; margin: 0; max-width: none; min-height: var(--touch); }
   .page-heading h1 { font-size: 17px; }
   .page-heading p { display: none; }
-  .statusbar { display: none; }
 }
 
 @media (max-width: 560px) {
-  .topbar-user { display: none; }
-
-  /*
-   * Los filtros comparten fila en vez de gastar una cada uno.
-   *
-   * Un desplegable con su palabra delante cabe en media pantalla de teléfono; puestos de uno en
-   * uno, los tres del explorador ocupaban unos 165 px y, sumados a las cifras, dejaban la primera
-   * sesión por debajo del pliegue. Los desplegables pierden su ancho fijo y se reparten lo que
-   * hay, que es lo que un `select` sabe hacer sin que se le note.
-   */
-  /* Y en lo más estrecho, también el modelo: cada burbuja del hilo lleva el suyo. */
-  .chat-status-model { display: none; }
-
-  .filters-row > label { flex: 1 1 44%; min-width: 0; }
-  .filters-row .select { flex: 1 1 auto; width: auto; min-width: 0; }
 
   /*
    * El texto de los chips se esconde de la vista, no del lector de pantalla.
@@ -1784,386 +1532,6 @@ a:hover { text-decoration: underline; }
   }
   .chip { padding: 0 8px; }
 }
-
-
-/* ---------------------------------------------------------------------------
- * El Asistente (ADR-009).
- *
- * Dos columnas en escritorio —los hilos a la izquierda, la conversación a la derecha— y una sola
- * en el móvil, donde la lista se convierte en una tira que se desliza: en una pantalla de teléfono
- * el hilo abierto es lo único que importa, y robarle un tercio del ancho a una conversación para
- * enseñar títulos es el error de traer el escritorio encogido.
- *
- * La conversación ocupa el alto disponible y **sólo hace scroll la lista de mensajes**: el
- * compositor y la cabecera se quedan donde están. Un compositor que se va hacia arriba mientras
- * llega la respuesta obliga a perseguirlo justo cuando se quiere escribir.
- * ------------------------------------------------------------------------- */
-
-/*
- * En una conversación, la ventana la manda. En todas las anchuras.
- *
- * `.shell` trae `min-height: 100dvh` y crece con su contenido, que es lo correcto en una pantalla
- * de tarjetas: se apilan y se desplaza la página. Un hilo no se lee así. Al crecer, el compositor
- * se va fuera de la ventana y el final de la última respuesta queda debajo de la barra de
- * navegación —o simplemente fuera—. Con el alto fijado, el que se desplaza es `.chat-messages`,
- * que ya sabía hacerlo y nunca llegaba a tener que hacerlo.
- *
- * Va con `:has()` sobre `.shell` y no sobre `.assistant-page` porque quien crecía era el padre, y
- * acotar al hijo no le impide estirarse. Y la fila hace falta además del alto: una pista `auto` se
- * estira hasta caber el contenido y vuelve a desbordar por dentro. En estrecho el carril es una
- * barra fija y en ancho una columna, así que en los dos casos la única fila en flujo es el área de
- * trabajo.
- *
- * Estuvo un rato sólo bajo `max-width: 1024px`, y era un arreglo a medias: el mismo desbordamiento
- * ocurre en escritorio en cuanto la conversación es larga —medido, 1087 px de documento en una
- * ventana de 1000—. No es un problema de ancho, es de cuánto contenido hay.
- */
-.shell:has(.assistant-page) {
-  height: 100dvh;
-  grid-template-rows: minmax(0, 1fr);
-}
-.shell:has(.assistant-page) .workarea { min-height: 0; }
-
-/*
- * En el asistente no hay buscador arriba.
- *
- * Poner un campo de texto justo encima de un chat es poner dos entradas en la misma pantalla, y en
- * un teléfono eso es un problema real de cuál tocar: se ha entrado a hablar, no a buscar. Y ese
- * campo ocupa exactamente el alto que se quiere dar al hilo. La paleta sigue estando en Ctrl+K y
- * en su botón, que es de donde se usa de verdad.
- */
-.shell:has(.assistant-page) .topbar-search { display: none; }
-
-.assistant-page {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 14px;
-  /*
-   * Ocupa el alto que hay, y las columnas lo llenan.
-   *
-   * `.page` trae `align-content: start`, que para una pantalla de tarjetas es lo correcto —se
-   * apilan arriba y ya— y aquí dejaba el hilo midiendo lo que midiera su contenido, con medio
-   * viewport en gris debajo y el compositor flotando por la mitad de la pantalla. En una
-   * conversación el compositor va abajo del todo, siempre.
-   */
-  align-content: stretch;
-  height: 100%;
-  min-height: 0;
-}
-
-.chat-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.chat-rail-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; overflow-y: auto; }
-
-.chat-rail-list a {
-  display: grid;
-  gap: 1px;
-  padding: 8px 9px;
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  text-decoration: none;
-  border: 1px solid transparent;
-}
-
-.chat-rail-list a:hover { background: var(--bg-elevated); }
-.chat-rail-list a.current { background: var(--bg-elevated); border-color: var(--border-accent); }
-
-.chat-rail-title {
-  font-size: 13px;
-  font-weight: 550;
-  /* Un título largo no puede empujar la columna: se corta y se lee el principio, que es lo útil. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* No es un aviso rojo: es un dato de la fila, y el rojo en una lista se lee como «rota». */
-.chat-rail-mudo { color: var(--warn); }
-
-/*
- * Un plan que espera algo tuyo.
- *
- * Mismo peso visual que la tarjeta de permiso —es la misma clase de cosa: hasta que hagas algo,
- * esto no avanza— y anclado igual, porque el fallo que lo trae fue justamente no verlo.
- */
-.chat-plan-pending {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: grid;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-}
-
-.chat-plan-pending.firma { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-.chat-plan-pending .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* La pregunta se lee entera: cortarla dejaría a la persona adivinando qué le preguntan. */
-.chat-plan-question { margin: 0; color: var(--text-strong); }
-.chat-plan-answer { display: flex; gap: 8px; }
-.chat-plan-answer .input { flex: 1 1 auto; min-width: 0; }
-
-.chat-capabilities {
-  margin-top: auto;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.chat-capabilities ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; width: 100%; }
-
-/* Su propio renglón: es una cifra, no un distintivo más de la fila. */
-.chat-capabilities-cost { width: 100%; margin-top: 2px; }
-
-.chat-thread {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.chat-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
-}
-
-.chat-head-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
-/* El título y el estado en la misma columna: dos líneas de texto, no dos filas de cabecera. */
-.chat-head-id { display: grid; gap: 1px; min-width: 0; }
-/*
- * El título, hasta dos líneas.
- *
- * Estaba a una con puntos suspensivos, y el motivo era bueno: un título largo no puede empujar el
- * resto de la cabecera fuera de la fila. Pero el título es el resumen automático del primer
- * mensaje, así que con una pregunta normal se corta casi siempre —medido: 295 px visibles de 443—
- * y lo que quedaba era media frase.
- *
- * Dos líneas y no más, porque debajo va la línea de estado, que mientras piensa dice con cuánto
- * esfuerzo. Ésa cambia mientras la miras y es la que no puede quedarse sin sitio: si el título
- * pudiera crecer sin tope, acabarían compitiendo por el mismo alto. Con el tope, cada uno tiene el
- * suyo.
- */
-.chat-head h2 {
-  margin: 0;
-  font-size: 14.5px;
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-}
-
-/*
- * Si esto va a funcionar, y con qué.
- *
- * El punto mira si responden las máquinas. No dice «online»: una palabra así colapsa el modelo,
- * las capacidades, el índice y seis hosts en un color, y luego no se puede comprobar. Cada cosa va
- * con su número al lado, y la que esté mal se lee.
- */
-.chat-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
-.chat-status-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--text-faint); }
-
-/*
- * Los trozos de la línea, por orden de a qué se renuncia primero.
- *
- * Se separan con un punto medio dibujado por CSS para que esconder un trozo se lleve su separador
- * y no queden dos puntos seguidos.
- */
-.chat-status-part { min-width: 0; flex: 0 1 auto; }
-.chat-status-part + .chat-status-part::before,
-.chat-status-part + /* El botón no encoge: es la única salida del callejón. */
-.chat-status-retry { flex: 0 0 auto; margin-left: 2px; }
-
-.chat-status-warn::before { content: '·'; margin: 0 5px; color: var(--text-faint); }
-
-/*
- * El aviso no encoge ni se corta, y va en negrita.
- *
- * Es lo único accionable de la línea: dice cuánto margen queda antes de que el catálogo deje de
- * caber y el modo directo se apague sin avisar. Si algo tiene que desaparecer en una pantalla
- * estrecha, éste es el último.
- */
-.chat-status-warn { flex: 0 0 auto; white-space: nowrap; font-weight: 650; }
-.chat-status.ok .chat-status-dot { background: var(--ok); }
-.chat-status.warn .chat-status-dot { background: var(--warn); }
-.chat-status.danger .chat-status-dot { background: var(--danger); }
-.chat-status.danger { color: var(--danger); }
-
-/*
- * El punto late mientras piensa.
- *
- * Es lo que distingue «está trabajando» de «así está la casa» sin añadir otro indicador: la línea
- * es la misma y lo que cambia es que se mueve. Con `prefers-reduced-motion` se queda quieto —abajo
- * hay una regla que apaga las animaciones— y el texto sigue diciendo lo mismo, que es lo que de
- * verdad informa.
- */
-.chat-status-dot.pulsing { animation: chat-pulse 1.4s ease-in-out infinite; }
-@keyframes chat-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.72); }
-}
-
-/*
- * La autonomía: visible siempre, pero en un chip.
- *
- * Sigue leyéndose de un vistazo en qué modo estás —que es la decisión que más cambia lo que va a
- * pasar— sin gastar una fila entera de la cabecera en tres segmentos. El selector con las
- * explicaciones aparece al pedirlo, que es cuando se va a cambiar.
- */
-.autonomy { position: relative; }
-.autonomy-chip { cursor: pointer; gap: 5px; }
-.autonomy-veil { position: fixed; inset: 0; z-index: 44; background: transparent; border: 0; padding: 0; }
-.autonomy-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 45;
-  width: min(300px, calc(100vw - 32px));
-  display: grid;
-  gap: 2px;
-  padding: 6px;
-  box-shadow: var(--shadow-pop);
-}
-.autonomy-option {
-  display: grid;
-  gap: 2px;
-  text-align: left;
-  padding: 7px 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-}
-.autonomy-option:hover { background: var(--bg-elevated); }
-.autonomy-option[aria-current="true"] { background: var(--accent-soft); }
-.chat-head-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.chat-head-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-/* La puerta a la lista sólo existe donde la lista no cabe al lado. */
-.chat-head-list { display: none; }
-
-/* Lo que llevamos gastado: un distintivo que se abre, no un panel siempre presente. */
-.chat-spend { position: relative; }
-.chat-spend > button { cursor: pointer; }
-
-.chat-spend-detail {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 40;
-  width: min(320px, calc(100vw - 32px));
-  box-shadow: var(--shadow-pop);
-}
-
-.chat-spend-models {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  display: grid;
-  gap: 3px;
-}
-
-.chat-messages {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  /*
-   * Y de lado, nunca.
-   *
-   * Es una red, no el arreglo: lo que desborde hay que acotarlo donde se produce, y lo ancho de
-   * verdad —una tabla, una valla de código— lleva su propio contenedor con scroll. Pero un hilo
-   * que se puede arrastrar horizontalmente deja el texto cortado por la izquierda y no hay forma
-   * de saber que se ha movido, así que aquí se corta de raíz.
-   */
-  overflow-x: hidden;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.chat-bubble {
-  max-width: 46rem;
-  padding: 9px 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-}
-
-/* Lo propio va a la derecha y con el acento: el hilo se recorre sin leer quién dijo cada cosa. */
-.chat-bubble.user {
-  align-self: flex-end;
-  background: var(--accent-soft);
-  border-color: var(--border-accent);
-}
-
-.chat-bubble-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-/* La respuesta puede traer saltos de línea y hay que respetarlos, pero no desbordar por un log. */
-.chat-bubble-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-
-/*
- * Lo que la respuesta encontró, pulsable.
- *
- * Va dentro de la burbuja y no debajo del hilo: lo que el asistente encontró es parte de lo que
- * contestó, no un pie de página. En rejilla porque una oferta de terminal ocupa su propio bloque
- * —lleva escrito el motivo— mientras que los botones cortos comparten fila.
- */
-.chat-refs { display: grid; gap: 8px; margin-top: 8px; }
-
-/*
- * Una pastilla de referencia nunca es más ancha que el hilo.
- *
- * El título lo escribe el índice —es el primer turno aprovechable de una sesión— y venía recortado
- * a 56 caracteres. Eso funciona en un escritorio y falla siempre en un teléfono: 53 caracteres
- * pasaban el filtro y medían 374 px dentro de un hilo de 364, así que la conversación entera se
- * podía arrastrar de lado y el texto salía cortado por la izquierda. Contar letras cuando lo que
- * falta es ancho es contar la unidad equivocada.
- *
- * Ahora lo acota el ancho que haya: la pastilla no pasa del 100 % y la etiqueta se recorta con
- * puntos suspensivos. El texto entero sigue estando en el `title`.
- */
-/*
- * Y los contenedores tienen que **poder** encogerse, o el tope de la pastilla no sirve de nada.
- *
- * Una rejilla o un flex traen `min-width: auto`, que significa «no menos que mi contenido». Con
- * eso, `.chat-refs` medía 374 px dentro de una burbuja de 336: el tope del 100 % de la pastilla se
- * calculaba contra una fila que ya se había desbordado, así que no ataba nada. Medido antes de
- * ponerlo, con el título que lo destapó.
- */
-.chat-refs, .chat-refs .row { min-width: 0; }
-.ref-chip { max-width: 100%; min-width: 0; justify-content: flex-start; }
-.ref-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ------------------------------------------------- el markdown del asistente */
 
@@ -2264,280 +1632,6 @@ a:hover { text-decoration: underline; }
 }
 .md-table th { background: var(--bg-sunken); color: var(--text-strong); font-weight: 600; white-space: nowrap; }
 
-/* ------------------------------------------------------------- los artifacts */
-
-/*
- * Un artifact `inline` es contenido dentro de la burbuja, no una tarjeta encima.
- *
- * Lleva un borde suave y su cabecera, lo justo para que se vea dónde empieza y dónde acaba lo que
- * el asistente enseña, sin convertirlo en un objeto distinto de la respuesta que lo acompaña.
- */
-.artifact {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  overflow: hidden;
-}
-
-.artifact-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 7px 10px;
-  background: var(--bg-sunken);
-  border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
-}
-.artifact-head > span:first-child { flex: 1 1 auto; min-width: 0; }
-/* La procedencia va en su propia línea: es texto, no un distintivo, y no compite con el título. */
-.artifact-caption { flex: 1 1 100%; }
-
-.artifact-body { padding: 10px; overflow-x: auto; }
-.artifact-body > .md { white-space: normal; }
-
-/*
- * La pastilla que abre un panel o un modal.
- *
- * Es más alta que un botón normal porque lleva dos líneas —el título y qué hay dentro— y esa
- * segunda línea es la que hace que se pulse sabiendo si detrás hay tres filas o trescientas.
- */
-.artifact-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 5px 10px;
-  max-width: 100%;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-}
-.artifact-chip:hover { border-color: var(--border-strong); background: var(--bg-sunken); }
-
-/*
- * El HTML ejecutable, enmarcado y dicho.
- *
- * Es el único artifact que dibuja lo que quiere, así que es el único que puede parecerse a esta
- * consola. No puede actuar —origen opaco, no alcanza nada de aquí— pero sí puede pedir una
- * contraseña con una tarjeta que imite a las de verdad. El marco y la etiqueta son lo que separa
- * «esto lo dice Jarvis» de «esto lo dibujó algo que Jarvis leyó».
- */
-.artifact-html { display: grid; gap: 0; }
-.artifact-html-mark {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  margin: 0;
-  padding: 7px 9px;
-  font-size: 11.5px;
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 9%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-}
-.artifact-frame {
-  width: 100%;
-  height: min(60vh, 480px);
-  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
-  border-top: 0;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  background: #fff;
-  display: block;
-}
-
-/*
- * El panel y el modal, componentes propios.
- *
- * No reutilizan `.detail-sheet` porque aquello no es un panel: por encima de 1180 px no tiene
- * estilos —es una columna de un grid `main-side`— así que un diálogo con esas clases dejaría una
- * tarjeta sin posicionar justo en la pantalla donde más sitio hay.
- *
- * El panel es **no modal** a propósito: se consulta mientras se sigue leyendo el hilo, y eso es
- * exactamente lo que lo separa de un modal. Por eso tampoco lleva velo.
- */
-.artifact-panel, .artifact-modal {
-  position: fixed;
-  z-index: 80;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-card);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-pop);
-  animation: detail-sheet-in 160ms ease-out;
-}
-
-.artifact-panel {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(560px, 92vw);
-  border-right: 0;
-  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
-}
-
-.artifact-modal {
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(920px, 94vw);
-  max-height: 88vh;
-  border-radius: var(--radius-lg);
-}
-
-.artifact-overlay { position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 45%); }
-
-.artifact-sheet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 11px 13px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
-}
-.artifact-sheet-head h2, .artifact-sheet-head > .truncate {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 640;
-  color: var(--text-strong);
-  min-width: 0;
-}
-.artifact-sheet-body { padding: 12px; overflow: auto; flex: 1; min-height: 0; }
-/* Dentro de la hoja el artifact ya está enmarcado por ella: no hace falta un borde más. */
-.artifact-sheet-body > .artifact { border: 0; }
-.artifact-sheet-body > .artifact .artifact-head { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
-
-/* En estrecho, el panel es una hoja de abajo: es donde llega el pulgar, como el resto de hojas. */
-@media (max-width: 900px) {
-  .artifact-panel {
-    top: auto;
-    left: 0;
-    right: 0;
-    width: auto;
-    max-height: 82vh;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    border-right: 1px solid var(--border-strong);
-    padding-bottom: max(0px, env(safe-area-inset-bottom));
-  }
-  .artifact-modal { width: 96vw; max-height: 90vh; }
-  .artifact-frame { height: min(52vh, 380px); }
-}
-
-.chat-tool { align-self: flex-start; max-width: 46rem; width: 100%; }
-
-.chat-tool-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 9px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.chat-tool-head:hover { color: var(--text); border-color: var(--border-strong); }
-.chat-tool.failed .chat-tool-head { color: var(--danger); border-color: var(--danger); }
-
-.chat-tool-body {
-  margin-top: 4px;
-  padding: 8px 10px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  max-height: 320px;
-  overflow: auto;
-}
-
-.chat-tool-body pre { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-muted); }
-
-.chat-event {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  align-self: center;
-  color: var(--text-faint);
-  font-size: 12px;
-}
-
-/*
- * Un evento con lo que el turno alcanzó a producir.
- *
- * La línea del evento sigue centrada y pequeña —no la dijo nadie— pero lo que trae debajo son
- * acciones, y ésas se alinean como las de cualquier respuesta: a la izquierda y con su ancho.
- */
-.chat-event-block { align-self: stretch; max-width: 46rem; display: grid; gap: 6px; }
-.chat-event-block .chat-event { align-self: center; }
-
-/*
- * Lo que llegó mientras leías arriba.
- *
- * Flota sobre el compositor y no empuja nada: aparece cuando hay algo nuevo y no estabas al final,
- * y se va al pulsarlo. Es lo que permite releer una respuesta anterior mientras el asistente sigue
- * trabajando, que antes era imposible porque cada consulta te devolvía abajo.
- */
-.chat-nuevos {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 84px;
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  min-height: 34px;
-  border-radius: 999px;
-  border: 1px solid var(--border-accent);
-  background: var(--bg-card);
-  color: var(--text);
-  font-size: 12.5px;
-  cursor: pointer;
-  box-shadow: var(--shadow-pop);
-}
-.chat-nuevos:hover { background: var(--bg-elevated); }
-/* El hilo pasa a ser el marco de referencia del aviso, que si no flotaría sobre la ventana. */
-.chat-thread { position: relative; }
-
-.chat-thinking { display: flex; align-items: center; gap: 6px; align-self: flex-start; padding: 4px 2px; }
-
-.chat-approval { align-self: stretch; max-width: 46rem; }
-
-/*
- * Lo que espera tu firma se queda a la vista.
- *
- * Antes iba al final del hilo, así que cada consulta nueva la empujaba más abajo y en un móvil
- * desaparecía. Una aprobación que hay que buscar es una aprobación que se acaba dando sin leer, y
- * ésta es la única superficie del producto donde eso cuesta caro. Se pega arriba del área de
- * mensajes mientras dure, con su sombra para que se lea como algo que está encima y no como una
- * tarjeta más del hilo.
- */
-.chat-approval-sticky {
-  position: sticky;
-  top: 0;
-  z-index: 6;
-  box-shadow: var(--shadow-pop);
-}
-/* Una caducada deja de gritar: ya no hay nada que firmar, sólo que entender. */
-.chat-approval.is-expired { opacity: 0.75; box-shadow: none; }
-.chat-approval-args {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 220px;
-  overflow: auto;
-  margin: 0 0 10px;
-  color: var(--text-muted);
-}
-
 /*
  * La barra de escribir, la misma en el hilo y en el borrador de un workspace.
  *
@@ -2589,99 +1683,361 @@ a:hover { text-decoration: underline; }
 
 .composer-send { flex: 0 0 auto; min-height: var(--touch); }
 
-/*
- * El hilo pega su barra al borde de abajo y le pone su franja.
- *
- * Con menos relleno que el borrador de un workspace: aquí la barra ya trae su propio recuadro y
- * el alto que se ahorre va al hilo, que es de lo que iba todo esto. El campo arranca en una línea
- * y crece con lo que se escriba; su alto mínimo sigue siendo el del dedo.
- */
-.chat-composer {
-  padding: 8px 10px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-elevated);
-}
-.chat-composer .composer-field { padding: 6px 4px; }
-
 @media (max-width: 900px) {
-  /*
-   * En estrecho, el hilo se queda con la pantalla entera y la lista se pide.
-   *
-   * Antes la lista era una tira horizontal arriba: ocupaba 132 px —un quinto de un móvil— en
-   * todos los mensajes para servir en uno de cada veinte, y encima empujaba el compositor hacia
-   * abajo justo cuando se quiere escribir. Es el mismo problema que ya resolvió el panel de
-   * detalle, así que se resuelve igual: hoja anclada abajo, velo detrás, y se va al elegir.
-   */
-  .assistant-page {
-    grid-template-columns: minmax(0, 1fr);
-    /*
-     * Sin `min-height` inventado.
-     *
-     * Restarle a `100vh` un número a ojo se pasaba de alto —no contaba la cabecera ni la barra
-     * inferior— y el compositor acababa por debajo del pulgar, medio tapado por la navegación. El
-     * área de trabajo ya reserva su sitio; aquí basta con ocupar el que hay.
-     */
-    min-height: 0;
-  }
-
-  /* Una cabecera sin nada que decir no se queda ocupando una franja con su borde. */
-  .chat-head:empty { display: none; }
-
-  .chat-head-list { display: inline-flex; }
-  /* En un móvil la palabra sobra: el icono va con su etiqueta accesible. */
-  .chat-head-word { display: none; }
-  /*
-   * Las acciones ya **no** bajan a su propia fila.
-   *
-   * Ocupaban el ancho completo para enseñar el selector de autonomía, y eso costaba un renglón de
-   * los cinco que había antes del primer mensaje. Con la autonomía en un chip caben al lado del
-   * título, que es donde deberían haber estado siempre.
-   */
-  .chat-head { padding: 8px 12px; gap: 8px; }
-
-  .chat-rail {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 70;
-    max-height: min(70vh, 520px);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    border-bottom: 0;
-    box-shadow: 0 -14px 44px rgb(0 0 0 / 45%);
-    /* Respeta la barra del sistema para que la última conversación no quede bajo el gesto. */
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-    animation: detail-sheet-in 160ms ease-out;
-    display: none;
-  }
-  .assistant-page.list-open .chat-rail { display: flex; }
-
-  .chat-rail-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 69;
-    background: rgb(0 0 0 / 45%);
-    border: 0;
-    padding: 0;
-    animation: detail-sheet-in 160ms ease-out;
-  }
-
-  .chat-rail-list a { min-height: var(--touch); align-content: center; }
-  .chat-capabilities { display: none; }
-  .chat-bubble, .chat-tool, .chat-approval { max-width: 100%; }
-
-  /* El compositor manda: es a lo que se ha venido, y no se persigue al llegar una respuesta. */
-  .chat-composer { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
-  /* 16 px o el navegador hace zoom al enfocar, y el hilo se descoloca entero. */
+  /* 16 px o el navegador hace zoom al enfocar. */
   .composer-field { font-size: 16px; }
   /* En estrecho el botón es sólo el icono: la palabra no cabe sin robarle sitio al campo. */
   .composer-word { display: none; }
   .composer-send { min-width: var(--touch); justify-content: center; padding: 0; }
 }
 
-/* En ancho no hay hoja ni velo: la lista es la columna de siempre. */
-@media (min-width: 901px) {
-  .chat-rail-backdrop { display: none; }
+/* ---------------------------------------------------------------------------
+ * El rediseño compacto (2026-11).
+ *
+ * Una idea para todo: se enseña lo mínimo para reconocer algo y el resto está a un clic. Grupos
+ * que se abren, tarjetas que se despliegan, detalles plegados. Menos bordes de colores y menos
+ * sombras: el color se guarda para el estado.
+ * ------------------------------------------------------------------------- */
+
+/* Las pantallas de lectura no pasan de una columna cómoda, aunque la ventana sea ancha. */
+.page.narrow { max-width: 940px; width: 100%; margin: 0 auto; }
+
+.toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+/*
+ * En Sesiones, un solo buscador.
+ *
+ * El de arriba abre la paleta y el de la página filtra los grupos: dos cajas iguales una encima de
+ * otra hacían dudar de cuál usar. Aquí se queda el que filtra; la paleta sigue en Ctrl K.
+ */
+.shell:has(.sessions-page) .topbar-search { display: none; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.hint-line { margin: 0; font-size: 12px; color: var(--text-faint); }
+.faint-link { color: var(--text-faint); justify-self: center; text-decoration: none; }
+.faint-link:hover { color: var(--text); text-decoration: underline; }
+
+.dot-status {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: 0 0 auto;
+}
+.dot-status.ok { background: var(--ok); }
+.dot-status.warn { background: var(--warn); }
+.dot-status.danger { background: var(--danger); }
+
+/* ---- sesiones: grupos por carpeta ---- */
+
+.groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.group-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  transition: border-color 120ms ease;
+}
+.group-card:hover { border-color: var(--border-strong); }
+/* Abierto ocupa la fila entera: lo que se elige se lee mejor a lo ancho que en una columna. */
+.group-card.open { grid-column: 1 / -1; border-color: var(--border-accent); }
+
+.group-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  width: 100%;
+  padding: 13px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-lg);
+}
+.group-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.group-main { display: grid; gap: 2px; min-width: 0; }
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+}
+.group-when { margin-left: auto; font-weight: 400; letter-spacing: 0; }
+.group-sub { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; color: var(--text-muted); }
+.group-latest { font-size: 12.5px; color: var(--text-faint); margin-top: 2px; }
+.provider-icons { display: inline-flex; gap: 4px; color: var(--text-faint); }
+
+.group-body { display: grid; gap: 10px; padding: 0 14px 14px; }
+.group-paths { display: flex; flex-wrap: wrap; gap: 6px; }
+.path-chip {
+  display: inline-flex;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-list { display: grid; gap: 6px; }
+.session-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.session-card.open { background: var(--bg-elevated); border-color: var(--border-strong); }
+.session-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: var(--touch);
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+.session-provider { color: var(--text-muted); }
+.session-main { display: grid; gap: 1px; min-width: 0; }
+.session-title { font-weight: 600; color: var(--text-strong); }
+.session-sub { font-size: 12px; color: var(--text-muted); }
+.session-side { display: flex; align-items: center; gap: 8px; }
+.session-detail { display: grid; gap: 10px; padding: 0 12px 12px 37px; }
+.path-full { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.session-preview { margin: 0; font-size: 13px; color: var(--text-muted); }
+
+/* ---- una sesión: cabecera, hilo y compositor ---- */
+
+.ws-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 12px;
+}
+.ws-head-main { display: grid; gap: 4px; flex: 1 1 0; min-width: 0; }
+.ws-title { margin: 0; font-size: 18px; letter-spacing: -0.015em; color: var(--text-strong); }
+.ws-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12.5px; color: var(--text-muted); }
+.meta-item { display: inline-flex; align-items: center; gap: 5px; }
+.meta-item.warn { color: var(--warn); }
+.linklike-plain {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.linklike-plain:hover { color: var(--text); text-decoration: underline; }
+.ws-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.ws-details {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.thread { display: grid; gap: 8px; min-width: 0; }
+.thread-more {
+  justify-self: center;
+  padding: 6px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.thread-more:hover:not(:disabled) { color: var(--text); border-style: solid; }
+.thread-more:disabled { cursor: default; opacity: 0.7; }
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.notice.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.notice-go { margin-left: auto; font-weight: 600; }
+
+/*
+ * Un turno plegado: lo que pediste y lo último que contestó.
+ *
+ * Dos líneas y nada más. El color está en el punto de estado, no en el borde: con veinte turnos
+ * en pantalla, veinte bordes de colores son ruido.
+ */
+.turn {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+.turn.open { border-color: var(--border-strong); }
+.turn-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-lg);
+}
+.turn-head:hover .turn-prompt-text { color: var(--text-strong); }
+.turn-prompt { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.turn-you {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.turn-prompt-text { font-weight: 600; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.turn-meta { display: flex; align-items: center; gap: 8px; }
+.turn-answer {
+  grid-column: 1 / -1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.turn-status { display: inline-grid; place-items: center; color: var(--text-faint); }
+.turn-status.ok { color: var(--ok); }
+.turn-status.running { color: var(--running); }
+.turn-status.warn { color: var(--warn); }
+.turn-status.danger { color: var(--danger); }
+.turn-body { display: grid; gap: 8px; padding: 0 14px 14px; min-width: 0; }
+.turn-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.ws-composer {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+.composer-foot { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.composer-foot .composer-target { padding: 0; border: 0; background: none; color: var(--text-muted); }
+.ws-composer .permission-help { margin: 0; }
+
+/* ---- trabajo ---- */
+
+.run-list { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.run-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: var(--touch);
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  text-align: left;
+  cursor: pointer;
+}
+.run-row:hover { border-color: var(--border-strong); }
+.run-row[aria-current="true"] { border-color: var(--accent); }
+.run-row-main { display: grid; gap: 1px; min-width: 0; }
+.run-row-title { font-weight: 600; color: var(--text-strong); }
+.run-row-sub { font-size: 12px; color: var(--text-muted); }
+.run-detail-title { margin: 0; font-weight: 600; color: var(--text-strong); overflow-wrap: anywhere; }
+.facts-fold > summary { cursor: pointer; }
+
+/* En estrecho el detalle vacío no ocupa nada: aparece como hoja cuando se elige un trabajo. */
+@media (max-width: 1180px) {
+  .card.detail-sheet:not(.is-open) { display: none; }
+}
+
+/* ---- salud ---- */
+
+.health-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+.health-summary .grow { display: grid; gap: 2px; }
+.health-summary strong { font-size: 15px; color: var(--text-strong); }
+.health-summary.ok > svg { color: var(--ok); }
+.health-summary.warn > svg { color: var(--warn); }
+.health-summary.danger > svg { color: var(--danger); }
+
+.rows { display: grid; }
+.line-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.line-row:last-of-type { border-bottom: 0; }
+.rows-more { justify-self: start; margin-top: 8px; }
+.line-main { display: grid; gap: 1px; min-width: 0; }
+.quota-row {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+}
+.system-line { margin: 0; text-align: center; }
+
+@media (max-width: 560px) {
+  .groups { grid-template-columns: minmax(0, 1fr); }
+  .session-detail { padding-left: 12px; }
+  .quota-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .quota-row .meter { grid-column: 1 / -1; grid-row: 2; }
+  .ws-title { font-size: 16px; }
 }
 
 .visually-hidden {

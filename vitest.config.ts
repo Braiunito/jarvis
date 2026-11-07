@@ -77,12 +77,11 @@ export default defineConfig({
        *
        * Va aparte de `web` porque aquélla prueba funciones puras en `node` —el parser de markdown— y
        * eso tiene que seguir siendo barato. Aquí se monta React contra jsdom, que cuesta más y sólo
-       * hace falta para lo que **únicamente se ve montando**: que un artifact con la forma
-       * equivocada no desmonte la conversación entera, que un envío fallido no borre lo escrito, que
-       * el stream deje de reintentar.
+       * hace falta para lo que **únicamente se ve montando**: que una respuesta del agente no salga
+       * dos veces, que no se corte, que sus enlaces no queden dentro de un botón.
        *
-       * Nada de eso se puede ver desde el core por definición, y nada de eso lo cazó la suite de 571
-       * que estaba en verde mientras los tres fallos existían.
+       * Nada de eso se puede ver desde el core por definición: una respuesta duplicada no deja rastro
+       * en ninguna API, sólo en la pantalla.
        *
        * Va con `include` de `*.dom.test.tsx` para que se distingan de un vistazo y no haya que
        * abrirlas para saber cuál necesita navegador.

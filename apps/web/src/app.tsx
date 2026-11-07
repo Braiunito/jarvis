@@ -1,13 +1,12 @@
 /**
  * El armazón.
  *
- * A la izquierda, los destinos y el estado de la conexión: lo que hay que poder ver siempre.
- * Arriba, dónde estoy y el buscador que lleva a cualquier sitio. Abajo, la barra de estado, que
- * es lo que se mira cuando algo va raro. En un teléfono el carril baja y se queda en iconos.
+ * Cuatro destinos y nada más: Sesiones —que es la portada, porque casi siempre se viene a
+ * retomar algo—, Trabajo, Terminal y Salud. Arriba, dónde estoy y el buscador. En un teléfono el
+ * carril baja y se queda en iconos.
  *
- * El orden de los destinos sigue los flujos, no las entidades: primero volver a lo de siempre
- * (Inicio, Sesiones), después vigilar lo que corre (Trabajo), intervenir (Terminal) y por último
- * diagnosticar (Salud).
+ * Lo que había además —una portada de tarjetas, el asistente, la barra de estado de abajo— se
+ * quitó: duplicaba lo que ya dicen estas cuatro pantallas y obligaba a leer más para lo mismo.
  *
  * La URL manda: el workspace, el run o la terminal activos están ahí, no en un estado escondido.
  */
@@ -21,15 +20,12 @@ import { Announcer } from './ui/announce.jsx';
 import { Link } from './ui/bits.jsx';
 import { CommandPalette, openCommandPalette } from './ui/command-palette.jsx';
 import { NewSessionDialog } from './ui/new-session.jsx';
-import { ACTION_ICON, Glyph, NAV_ICON, PLAN_STATUS_ICON, STATUS_ICON } from './ui/icons.jsx';
+import { ACTION_ICON, Glyph, NAV_ICON } from './ui/icons.jsx';
 import { PageMetaProvider, usePageMetaValue } from './ui/page-meta.jsx';
-import { formatDuration } from './ui/primitives.jsx';
 import { LoginScreen } from './screens/login.jsx';
 import { EnrollScreen } from './screens/enroll.jsx';
-import { HomeScreen } from './screens/home.jsx';
-import { AssistantScreen } from './screens/assistant.jsx';
 import { Boundary } from './ui/boundary.jsx';
-import { ExplorerScreen } from './screens/explorer.jsx';
+import { SessionsScreen } from './screens/explorer.jsx';
 import { WorkspaceScreen } from './screens/workspace.jsx';
 import { RunCenterScreen } from './screens/runs.jsx';
 import { HealthScreen } from './screens/health.jsx';
@@ -69,12 +65,10 @@ const queryClient = new QueryClient({
 
 const RAIL_KEY = 'jarvis.rail.collapsed';
 
-function Rail({ working, attention, insecure, terminals, waitingApproval }: {
+function Rail({ working, attention, insecure, terminals }: {
   working: number;
   attention: number;
   insecure: boolean;
-  /** Aprobaciones pendientes en toda la casa: planes y conversaciones. */
-  waitingApproval: number;
   /** Terminales abiertas, o null si todavía no se ha contado ninguna vez. */
   terminals: number | null;
 }): JSX.Element {
@@ -87,8 +81,10 @@ function Rail({ working, attention, insecure, terminals, waitingApproval }: {
     window.localStorage.setItem(RAIL_KEY, collapsed ? '1' : '0');
   }, [collapsed]);
 
+  /** Una sesión abierta (`/w/…`) sigue siendo «Sesiones»: es donde se llegó. */
+  const sessionsActive = route.path === '/' || route.path.startsWith('/sessions') || route.path.startsWith('/w/');
   const current = (path: string): 'page' | undefined =>
-    (path === '/' ? route.path === '/' : route.path.startsWith(path)) ? 'page' : undefined;
+    (path === '/' ? sessionsActive : route.path.startsWith(path)) ? 'page' : undefined;
 
   const status = health.data?.status ?? 'unknown';
   const tone = status === 'ok' ? 'ok' : status === 'degraded' ? 'warn' : status === 'failed' ? 'danger' : 'neutral';
@@ -102,21 +98,6 @@ function Rail({ working, attention, insecure, terminals, waitingApproval }: {
 
       <nav className="nav" aria-label="Secciones">
         <Link to="/" aria-current={current('/')}>
-          <Glyph icon={NAV_ICON.home} size={17} />
-          <span>Inicio</span>
-        </Link>
-        <Link to="/assistant" aria-current={current('/assistant')}>
-          <Glyph icon={NAV_ICON.assistant} size={17} />
-          <span>Asistente</span>
-          {/*
-            * Una aprobación esperando es lo más urgente que puede haber aquí: algo se ha
-            * detenido a la espera de una firma, y hasta que llegue no avanza.
-            */}
-          {waitingApproval > 0 ? (
-            <span className="count attention" title={`${waitingApproval} esperan tu permiso`}>{waitingApproval}</span>
-          ) : null}
-        </Link>
-        <Link to="/sessions" aria-current={current('/sessions')}>
           <Glyph icon={NAV_ICON.sessions} size={17} />
           <span>Sesiones</span>
         </Link>
@@ -144,17 +125,17 @@ function Rail({ working, attention, insecure, terminals, waitingApproval }: {
           <Glyph icon={NAV_ICON.health} size={17} />
           <span>Salud</span>
           {insecure ? <span className="count attention" title="La conexión no está cifrada">!</span> : null}
+          {!insecure && tone !== 'ok' && tone !== 'neutral' ? (
+            <span className={`count ${tone === 'danger' ? 'attention' : 'warn'}`} title="Algo no va bien">!</span>
+          ) : null}
         </Link>
       </nav>
 
       <div className="rail-status">
-        <span className="line">
-          <span className={`badge ${tone}`} style={{ padding: 0, border: 0, background: 'none' }}>
-            <span className="dot" aria-hidden="true" />
-          </span>
+        <span className={`dot-status ${tone}`} aria-hidden="true" />
+        <span className="truncate">
           {status === 'ok' ? 'Conectado' : status === 'unknown' ? 'Conectando…' : 'Con incidencias'}
         </span>
-        <span className="muted">core {health.data?.version ?? '—'}</span>
       </div>
 
       <button type="button" className="rail-collapse" onClick={() => setCollapsed((value) => !value)}
@@ -164,38 +145,6 @@ function Rail({ working, attention, insecure, terminals, waitingApproval }: {
         <span>Colapsar</span>
       </button>
     </aside>
-  );
-}
-
-/** Lo que se mira cuando algo va raro: dónde estamos, desde cuándo y con qué. */
-function StatusBar(): JSX.Element | null {
-  const health = useHealth();
-  const system = health.data?.system;
-  if (!system) return null;
-
-  return (
-    <footer className="statusbar">
-      <span className="item">
-        <Glyph icon={NAV_ICON.terminal} size={14} />
-        Entorno <strong>{system.bastionHost}</strong>
-      </span>
-      <span className="item">
-        <Glyph icon={ACTION_ICON.hosts} size={14} />
-        Hosts <strong>{system.hosts}</strong>
-      </span>
-      <span className="item">
-        <Glyph icon={STATUS_ICON.clock} size={14} />
-        En pie <strong>{formatDuration(system.uptimeSeconds * 1000)}</strong>
-      </span>
-      <span className="item">
-        <Glyph icon={ACTION_ICON.database} size={14} />
-        SQLite <strong>{system.sqlite}</strong>
-      </span>
-      <span className="item">
-        <Glyph icon={ACTION_ICON.node} size={14} />
-        Node <strong>{system.node}</strong>
-      </span>
-    </footer>
   );
 }
 
@@ -213,14 +162,13 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
   const attention = (runs.data?.runs ?? []).filter((run) =>
     !run.acknowledgedAt
     && (run.status === 'waiting' || run.status === 'failed' || run.status === 'timed_out')).length;
-  const waitingApproval = metrics.data?.plans.waitingApproval ?? 0;
   const terminals = metrics.data?.terminals;
   const openTerminals = terminals && terminals.at !== null ? terminals.open : null;
 
   /*
    * La última red, por pantalla.
    *
-   * Los anillos de dentro —cada burbuja, cada artifact— hacen que un dato malo caiga solo. Éste es
+   * Los anillos de dentro —cada turno de un hilo— hacen que un dato malo caiga solo. Éste es
    * para lo que nadie previó: sin él, cualquier excepción de render deja la ventana **en blanco**,
    * sin navegación y sin forma de irse a otro sitio, que es la peor cara que puede poner una consola.
    * Va por sección y no en la raíz para que el carril, la cabecera y los demás destinos sobrevivan:
@@ -228,20 +176,19 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
    */
   const content = (() => {
     const pantalla = (() => {
-      if (section === 'assistant') return <AssistantScreen />;
-      if (section === 'sessions') return <ExplorerScreen />;
       if (section === 'w' && route.segments[1]) return <WorkspaceScreen workspaceId={route.segments[1]} />;
       if (section === 'runs') return <RunCenterScreen runId={route.segments[1] ?? null} />;
       if (section === 'terminal') return <TerminalScreen query={route.query} />;
       if (section === 'health') return <HealthScreen />;
-      return <HomeScreen />;
+      // `/sessions` sigue valiendo: hay enlaces viejos guardados que apuntan ahí.
+      return <SessionsScreen />;
     })();
     return <Boundary what={`la pantalla «${meta.title}»`} key={section}>{pantalla}</Boundary>;
   })();
 
   return (
     <div className="shell">
-      {/* Lo primero del orden de tabulación: cinco destinos antes del contenido son once saltos. */}
+      {/* Lo primero del orden de tabulación: cuatro destinos antes del contenido son nueve saltos. */}
       <a className="skip-link" href="#contenido"
         onClick={(event) => {
           event.preventDefault();
@@ -253,49 +200,36 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
       </a>
       <Rail working={working} attention={attention}
         insecure={Boolean(me.insecureLogin) || Boolean(me.testNoAuth)}
-        terminals={openTerminals} waitingApproval={waitingApproval} />
+        terminals={openTerminals} />
 
       <div className="workarea">
         <header className="topbar">
           <div className="page-heading">
+            {/* Las migas y el título en una línea: «Sesiones › app». Repetirlo en dos era ruido. */}
             {meta.parent ? (
-              <p className="row tight" style={{ gap: 5 }}>
+              <span className="crumb">
                 <Link to={meta.parent.to}>{meta.parent.label}</Link>
-                <Glyph icon={ACTION_ICON.chevron} size={13} />
-                <span className="truncate">{meta.title}</span>
-              </p>
+                <Glyph icon={ACTION_ICON.chevron} size={14} />
+              </span>
             ) : null}
             <h1 className="truncate">{meta.title}</h1>
-            {meta.subtitle && !meta.parent ? <p>{meta.subtitle}</p> : null}
           </div>
 
           <button type="button" className="topbar-search" onClick={openCommandPalette}
             aria-label="Buscar y saltar a cualquier sitio">
-            <Glyph icon={NAV_ICON.sessions} size={16} />
-            <span className="grow">Buscar sesiones, hosts, trabajos…</span>
+            <Glyph icon={ACTION_ICON.search} size={16} />
+            <span className="grow">Buscar…</span>
             <span className="kbd">Ctrl K</span>
           </button>
 
           <div className="topbar-right">
             {/*
-              * Lo que espera una decisión tuya no puede vivir sólo en la pantalla donde nació:
-              * un plan parado en un workspace que no estás mirando no se entera nadie.
-              */}
-            {waitingApproval > 0 ? (
-              <Link to="/" className="chip warn"
-                title="Hay planes parados esperando que autorices algo">
-                <Glyph icon={PLAN_STATUS_ICON['waiting_approval'] as never} />
-                <span className="chip-text">
-                  {waitingApproval === 1 ? '1 espera tu permiso' : `${waitingApproval} esperan tu permiso`}
-                </span>
-              </Link>
-            ) : null}
-            {/*
-              * Tres estados, y el peor manda.
+              * Sólo se dice algo cuando hay algo que decir.
               *
               * Sin autenticación es más grave que sin cifrar: sin cifrar, alguien que ya está en
               * la red puede leer lo que pasa; sin autenticación, cualquiera que llegue **es** tú.
-              * Por eso va en rojo y lo dice con esas palabras, sin eufemismos.
+              * Por eso va en rojo y lo dice con esas palabras. Con todo en orden no se pinta nada:
+              * un «conexión segura» fijo es una etiqueta que se deja de leer al segundo día.
               */}
             {me.testNoAuth ? (
               <Link to="/health" className="chip danger"
@@ -310,25 +244,18 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
                 <Glyph icon={ACTION_ICON.insecure} />
                 <span className="chip-text">HTTP sin cifrar</span>
               </Link>
-            ) : (
-              <span className="chip ok" title="La conexión con el gateway está cifrada">
-                <Glyph icon={ACTION_ICON.secure} />
-                <span className="chip-text">Conexión segura</span>
-              </span>
-            )}
-            <span className="chip topbar-user">
-              <span className="avatar">{me.user.displayName.slice(0, 1).toUpperCase()}</span>
-              <strong>{me.user.displayName}</strong>
+            ) : null}
+            <span className="avatar" title={me.user.displayName} aria-hidden="true">
+              {me.user.displayName.slice(0, 1).toUpperCase()}
             </span>
-            <button type="button" className="btn small" onClick={onLogout}>
+            <button type="button" className="btn small icon ghost" onClick={onLogout}
+              aria-label={`Salir (${me.user.displayName})`} title="Salir">
               <Glyph icon={ACTION_ICON.logout} />
-              <span className="chip-text">Salir</span>
             </button>
           </div>
         </header>
 
         <main id="contenido" tabIndex={-1}>{content}</main>
-        <StatusBar />
       </div>
 
       <CommandPalette />

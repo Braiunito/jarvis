@@ -12,9 +12,9 @@ const PASSWORD = 'e2e-password-de-pruebas';
 /**
  * Los destinos del carril.
  *
- * Se busca dentro del carril y no en toda la página a propósito: «Sesiones» o «Trabajo» aparecen
- * también como atajos dentro de las pantallas, y un test que pincha el primero que encuentra deja
- * de probar la navegación para probar la suerte.
+ * Se busca dentro del carril y no en toda la página a propósito: «Sesiones» aparece también como
+ * miga dentro de las pantallas, y un test que pincha el primero que encuentra deja de probar la
+ * navegación para probar la suerte.
  */
 const nav = (page: Page, name: string | RegExp) =>
   page.locator('.rail').getByRole('link', { name });
@@ -27,12 +27,23 @@ async function login(page: Page): Promise<void> {
   await expect(nav(page, 'Sesiones')).toBeVisible();
 }
 
-/** Abre el workspace de una sesión concreta y devuelve su URL. */
+/** El grupo de una carpeta, por su nombre corto. */
+const group = (page: Page, folder: string) =>
+  page.locator('.group-head').filter({ has: page.locator('.group-title', { hasText: new RegExp(`^${folder}`) }) });
+
+/**
+ * Abre una sesión concreta y devuelve su URL.
+ *
+ * Tres pasos, que son los de la pantalla: el grupo de su carpeta, la sesión, «Abrir». Se busca el
+ * grupo que contiene la sesión en vez de nombrar la carpeta, para que el test no dependa de dónde
+ * se ejecutó cada sesión de prueba.
+ */
 async function openWorkspace(page: Page, title: string): Promise<string> {
   await nav(page, 'Sesiones').click();
-  // La lista es una tabla: se compara entre sesiones, así que cada una es una fila.
-  await page.getByRole('row', { name: new RegExp(title, 'i') }).click();
-  await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
+  await page.getByLabel('Buscar sesiones').fill(title);
+  await page.locator('.group-head').first().click();
+  await page.locator('.session-head', { hasText: new RegExp(title, 'i') }).click();
+  await page.getByRole('button', { name: 'Abrir', exact: true }).click();
   await expect(page).toHaveURL(/\/w\//);
   return page.url();
 }
@@ -41,24 +52,49 @@ test.beforeEach(async ({ page }) => {
   await login(page);
 });
 
-test('flujo 1 · retomar trabajo: buscar, previsualizar y abrir', async ({ page }) => {
-  await nav(page, 'Sesiones').click();
-  await expect(page.getByRole('row', { name: /timeout del pool/i })).toBeVisible();
+test('flujo 1 · retomar trabajo: carpeta, sesión y abrir', async ({ page }) => {
+  // La portada son las sesiones, agrupadas por la carpeta donde se ejecutaron: el nombre corto,
+  // no la ruta, y las de la misma carpeta juntas aunque sean de máquinas distintas.
+  await expect(group(page, 'app')).toBeVisible();
+  await expect(group(page, 'app')).toContainText('3 sesiones');
+  await expect(page.getByText('/tmp/jarvis-demo/app')).toHaveCount(0);
 
-  // Buscar es una consulta: filtra la lista y no toca nada más.
+  // Buscar es una consulta: filtra y no toca nada más.
   await page.getByLabel('Buscar sesiones').fill('certificado');
-  await expect(page.getByRole('row', { name: /certificado caducado/i })).toBeVisible();
-  await expect(page.getByRole('row', { name: /timeout del pool/i })).toHaveCount(0);
-
+  await expect(group(page, 'edge')).toBeVisible();
+  await expect(group(page, 'app')).toHaveCount(0);
   await page.getByLabel('Buscar sesiones').fill('');
-  await page.getByRole('row', { name: /timeout del pool/i }).click();
-  await expect(page.getByText('el pool se queda sin conexiones')).toBeVisible();
 
-  await page.getByRole('button', { name: /^(Abrir|Ir al) workspace$/ }).click();
+  // Abrir el grupo enseña sus sesiones, la más reciente primero, y las rutas completas.
+  await group(page, 'app').click();
+  await expect(page.locator('.session-head').first()).toContainText('timeout del pool');
+  await expect(page.getByText('/srv/app')).toBeVisible();
+
+  // Y pulsar una sesión enseña su ruta, de qué iba y qué se puede hacer.
+  await page.locator('.session-head', { hasText: 'timeout del pool' }).click();
+  await expect(page.getByText('el pool se queda sin conexiones')).toBeVisible();
+  await page.getByRole('button', { name: 'Abrir', exact: true }).click();
   await expect(page).toHaveURL(/\/w\//);
-  // El transcript remoto se ve, y dice de dónde salió.
-  await page.getByRole('tab', { name: /Conversación/ }).click();
-  await expect(page.getByText('escrito en la máquina').first()).toBeVisible();
+
+  // El hilo: los turnos anteriores plegados en «lo que pediste → lo que contestó»; el último,
+  // abierto. Desplegar uno enseña el turno entero.
+  // Con la suite pasando dos veces —escritorio y móvil— el hilo crece; si el primero quedó entre
+  // los anteriores, se piden.
+  // `count()` antes que `isEnabled()`: éste espera a que el botón exista, y si no hay nada
+  // anterior no va a existir nunca.
+  const anteriores = page.locator('.thread-more');
+  await expect(page.locator('.turn').first()).toBeVisible();
+  if (await anteriores.count() && await anteriores.isEnabled()) await anteriores.click();
+  const primero = page.locator('.turn').first();
+  await expect(primero).toContainText('La API devuelve 502');
+  await expect(primero).toContainText('el pool llega a 20 conexiones');
+  await expect(primero.locator('.turn-head')).toHaveAttribute('aria-expanded', 'false');
+  await primero.locator('.turn-head').click();
+  await expect(primero.locator('.message.assistant')).toContainText('el pool llega a 20 conexiones');
+
+  // La miga vuelve al grupo abierto, no a la portada en frío.
+  await page.locator('.crumb').getByRole('link', { name: 'Sesiones' }).click();
+  await expect(page.locator('.session-head', { hasText: 'timeout del pool' })).toBeVisible();
 });
 
 test('flujo 2 · trabajo directo: destino visible antes de enviar, y resultado en vivo', async ({ page }) => {
@@ -74,8 +110,11 @@ test('flujo 2 · trabajo directo: destino visible antes de enviar, y resultado e
 
   // El borrador se limpia sólo cuando el servidor confirmó el trabajo.
   await expect(page.getByLabel('Qué quieres que haga el agente')).toHaveValue('');
-  await expect(page.getByText('Terminado').first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText('resultado').first()).toBeVisible();
+  // El trabajo es el último turno del hilo, y viene abierto: se ve en vivo sin pulsar nada.
+  const turno = page.locator('.turn').last();
+  await expect(turno.locator('.turn-head')).toContainText('revisa el pool');
+  await expect(turno.getByText('Terminado').first()).toBeVisible({ timeout: 60_000 });
+  await expect(turno.getByText('resultado').first()).toBeVisible();
 
   /*
    * Lo repetido se agrupa; lo distinto no.
@@ -103,44 +142,44 @@ test('flujo 3 · el borrador sobrevive a navegar y volver', async ({ page }) => 
     .toHaveValue('esto es un borrador a medio escribir');
 });
 
-test('flujo 4 · delegar un objetivo al Assistant', async ({ page }) => {
-  await openWorkspace(page, 'timeout del pool');
-
-  await page.getByLabel('Objetivo').fill('averigua por que el pool se queda sin conexiones');
-  await page.getByRole('button', { name: 'Delegar objetivo' }).click();
-
-  // El plan es una lista de pasos con estado, no una conversación. El título aparece también en
-  // la síntesis final, así que se busca el del paso.
-  await expect(page.getByText('Reunir contexto', { exact: true }).first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole('heading', { name: 'Resultado' })).toBeVisible({ timeout: 90_000 });
-});
-
-test('flujo 5 · diagnóstico: qué salto está roto y cómo se copia', async ({ page }) => {
+test('flujo 4 · diagnóstico: qué salto está roto y cómo se copia', async ({ page }) => {
   await nav(page, /^Salud/).click();
 
-  await expect(page.getByText('ssh:bastion')).toBeVisible();
-  // Un host caído deja su check en rojo y el resto de la aplicación en pie.
+  // Un host caído deja su check en rojo, a la vista, y el resto de la aplicación en pie.
   await expect(page.getByText('ssh:deadhost')).toBeVisible();
-  await expect(page.getByText(/No route to host/)).toBeVisible();
-  await expect(page.getByText('database')).toBeVisible();
+  await expect(page.getByText(/No route to host/).first()).toBeVisible();
+
+  // Lo que va bien está plegado, contado, y a un clic.
+  await expect(page.getByText('ssh:bastion')).toHaveCount(0);
+  await page.getByRole('button', { name: /^Ver las \d+ que van bien$/ }).click();
+  await expect(page.getByText('ssh:bastion')).toBeVisible();
+  await expect(page.getByText('database', { exact: true })).toBeVisible();
 
   await expect(page.getByRole('button', { name: 'Copiar diagnóstico' })).toBeVisible();
 });
 
+test('el asistente ya no está: ni en el carril ni en su ruta', async ({ page }) => {
+  await expect(page.locator('.rail').getByRole('link')).toHaveCount(4);
+  await expect(nav(page, /Asistente/)).toHaveCount(0);
+  // Un enlace viejo a /assistant cae en la portada, no en una pantalla en blanco.
+  await page.goto('/assistant');
+  await expect(page.getByLabel('Buscar sesiones')).toBeVisible();
+});
+
 test('la paleta lleva a un contexto sin pasar por tres pantallas', async ({ page }) => {
   await openWorkspace(page, 'timeout del pool');
-  await nav(page, 'Inicio').click();
+  await nav(page, /^Trabajo/).click();
 
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.getByRole('dialog', { name: 'Ir a' })).toBeVisible();
 
-  await page.getByPlaceholder('Ir a un workspace').fill('timeout');
+  await page.getByPlaceholder('Ir a una sesión').fill('timeout');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/w\//);
 
   // Y también lleva a una sección, escribiendo lo que uno recuerda.
   await page.keyboard.press('ControlOrMeta+k');
-  await page.getByPlaceholder('Ir a un workspace').fill('salud');
+  await page.getByPlaceholder('Ir a una sesión').fill('salud');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/health/);
 });
@@ -159,7 +198,7 @@ test('la terminal se abre, adjunta y no se cierra al salir', async ({ page }) =>
   await expect(page.getByText(/hola-jarvis/).first()).toBeVisible({ timeout: 20_000 });
 
   // Salir de la pantalla no mata la sesión: al volver sigue en la lista.
-  await nav(page, 'Inicio').click();
+  await nav(page, 'Sesiones').click();
   await nav(page, 'Terminal').click();
   await expect(page.locator('.list-item').filter({ hasText: /jarvis-claude/ }).first())
     .toBeVisible({ timeout: 20_000 });
@@ -271,7 +310,7 @@ test('con dos factores, la pantalla pide el segundo y lleva el token pendiente',
 /**
  * Adjuntar un fichero, que la pantalla prometía sin poder cumplirlo.
  *
- * La pestaña de contexto decía «los ficheros que le subiste» y en toda la consola no había un solo
+ * La pantalla decía «los ficheros que le subiste» y en toda la consola no había un solo
  * `input` de fichero. Se prueba el camino entero —subir, verlo, mandarlo con el trabajo— porque el
  * fallo era justamente que no existía ninguno de los tres pasos.
  */
@@ -288,16 +327,15 @@ test('adjuntar un fichero y mandarlo con el trabajo', async ({ page }) => {
   // fichero y no por el contador: el workspace es el mismo en las dos pasadas de la suite, así que
   // el número de adjuntos depende de quién llegó antes.
   await expect(page.getByText(/notas\.txt/).first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(/\d+ de \d+ irán con este envío/)).toBeVisible();
 
   const quitar = page.getByRole('button', { name: 'Quitar notas.txt' }).first();
   await quitar.click();
   await expect(page.getByRole('button', { name: 'Incluir notas.txt' }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Incluir notas.txt' }).first().click();
 
-  // Y llega a la pestaña de contexto, que es donde se mira lo que el agente puede ver.
-  await page.getByRole('tab', { name: /Archivos y contexto/ }).click();
-  await expect(page.getByText('notas.txt').first()).toBeVisible();
+  // Y queda en los detalles de la sesión, que es donde se mira lo que el agente puede ver.
+  await page.getByRole('button', { name: 'Detalles' }).click();
+  await expect(page.locator('.ws-details').getByText('notas.txt').first()).toBeVisible();
 });
 
 /**

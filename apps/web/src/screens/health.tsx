@@ -1,35 +1,47 @@
 /**
  * Salud: dónde duele y desde cuándo.
  *
- * Se puede copiar, y lo que se copia no lleva prompts, salida del agente ni secretos: sólo
- * versiones, estados por salto y códigos de error. Esa contención es el motivo de que se pueda
- * pegar en un chat sin pensárselo.
+ * Una frase arriba —todo bien o qué no— y debajo, en filas cortas, cada comprobación y cada
+ * máquina. Aquí vive también lo que antes ocupaba la portada y la barra de abajo: la cuota de las
+ * cuentas y los datos del sistema. Se miran cuando algo va raro, no cada vez que se entra.
+ *
+ * El diagnóstico se puede copiar y no lleva prompts, salida del agente ni secretos: sólo
+ * versiones, estados por salto y códigos de error, así que se puede pegar en cualquier chat.
  */
 import type { JSX } from 'react';
 import { useState } from 'react';
-import { useHealth, useHosts } from '../api/queries.js';
-import { Empty, ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
+import { useHealth, useHosts, useMetrics } from '../api/queries.js';
+import { ErrorNote, Loading, relativeTime } from '../ui/bits.jsx';
 import { Meter } from '../ui/charts.jsx';
-import { checkName, HEALTH } from '../ui/labels.js';
-import { ACTION_ICON, Glyph, HEALTH_ICON, NAV_ICON, STATUS_ICON } from '../ui/icons.jsx';
-import { AskAssistantButton } from '../ui/ask-assistant.jsx';
+import { checkName, HEALTH, USAGE_LOW_PERCENT, usageWindowName } from '../ui/labels.js';
+import { ACTION_ICON, Glyph, HEALTH_ICON, NAV_ICON, PROVIDER_ICON } from '../ui/icons.jsx';
 import { usePageMeta } from '../ui/page-meta.jsx';
-import { Card, Stat, formatDuration } from '../ui/primitives.jsx';
+import { Card, formatDuration } from '../ui/primitives.jsx';
+
+const SUMMARY: Record<string, string> = {
+  ok: 'Todo bien',
+  degraded: 'Algo va a medias',
+  failed: 'Algo está caído',
+};
 
 export function HealthScreen(): JSX.Element {
-  usePageMeta({ title: 'Salud', subtitle: 'El estado de cada salto, con su evidencia' });
+  usePageMeta({ title: 'Salud' });
 
   const health = useHealth();
   // Aquí sí interesa el estado real de cada máquina, aunque cueste una conexión por host.
   const hosts = useHosts({ probe: true });
+  const metrics = useMetrics(24);
   const [copied, setCopied] = useState(false);
+  const [showAllChecks, setShowAllChecks] = useState(false);
 
   const checks = Object.entries(health.data?.checks ?? {});
-  const okChecks = checks.filter(([, check]) => check.status === 'ok').length;
+  const okCount = checks.filter(([, check]) => check.status === 'ok').length;
   const fleet = hosts.data?.hosts ?? [];
-  const reachable = fleet.filter((host) => host.reachable).length;
+  const usage = metrics.data?.usage ?? [];
   const system = health.data?.system;
   const insecure = window.location.protocol !== 'https:';
+  const status = health.data?.status;
+  const tone = status === 'ok' ? 'ok' : status === 'degraded' ? 'warn' : status ? 'danger' : 'neutral';
 
   function copyDiagnostics(): void {
     const report = {
@@ -52,139 +64,137 @@ export function HealthScreen(): JSX.Element {
   }
 
   return (
-    <div className="page">
+    <div className="page narrow">
       {insecure ? (
         <p className="note warn" role="status">
           <Glyph icon={ACTION_ICON.insecure} size={16} />
           <span>
-            Esta página no viaja cifrada. Mientras siga así, las passkeys no funcionan —el
-            navegador no las expone fuera de un contexto seguro— y la entrada por contraseña
-            queda abierta. Con certificado, se apaga.
+            Esta página no viaja cifrada: las passkeys no funcionan y la entrada por contraseña queda
+            abierta. Con certificado, se apaga.
           </span>
         </p>
       ) : null}
 
-      <div className="grid cols-4">
-        <Card>
-          <Stat value={okChecks} label={`de ${checks.length} comprobaciones bien`} />
-          <Meter value={okChecks} max={Math.max(1, checks.length)}
-            tone={okChecks === checks.length ? 'ok' : 'danger'} />
-        </Card>
-        <Card>
-          <Stat value={reachable} label={`de ${fleet.length} máquinas responden`} />
-          <Meter value={reachable} max={Math.max(1, fleet.length)}
-            tone={reachable === fleet.length ? 'ok' : 'warn'} />
-        </Card>
-        <Card>
-          <Stat value={system ? formatDuration(system.uptimeSeconds * 1000) : '—'} label="el core lleva en pie"
-            hint={health.data ? `versión ${health.data.version}` : undefined} />
-        </Card>
-        <Card>
-          <Stat value={system?.sqlite ?? '—'} label="SQLite"
-            hint={system ? `Node ${system.node}` : undefined} />
-        </Card>
+      <div className={`health-summary ${tone}`}>
+        <Glyph icon={HEALTH_ICON[status ?? 'unknown'] ?? HEALTH_ICON['unknown'] as never} size={22} />
+        <div className="grow">
+          <strong>{status ? SUMMARY[status] ?? status : 'Comprobando…'}</strong>
+          <span className="small muted">
+            {okCount} de {checks.length} comprobaciones bien
+            {' · '}
+            {fleet.filter((host) => host.reachable).length} de {fleet.length} máquinas responden
+          </span>
+        </div>
+        <button type="button" className="btn small" onClick={copyDiagnostics}
+          title="Sin prompts, sin salida de agente y sin credenciales: se puede pegar donde haga falta">
+          <Glyph icon={copied ? ACTION_ICON.approve : ACTION_ICON.copy} />
+          {copied ? 'Copiado' : 'Copiar diagnóstico'}
+        </button>
       </div>
 
-      <Card title="Estado por salto" icon={NAV_ICON.health} count={checks.length}
-        actions={
-          <button type="button" className="btn small" onClick={copyDiagnostics}>
-            <Glyph icon={copied ? ACTION_ICON.approve : ACTION_ICON.copy} />
-            {copied ? 'Copiado' : 'Copiar diagnóstico'}
-          </button>
-        }>
-        <p className="small muted" style={{ margin: '0 0 10px' }}>
-          Sin prompts, sin salida de agente y sin credenciales: es seguro pegarlo donde haga falta.
-        </p>
+      <Card title="Comprobaciones" icon={NAV_ICON.health}>
         {health.isLoading ? <Loading rows={4} shape="list" label="Sondeando el core…" /> : null}
         <ErrorNote error={health.error} onRetry={() => void health.refetch()} />
-        <div className="list">
-          {checks.map(([name, check]) => (
-            <div key={name} className="list-item" style={{ cursor: 'default' }}>
-              <span className="row tight nowrap" style={{ minWidth: 0 }}>
-                <span className={`badge ${HEALTH[check.status]?.tone ?? 'neutral'}`}>
-                  <Glyph icon={HEALTH_ICON[check.status] ?? HEALTH_ICON['unknown'] as never} />
-                  {HEALTH[check.status]?.name ?? check.status}
-                </span>
-                <span className="cell-main">
-                  <span className="title truncate">{checkName(name).title}</span>
-                  <span className="tiny faint mono truncate">
-                    {name}
-                    {check.code ? ` · ${check.code}` : ''}
-                    {check.message ? ` · ${check.message}` : ''}
-                  </span>
+        <div className="rows">
+          {(showAllChecks ? checks : checks.filter(([, check]) => check.status !== 'ok')).map(([name, check]) => (
+            <div key={name} className={`line-row ${check.status === 'ok' ? '' : 'bad'}`}>
+              <span className={`badge ${HEALTH[check.status]?.tone ?? 'neutral'}`}>
+                <Glyph icon={HEALTH_ICON[check.status] ?? HEALTH_ICON['unknown'] as never} />
+                {HEALTH[check.status]?.name ?? check.status}
+              </span>
+              <span className="line-main">
+                <span className="truncate">{checkName(name).title}</span>
+                <span className="tiny faint mono truncate">
+                  {name}
+                  {check.code ? ` · ${check.code}` : ''}
+                  {check.message ? ` · ${check.message}` : ''}
                 </span>
               </span>
-              <span className="row tight nowrap">
-                <span className="tiny faint nowrap">
-                  {check.lastOkAt ? `último ok ${relativeTime(check.lastOkAt)}` : 'sin ok conocido'}
-                </span>
-                {/*
-                  * Un salto en rojo dice qué falla y desde cuándo, nunca por qué: eso está en la
-                  * máquina y el asistente sabe mirarla. Se le pasa el nombre y el código, que es
-                  * lo que aquí se sabe y lo que uno copiaría a mano para preguntarle.
-                  */}
-                {check.status !== 'ok' ? (
-                  <AskAssistantButton
-                    prompt={`¿Por qué está en «${HEALTH[check.status]?.name ?? check.status}» `
-                      + `la comprobación ${checkName(name).title} (${name})?`
-                      + (check.code ? ` El código es ${check.code}.` : '')
-                      + (check.message ? ` Dice: ${check.message}` : '')}
-                  >
-                    Pregúntale por qué
-                  </AskAssistantButton>
-                ) : null}
+              <span className="tiny faint nowrap">
+                {check.lastOkAt ? `ok ${relativeTime(check.lastOkAt)}` : 'sin ok conocido'}
               </span>
             </div>
           ))}
-        </div>
-      </Card>
-
-      <Card title="Flota" icon={ACTION_ICON.hosts} count={fleet.length}>
-        <p className="small muted" style={{ margin: '0 0 10px' }}>
-          Sondeada de verdad: una conexión por máquina para saber qué agentes tiene instalados.
-        </p>
-        {hosts.isLoading ? <Loading rows={3} shape="list" label="Sondeando las máquinas…" /> : null}
-        <ErrorNote error={hosts.error} onRetry={() => void hosts.refetch()} />
-        <div className="list">
-          {fleet.map((host) => (
-            <div key={host.host} className="list-item" style={{ cursor: 'default' }}>
-              <span className="row tight nowrap" style={{ minWidth: 0 }}>
-                <span className={`badge ${host.reachable ? (host.stale ? 'warn' : 'ok') : 'danger'}`}>
-                  <Glyph icon={host.reachable
-                    ? (host.stale ? HEALTH_ICON['stale'] as never : HEALTH_ICON['ok'] as never)
-                    : HEALTH_ICON['failed'] as never} />
-                  {host.reachable ? (host.stale ? 'sin refrescar' : 'responde') : 'no responde'}
-                </span>
-                <span className="cell-main">
-                  <span className="row tight nowrap">
-                    <Glyph icon={STATUS_ICON.host} size={13} />
-                    <span className="mono">{host.host}</span>
-                    {host.host === hosts.data?.bastionHost ? (
-                      <span className="badge neutral">bastión</span>
-                    ) : null}
-                  </span>
-                  <span className="tiny faint truncate">
-                    {host.providers.length ? `agentes: ${host.providers.join(', ')}` : 'sin CLI de agente'}
-                    {host.tmux ? ' · con tmux' : ' · sin tmux'}
-                  </span>
-                </span>
-              </span>
-              <span className="row tight nowrap">
-                {host.error ? <span className="badge danger">{host.error.slice(0, 40)}</span> : null}
-                <span className="tiny faint">sondeado {relativeTime(host.probedAt)}</span>
-              </span>
-            </div>
-          ))}
-          {!hosts.isLoading && fleet.length === 0 ? (
-            <Empty
-              tight
-              icon={ACTION_ICON.hosts}
-              title="La lista blanca está vacía"
-              hint="Jarvis sólo habla con máquinas declaradas de antemano. Se añaden en la configuración del core (JARVIS_HOSTS) y hasta entonces no hay a dónde mandar trabajo."
-            />
+          {/*
+            * Lo que va bien, plegado: se cuenta y se puede abrir. Diez filas verdes para encontrar
+            * la roja era justo lo que esta pantalla no debería obligar a hacer.
+            */}
+          {okCount > 0 ? (
+            <button type="button" className="linklike small rows-more" onClick={() => setShowAllChecks((value) => !value)}>
+              {showAllChecks ? 'Ocultar las que van bien' : `Ver las ${okCount} que van bien`}
+            </button>
           ) : null}
         </div>
       </Card>
+
+      <Card title="Máquinas" icon={ACTION_ICON.hosts}>
+        {hosts.isLoading ? <Loading rows={3} shape="list" label="Sondeando las máquinas…" /> : null}
+        <ErrorNote error={hosts.error} onRetry={() => void hosts.refetch()} />
+        <div className="rows">
+          {fleet.map((host) => (
+            <div key={host.host} className={`line-row ${host.reachable ? '' : 'bad'}`}>
+              <span className={`badge ${host.reachable ? (host.stale ? 'warn' : 'ok') : 'danger'}`}>
+                <Glyph icon={host.reachable
+                  ? (host.stale ? HEALTH_ICON['stale'] as never : HEALTH_ICON['ok'] as never)
+                  : HEALTH_ICON['failed'] as never} />
+                {host.reachable ? (host.stale ? 'sin refrescar' : 'responde') : 'no responde'}
+              </span>
+              <span className="line-main">
+                <span className="mono truncate">
+                  {host.host}
+                  {host.host === hosts.data?.bastionHost ? <span className="faint"> · bastión</span> : null}
+                </span>
+                <span className="tiny faint truncate">
+                  {host.error ? host.error.slice(0, 80) : (
+                    `${host.providers.length ? host.providers.join(', ') : 'sin agentes'}${host.tmux ? ' · tmux' : ' · sin tmux'}`
+                  )}
+                </span>
+              </span>
+              <span className="tiny faint nowrap">{relativeTime(host.probedAt)}</span>
+            </div>
+          ))}
+          {!hosts.isLoading && fleet.length === 0 ? (
+            <p className="small muted" style={{ margin: 0 }}>
+              No hay máquinas declaradas: se añaden en la configuración del core (JARVIS_HOSTS).
+            </p>
+          ) : null}
+        </div>
+      </Card>
+
+      {/*
+        * La cuota de cada cuenta: la ventana más apretada, que es la que va a molestar primero.
+        * El detalle por ventana sigue en la cabecera de cada sesión, que es donde se manda trabajo.
+        */}
+      {usage.length ? (
+        <Card title="Cuota de las cuentas" icon={ACTION_ICON.filters}>
+          <div className="rows">
+            {usage.map((account) => {
+              const low = account.remainingPercent <= USAGE_LOW_PERCENT;
+              return (
+                <div key={`${account.provider}:${account.executionHost}`} className="quota-row">
+                  <span className="row tight nowrap small" style={{ minWidth: 0 }}>
+                    <Glyph icon={PROVIDER_ICON[account.provider] ?? NAV_ICON.runs} size={13} />
+                    <span>{account.provider}</span>
+                    <span className="faint truncate">{account.executionHost}</span>
+                  </span>
+                  <Meter value={account.remainingPercent} max={100} tone={low ? 'danger' : 'ok'} />
+                  <span className={`tiny nowrap ${low ? 'danger-text' : 'faint'}`}>
+                    {account.remainingPercent}% de {usageWindowName(account.label)}
+                    {account.stale ? ' · viejo' : ''}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      ) : null}
+
+      {system ? (
+        <p className="tiny faint system-line">
+          core {health.data?.version} · en pie {formatDuration(system.uptimeSeconds * 1000)}
+          {' · '}bastión {system.bastionHost} · {system.hosts} máquinas · SQLite {system.sqlite} · Node {system.node}
+        </p>
+      ) : null}
     </div>
   );
 }

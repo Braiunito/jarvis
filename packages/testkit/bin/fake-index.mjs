@@ -37,6 +37,28 @@ const SESSIONS = [
     created_at: iso(14_400), updated_at: iso(1_500), model: 'claude-sonnet-5',
     size_bytes: 4_800, user_messages: 2, assistant_messages: 3, indexed_at: iso(60),
   },
+  /*
+   * Dos más en la misma carpeta que la primera, una de ellas en otra máquina y con otra ruta.
+   *
+   * La portada agrupa por el nombre de la carpeta —`app`— y no por la ruta entera: sin al menos
+   * un grupo de varias, nada de eso se ejercitaba.
+   */
+  {
+    session_key: 'local:codex:sid-migr', host: 'local', provider: 'codex', session_id: 'sid-migr',
+    path: '/home/dev/.codex/sessions/sid-migr.jsonl', source_root: '/home/dev/.codex',
+    cwd: '/tmp/jarvis-demo/app', title: 'índices de la tabla de pedidos',
+    preview: 'las consultas por fecha hacen un barrido completo de pedidos',
+    created_at: iso(9000), updated_at: iso(3_000), model: 'gpt-5-codex',
+    size_bytes: 6_200, user_messages: 3, assistant_messages: 3, indexed_at: iso(5),
+  },
+  {
+    session_key: 'serverB:claude:sid-cache', host: 'serverB', provider: 'claude', session_id: 'sid-cache',
+    path: '/home/ops/.claude/projects/app/sid-cache.jsonl', source_root: '/home/ops/.claude',
+    cwd: '/srv/app', title: 'caché de sesiones en redis',
+    preview: 'las sesiones caducan antes de tiempo después del despliegue',
+    created_at: iso(20_000), updated_at: iso(8_000), model: 'claude-sonnet-5',
+    size_bytes: 3_100, user_messages: 1, assistant_messages: 1, indexed_at: iso(60),
+  },
 ];
 
 const TRANSCRIPTS = {
@@ -49,6 +71,16 @@ const TRANSCRIPTS = {
   'sid-deploy': [
     { role: 'user', at: iso(6000), text: 'El pipeline falla en migraciones cuando la base está vacía.' },
     { role: 'assistant', at: iso(5990), text: 'La migración 0007 asume que existe la tabla de la 0003, que se saltó por un IF NOT EXISTS mal puesto.' },
+  ],
+  'sid-migr': [
+    { role: 'user', at: iso(9000), text: 'Las consultas por fecha de pedidos van lentísimas.' },
+    { role: 'assistant', at: iso(8990), text: 'Hacen un barrido completo: falta un índice sobre `created_at`.' },
+    { role: 'user', at: iso(3_010), text: 'Créalo sin bloquear la tabla.' },
+    { role: 'assistant', at: iso(3_000), text: 'Hecho con `CREATE INDEX CONCURRENTLY`; la consulta baja de 4 s a 30 ms.' },
+  ],
+  'sid-cache': [
+    { role: 'user', at: iso(20_000), text: 'Las sesiones caducan antes de tiempo.' },
+    { role: 'assistant', at: iso(8_000), text: 'El TTL de redis se fijaba en segundos y el código lo pasaba en minutos.' },
   ],
   'sid-nginx': [
     { role: 'user', at: iso(14_400), text: 'Certificado caducado en el borde, hay que renovarlo.' },
