@@ -191,8 +191,14 @@ leer la lista.
 1. `bin/jarvis down` (los volúmenes se quedan).
 2. Volver a la versión anterior: `git checkout <tag>` y `bin/jarvis up`.
 3. Las tmux de los runs **no se matan**: siguen en los hosts y el core las redescubre al arrancar.
-4. Restaurar la base sólo si la migración fue destructiva. El diseño evita que lo sea: las
-   migraciones son aditivas mientras la ventana de rollback siga abierta.
+4. **Si entre las dos versiones hay una migración, el código viejo no arranca**: un core que
+   encuentra un esquema más nuevo que el suyo se niega a escribir en vez de adivinar. Entonces se
+   restaura la copia que `bin/jarvis backup` hizo antes de desplegar (**Restaurar**, arriba), y se
+   pierde lo escrito desde ese momento.
+
+   Las migraciones son aditivas, salvo la 19, que borra las tablas del asistente a propósito. Para
+   volver a una versión anterior a la 19 hace falta la copia sí o sí: los datos de esas tablas sólo
+   están ahí.
 
 ## Qué hacer cuando un run se queda a medias
 
@@ -209,7 +215,8 @@ tocar la base a mano.
 
 ## El asistente
 
-Se quitó el 2026-11-07, con su modelo, sus servidores MCP y sus aprobaciones. Las tablas que
-usaba siguen en la base —no se borra historia en un despliegue—, pero nada las lee ni las escribe.
-Las variables `JARVIS_MODEL_*`, `JARVIS_ASSISTANT_*`, `JARVIS_MCP_*` y `JARVIS_CHAT_*` que queden
+Se quitó el 2026-11-07, con su modelo, sus servidores MCP y sus aprobaciones, y la migración 19
+borró sus tablas: conversaciones, mensajes, artifacts, planes, pasos, aprobaciones, gasto del
+modelo y la cola de turnos. En producción, lo que había queda sólo en la copia de antes de ese
+despliegue, `backups/2026-11-07T21-12-28Z`. Las variables `JARVIS_MODEL_*`, `JARVIS_ASSISTANT_*`, `JARVIS_MCP_*` y `JARVIS_CHAT_*` que queden
 en un `.env` ya no hacen nada.

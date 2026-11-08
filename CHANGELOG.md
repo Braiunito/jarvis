@@ -28,8 +28,7 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 - **Y el asistente, también del core.** Se van el modelo de dos escalones, el cliente MCP, las
   conversaciones, los planes y su supervisor, la cola de turnos, las aprobaciones, los artifacts,
   la evidencia y el contador de gasto: unas 11.600 líneas y sus pruebas. Salud deja de comprobar
-  los servidores MCP y la cola, y las métricas dejan de contar planes. Las tablas siguen en la base
-  —un despliegue no borra historia— pero nada las lee ni las escribe, y las variables
+  los servidores MCP y la cola, y las métricas dejan de contar planes. Las variables
   `JARVIS_MODEL_*`, `JARVIS_ASSISTANT_*`, `JARVIS_MCP_*` y `JARVIS_CHAT_*` que queden en un `.env`
   ya no hacen nada. El titulador de workspaces se queda: es de las sesiones, no del asistente.
 - **Y sus tablas, también** (migración 19). Conversaciones, mensajes, artifacts, planes, pasos,
