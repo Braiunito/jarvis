@@ -28,6 +28,9 @@ const resumeIndex = argv.indexOf('--resume');
 const sessionId = resumeIndex !== -1 ? argv[resumeIndex + 1] : 'sid-claude-new';
 const modeIndex = argv.indexOf('--permission-mode');
 const permissionMode = modeIndex !== -1 ? argv[modeIndex + 1] : 'plan';
+// Lo que pidió `--model`, repetido en el arranque: así una prueba ve que la elección llegó a la CLI.
+const modelIndex = argv.indexOf('--model');
+const model = modelIndex !== -1 ? argv[modelIndex + 1] : 'claude-opus-5';
 
 const emit = (record) => process.stdout.write(`${JSON.stringify(record)}\n`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,7 +75,7 @@ async function main() {
     return;
   }
 
-  emit({ type: 'system', subtype: 'init', session_id: sessionId, model: 'claude-opus-5',
+  emit({ type: 'system', subtype: 'init', session_id: sessionId, model,
     cwd: process.cwd(), permissionMode, tools: ['Bash', 'Read'] });
 
   if (directive('fail') !== null) {

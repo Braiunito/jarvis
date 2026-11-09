@@ -21,6 +21,13 @@ export const SessionSummary = Type.Object({
   startedAt: Type.Union([Iso8601, Type.Null()]),
   lastActivityAt: Type.Union([Iso8601, Type.Null()]),
   preview: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * El último modelo con el que trabajó la sesión, según el índice.
+   *
+   * `null` cuando el índice no lo sabe, y también cuando lo que guarda no es un modelo: el
+   * `<synthetic>` que Claude Code pone en sus propios mensajes o un proveedor a secas (`openai`).
+   */
+  model: Type.Union([Type.String(), Type.Null()]),
   /** Workspace ya abierto para esta sesión, si existe. */
   workspaceId: Type.Union([Type.String(), Type.Null()]),
   /**

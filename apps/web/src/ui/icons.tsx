@@ -17,7 +17,7 @@
  */
 import type { JSX } from 'react';
 import {
-  Activity, Ban, Boxes, Cable, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
+  Activity, Ban, Boxes, Cable, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu,
   ChevronsDown, Check, CircleCheck,
   CircleHelp, CircleSlash, CircleStop, CircleX, Clock, Copy, CornerDownLeft, Database,
   Download, ExternalLink, Eye, Filter, FolderOpen, Gauge, Hexagon, History,
@@ -122,6 +122,7 @@ export const STATUS_ICON = {
   host: Server,
   folder: FolderOpen,
   folderClosed: Folder,
+  model: Cpu,
 } as const;
 
 /** Acciones. Siempre junto a su palabra: un botón que sólo es un dibujo se adivina, no se lee. */

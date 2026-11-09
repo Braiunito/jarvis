@@ -92,10 +92,13 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   const index = options.index ?? new HttpSessionIndex({
     baseUrl: config.indexUrl, token: config.indexToken, timeoutMs: config.indexTimeoutMs,
   });
-  const sessions = new SessionService({ index, workspaces: workspaceRepository, clock, bastionHost: config.bastionHost });
+  const runRepository = new RunRepository(db);
+  const sessions = new SessionService({
+    index, workspaces: workspaceRepository, clock, bastionHost: config.bastionHost,
+    modelsUsed: () => runRepository.modelsUsed(),
+  });
   const fleet = new FleetService({ db, clock, capabilities, hosts: config.hosts, bastionHost: config.bastionHost });
 
-  const runRepository = new RunRepository(db);
   const bus = new RunEventBus();
   const runner = new RemoteRunner({
     sshConfig, spoolRoot: config.spoolRoot, pollChunkBytes: config.pollChunkBytes,

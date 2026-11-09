@@ -13,7 +13,7 @@ import type {
   AgentEvent, CreateRunRequest, PermissionProfile, Provider, Run, RunEvent, RunEventType, RunStatus,
   TargetPlan, UserIdentity, Workspace,
 } from '@jarvis/contracts';
-import { canTransition, isTerminalStatus, JarvisError, PERMISSION_PROFILES } from '@jarvis/contracts';
+import { canTransition, isModelId, isTerminalStatus, JarvisError, PERMISSION_PROFILES } from '@jarvis/contracts';
 import {
   explainResumeFailure, getAdapter, remoteScript, resolveTarget, strategyPreamble, tmuxRunName,
   type CapabilityCache, type RunnerMeta, type SshConfig,
@@ -237,6 +237,13 @@ export class RunService {
       }
     }
 
+    /*
+     * El modelo acaba de argumento de la CLI en otra máquina. Se acepta un nombre de modelo y
+     * nada más: sobre todo, nada que empiece por guion y se lea como otra bandera.
+     */
+    if (request.model && !isModelId(request.model)) {
+      throw new JarvisError('BAD_REQUEST', 'that is not a model name');
+    }
     const prompt = String(request.prompt ?? '');
     const attachmentIds = request.attachmentIds ?? [];
     if (!prompt.trim() && attachmentIds.length === 0) {
@@ -287,7 +294,7 @@ export class RunService {
       strategyReason: target.reason,
       cwd: target.cwd,
       permissionProfile: target.permissionProfile,
-      model: request.model ?? null,
+      model: request.model || null,
       attempt: 1,
       parentRunId: null,
       remoteName: tmuxRunName(runId),

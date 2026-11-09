@@ -7,8 +7,8 @@
 import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type {
-  Attachment, Draft, Health, HostCapabilities, Run, RunEvent, SessionSearchResult, TargetPlan,
-  TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
+  Attachment, Draft, Health, HostCapabilities, ModelCatalog, Run, RunEvent, SessionSearchResult,
+  TargetPlan, TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
 import { api, get, post, put } from './client.js';
 
@@ -62,6 +62,7 @@ export const keys = {
   usage: (workspaceId: string) => ['usage', workspaceId] as const,
   terminals: (host: string) => ['terminals', host] as const,
   metrics: (hours: number) => ['metrics', hours] as const,
+  models: ['models'] as const,
 };
 
 export interface SessionQuery {
@@ -136,6 +137,17 @@ export const useSessions = (query: SessionQuery): UseQueryResult<SessionSearchRe
   placeholderData: (previous) => previous,
 });
 
+/**
+ * Los modelos que se pueden elegir al mandar trabajo: los alias de cada CLI y lo que la flota ya
+ * ha usado. Cambia cuando se usa uno nuevo, que es raro: no hace falta preguntar a menudo.
+ */
+export const useModels = (): UseQueryResult<ModelCatalog> => useQuery({
+  queryKey: keys.models,
+  queryFn: () => get<ModelCatalog>('/api/models'),
+  staleTime: 5 * 60_000,
+  retry: 0,
+});
+
 export const useWorkspaces = (): UseQueryResult<{ workspaces: Workspace[] }> => useQuery({
   queryKey: keys.workspaces,
   queryFn: () => get<{ workspaces: Workspace[] }>('/api/workspaces?limit=25'),
@@ -181,6 +193,8 @@ export const useTranscript = (workspace: Workspace | undefined) => useQuery({
      * reanudar.
      */
     resumable?: boolean;
+    /** El último modelo con el que trabajó la sesión, si el índice lo sabe. */
+    model?: string | null;
   }>(
     `/api/sessions/transcript?host=${encodeURIComponent(workspace!.ref.host)}`
     + `&provider=${workspace!.ref.provider}&sessionId=${encodeURIComponent(workspace!.ref.sessionId)}&last=${TRANSCRIPT_PAGE}`,
@@ -301,6 +315,7 @@ export function useStartSession() {
       cwd?: string | null;
       permissionProfile?: string;
       prompt?: string;
+      model?: string;
     }) => post<StartSessionResult>('/api/sessions/new', input),
     onSuccess: (_data, variables) => {
       void client.invalidateQueries({ queryKey: ['sessions'] });
@@ -389,10 +404,12 @@ export function useCreateRun(workspaceId: string | null) {
     // Nunca se reintenta sola una mutación con efectos: la clave de idempotencia la pone quien
     // llama, y sólo entonces repetir es seguro.
     retry: 0,
-    mutationFn: (input: { prompt: string; permissionProfile: string; idempotencyKey: string; attachmentIds?: string[] }) =>
+    mutationFn: (input: { prompt: string; permissionProfile: string; idempotencyKey: string; attachmentIds?: string[]; model?: string }) =>
       post<{ run: Run; target: TargetPlan; replayed: boolean }>('/api/runs', { workspaceId, ...input }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       void client.invalidateQueries({ queryKey: keys.runs });
+      // Un modelo escrito a mano pasa a ser de los usados: que aparezca la próxima vez.
+      if (variables.model) void client.invalidateQueries({ queryKey: keys.models });
       void client.invalidateQueries({ queryKey: ['metrics'] });
       void client.invalidateQueries({ queryKey: keys.workspace(workspaceId ?? 'none') });
     },

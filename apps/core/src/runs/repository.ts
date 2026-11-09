@@ -190,6 +190,13 @@ export class RunRepository {
       .all(...statuses) as RunRow[]).map(toRun);
   }
 
+  /** Los modelos que se han pedido al mandar trabajo, con la última vez que se pidió cada uno. */
+  modelsUsed(): Array<{ provider: string; model: string; at: string }> {
+    return this.#db.prepare(
+      "SELECT provider, model, MAX(created_at) AS at FROM runs WHERE model IS NOT NULL AND model <> '' GROUP BY provider, model",
+    ).all() as Array<{ provider: string; model: string; at: string }>;
+  }
+
   countActive(): number {
     return (this.#db.prepare(
       "SELECT COUNT(*) AS n FROM runs WHERE status IN ('queued','preparing','running','waiting','cancelling')",

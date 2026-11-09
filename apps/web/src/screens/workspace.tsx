@@ -18,7 +18,7 @@
  */
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Attachment, PermissionProfile, Run, TranscriptMessage, Workspace } from '@jarvis/contracts';
+import type { Attachment, PermissionProfile, Provider, Run, TranscriptMessage, Workspace } from '@jarvis/contracts';
 import {
   useCancelRun, useCreateRun, useRenameWorkspace, useSaveDraft, useTarget, useTranscript,
   useUploadAttachment, useUsage, useWorkspace,
@@ -29,7 +29,8 @@ import { CopyButton, Empty, ErrorNote, Link, Loading, RunStatusBadge, TargetChip
 import { useAnnounceOnChange } from '../ui/announce.jsx';
 import { Boundary } from '../ui/boundary.jsx';
 import { Composer } from '../ui/composer.jsx';
-import { PERMISSION, RUN_STATUS, isRunLive } from '../ui/labels.js';
+import { PERMISSION, RUN_STATUS, isRunLive, modelLabel } from '../ui/labels.js';
+import { ModelPicker, isUsableModel } from '../ui/model-picker.jsx';
 import {
   ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, PROVIDER_ICON, RUN_STATUS_ICON, STATUS_ICON,
 } from '../ui/icons.jsx';
@@ -123,7 +124,7 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
   return (
     <div className="page narrow workspace-page">
       <Header workspace={workspace} runs={runs} attachments={detail.data.attachments}
-        messageCount={transcript.data?.messageCount ?? null} />
+        messageCount={transcript.data?.messageCount ?? null} model={transcript.data?.model ?? null} />
 
       {/* Por sesión: lo abierto a mano en una no tiene nada que ver con otra. */}
       <Thread
@@ -153,7 +154,8 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
         />
       ) : (
         <WorkspaceComposer key={workspaceId} workspaceId={workspaceId} draftBody={detail.data.draft.body}
-          draftVersion={detail.data.draft.version} attachments={detail.data.attachments} />
+          draftVersion={detail.data.draft.version} attachments={detail.data.attachments}
+          provider={workspace.ref.provider} lastModel={runs[0]?.model ?? null} />
       )}
     </div>
   );
@@ -161,11 +163,13 @@ export function WorkspaceScreen({ workspaceId }: { workspaceId: string }): JSX.E
 
 // ---- cabecera -----------------------------------------------------------------
 
-function Header({ workspace, runs, attachments, messageCount }: {
+function Header({ workspace, runs, attachments, messageCount, model }: {
   workspace: Workspace;
   runs: Run[];
   attachments: Attachment[];
   messageCount: number | null;
+  /** El último con el que trabajó la sesión, según el índice. Sólo informa. */
+  model: string | null;
 }): JSX.Element {
   const usage = useUsage(workspace);
   const rename = useRenameWorkspace(workspace.id);
@@ -219,6 +223,12 @@ function Header({ workspace, runs, attachments, messageCount }: {
             <Glyph icon={PROVIDER_ICON[workspace.ref.provider] ?? NAV_ICON.terminal} size={13} />
             {workspace.ref.provider}
           </span>
+          {model ? (
+            <span className="meta-item" title={`Modelo: ${model}`}>
+              <Glyph icon={STATUS_ICON.model} size={13} />
+              {modelLabel(model)}
+            </span>
+          ) : null}
           {workspace.sessionLaunched === false ? (
             <span className="meta-item warn" title="El agente todavía no ha abierto esta sesión en la máquina">
               sin estrenar
@@ -253,6 +263,9 @@ function Header({ workspace, runs, attachments, messageCount }: {
             <span className="row tight" style={{ justifyContent: 'flex-end' }}>
               <TargetChip target={target.data?.target} />
             </span>
+          </DataRow>
+          <DataRow label="Modelo">
+            {model ? <span className="mono">{model}</span> : <span className="faint">el índice no lo sabe</span>}
           </DataRow>
           <DataRow label="Mensajes">{messageCount ?? '—'}</DataRow>
           <DataRow label="Trabajos desde Jarvis">
@@ -504,13 +517,18 @@ function TranscriptTurnBody({ messages, prompt }: { messages: TranscriptMessage[
 
 // ---- el compositor --------------------------------------------------------------
 
-function WorkspaceComposer({ workspaceId, draftBody, draftVersion, attachments }: {
+function WorkspaceComposer({ workspaceId, draftBody, draftVersion, attachments, provider, lastModel }: {
   workspaceId: string;
   draftBody: string;
   draftVersion: number;
   attachments: Attachment[];
+  provider: Provider;
+  /** El que se pidió en el último trabajo de esta sesión: lo normal es seguir con el mismo. */
+  lastModel: string | null;
 }): JSX.Element {
   const [profile, setProfile] = useState<PermissionProfile>('safe');
+  const [model, setModel] = useState(lastModel ?? '');
+  const modelOk = isUsableModel(model);
   const target = useTarget(workspaceId, profile);
   const createRun = useCreateRun(workspaceId);
   const upload = useUploadAttachment(workspaceId);
@@ -552,11 +570,12 @@ function WorkspaceComposer({ workspaceId, draftBody, draftVersion, attachments }
   async function send(): Promise<void> {
     if (!body.trim()) return;
     // La clave de idempotencia es del envío, no del render: un doble toque manda la misma.
-    const idempotencyKey = `${workspaceId}:${draftVersion}:${body.length}:${body.slice(0, 24)}`;
+    const idempotencyKey = `${workspaceId}:${draftVersion}:${model}:${body.length}:${body.slice(0, 24)}`;
     await createRun.mutateAsync({
       prompt: body,
       permissionProfile: profile,
       idempotencyKey,
+      ...(model ? { model } : {}),
       ...(attached.length ? { attachmentIds: attached.map((file) => file.id) } : {}),
     });
     // El borrador sólo se limpia cuando el servidor ya tiene el trabajo.
@@ -576,7 +595,7 @@ function WorkspaceComposer({ workspaceId, draftBody, draftVersion, attachments }
         label="Qué quieres que haga el agente"
         submitLabel="Enviar"
         submitting={createRun.isPending}
-        disabled={upload.isPending}
+        disabled={upload.isPending || !modelOk}
         rows={2}
         uploading={upload.isPending}
         onFiles={(chosen) => {
@@ -617,6 +636,7 @@ function WorkspaceComposer({ workspaceId, draftBody, draftVersion, attachments }
               */}
             <div className="composer-foot">
               <Segmented label="Qué puede hacer el agente" options={PROFILES} value={profile} onChange={setProfile} />
+              <ModelPicker provider={provider} value={model} onChange={setModel} />
               <span className="composer-target small" title={target.data?.target.reason ?? undefined}>
                 {target.data?.target
                   ? `${target.data.target.provider} · en ${target.data.target.executionHost}`
@@ -629,6 +649,11 @@ function WorkspaceComposer({ workspaceId, draftBody, draftVersion, attachments }
               <Glyph icon={PERMISSION_ICON[profile]} size={13} />
               <span>{PERMISSION[profile].help}</span>
             </p>
+            {modelOk ? null : (
+              <p className="tiny model-invalid" role="status">
+                Eso no parece el nombre de un modelo: letras, cifras y <span className="mono">. _ : / @ -</span>, sin espacios.
+              </p>
+            )}
             <ErrorNote error={target.error} />
           </>
         }

@@ -43,6 +43,14 @@ La regla del rediseño compacto: se enseña lo mínimo para reconocer algo y el 
   trabajo, que dice lo mismo y además trae el proceso (`ui/turns.ts`).
 - **Lo que se consulta de vez en cuando va plegado**: los detalles de una sesión, lo que va bien en
   Salud, el «dónde y cómo» de un trabajo.
+- **Buscar es por trozos**: «vul» encuentra vultr. Va por dos caminos que se suman —la
+  conversación en el índice, con cada palabra como prefijo, y la ficha de cada sesión (máquina,
+  títulos, carpeta, modelo, id) como subcadena— porque el índice compara palabras enteras y la
+  máquina ni siquiera está en su texto (`apps/core/src/sessions/search.ts`).
+- **El modelo se ve y se elige, pero no compite con el permiso.** La cabecera de una sesión dice
+  con cuál trabajó; el compositor lleva un desplegable discreto al lado del permiso, que sigue a la
+  vista entero. El permiso decide qué puede tocar el agente; el modelo, cómo de bien y cuánto
+  cuesta. El agente no se elige ahí: una sesión es de un agente, y se elige al empezarla.
 - **Cada respuesta del agente se copia de un clic**, con el Markdown tal cual: en su esquina dentro
   del hilo, y en la tarjeta plegada la última, sin abrirla. Si el core sólo guardó el principio de
   una respuesta larga (4000 caracteres), la tarjeta plegada no lo ofrece: se copia desde dentro,
@@ -153,6 +161,7 @@ apps/web/src/ui/              piezas compartidas
   labels.ts                   el vocabulario del producto, en un solo sitio
   charts.tsx                  el medidor de la cuota
   new-session.tsx             estrenar una sesión desde cero
+  model-picker.tsx            con qué modelo se manda: alias, lo ya usado y «Otro…»
   announce.tsx               la única región `aria-live` de la aplicación
 apps/web/src/api/queries.ts   TanStack Query: los datos del servidor, sin store global
 apps/web/src/api/run-stream.ts   los eventos de un trabajo en directo, por SSE

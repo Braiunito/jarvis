@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { HostName, Iso8601, PermissionProfile, Provider, Strategy } from './common.js';
 import { TargetPlan } from './target.js';
+import { ModelId } from './models.js';
 
 /**
  * Estados de un run. `interrupted` del stack viejo se normaliza a `cancelled`; el motivo viaja
@@ -169,7 +170,8 @@ export const CreateRunRequest = Type.Object({
   prompt: Type.String({ maxLength: 200_000 }),
   permissionProfile: Type.Optional(PermissionProfile),
   preferredStrategy: Type.Optional(Type.Union([Type.Literal('auto'), Type.Literal('A'), Type.Literal('B')])),
-  model: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  /** Sin modelo, la CLI usa el que tenga configurado esa máquina. */
+  model: Type.Optional(Type.Union([ModelId, Type.Null()])),
   attachmentIds: Type.Optional(Type.Array(Type.String())),
   /*
    * Aquí **no** hay `startsSession`, y su ausencia es la garantía.

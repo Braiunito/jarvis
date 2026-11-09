@@ -26,6 +26,7 @@ import { navigate } from '../router.js';
 import { ErrorNote } from './bits.jsx';
 import { ACTION_ICON, Glyph, NAV_ICON, PERMISSION_ICON, STATUS_ICON } from './icons.jsx';
 import { PERMISSION } from './labels.js';
+import { ModelPicker, isUsableModel } from './model-picker.jsx';
 import { Segmented, type SegmentOption } from './primitives.jsx';
 
 const PROVIDERS: Provider[] = ['claude', 'codex', 'opencode'];
@@ -80,6 +81,8 @@ export function NewSessionDialog(): JSX.Element | null {
   const [cwd, setCwd] = useState('');
   const [profile, setProfile] = useState<PermissionProfile>('safe');
   const [prompt, setPrompt] = useState('');
+  /** El de la primera tarea; los siguientes se eligen en el compositor, que empieza con éste. */
+  const [model, setModel] = useState('');
 
   // Sondeado: aquí interesa saber de verdad qué hay en cada máquina, porque de eso depende que la
   // combinación elegida pueda existir. Es la misma consulta cara que hace Salud.
@@ -125,6 +128,7 @@ export function NewSessionDialog(): JSX.Element | null {
   const close = (): void => {
     setOpen(false);
     setPrompt('');
+    setModel('');
     start.reset();
   };
 
@@ -135,7 +139,7 @@ export function NewSessionDialog(): JSX.Element | null {
       mode,
       cwd: cwd.trim() || null,
       permissionProfile: profile,
-      ...(mode === 'task' && prompt.trim() ? { prompt } : {}),
+      ...(mode === 'task' && prompt.trim() ? { prompt, ...(model ? { model } : {}) } : {}),
     });
     close();
     if (created.mode === 'terminal') {
@@ -195,7 +199,11 @@ export function NewSessionDialog(): JSX.Element | null {
               <div className="stack" style={{ gap: 6, flex: '1 1 160px' }}>
                 <span className="small muted">Agente</span>
                 <select className="select" value={provider} aria-label="Agente"
-                  onChange={(event) => setProvider(event.target.value as Provider)}>
+                  onChange={(event) => {
+                    setProvider(event.target.value as Provider);
+                    // Un modelo de Claude no le sirve a Codex.
+                    setModel('');
+                  }}>
                   {PROVIDERS.map((candidate) => (
                     <option key={candidate} value={candidate}>{candidate}</option>
                   ))}
@@ -253,6 +261,14 @@ export function NewSessionDialog(): JSX.Element | null {
               </label>
             ) : null}
 
+            {/* Debajo de la tarea y sólo con tarea: aparece sin mover el campo en el que se escribe. */}
+            {mode === 'task' && prompt.trim() ? (
+              <div className="stack" style={{ gap: 6 }}>
+                <span className="small muted">Con qué modelo · opcional</span>
+                <ModelPicker provider={provider} value={model} onChange={setModel} />
+              </div>
+            ) : null}
+
             <ErrorNote error={start.error} />
 
             <div className="row" style={{ justifyContent: 'flex-end' }}>
@@ -260,7 +276,7 @@ export function NewSessionDialog(): JSX.Element | null {
                 <button type="button" className="btn">Cancelar</button>
               </Dialog.Close>
               <button type="submit" className="btn primary"
-                disabled={start.isPending || !host || chosenIsImpossible}>
+                disabled={start.isPending || !host || chosenIsImpossible || !isUsableModel(model)}>
                 <Glyph icon={mode === 'terminal' ? ACTION_ICON.connect : prompt.trim() ? ACTION_ICON.send : ACTION_ICON.open} />
                 {start.isPending
                   ? 'Empezando…'

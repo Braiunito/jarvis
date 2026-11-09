@@ -2075,3 +2075,22 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+/* ---- el modelo ---- */
+
+/*
+ * Al lado del permiso y más discreto que él: decide cómo de bien y cuánto cuesta, no qué puede
+ * tocar el agente. El desplegable mide lo que dice su opción, no la fila entera.
+ */
+.model-picker { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-muted); }
+.model-picker .select { width: auto; max-width: 15rem; min-height: 32px; padding: 4px 8px; font-size: 12.5px; }
+.model-picker .input { width: 13rem; max-width: 100%; min-height: 32px; padding: 4px 8px; font-size: 12.5px; }
+.model-picker .input[aria-invalid] { border-color: var(--warn); }
+.model-invalid { margin: 0; color: var(--warn); }
+.new-session .model-picker { display: flex; flex-wrap: wrap; }
+.new-session .model-picker .select { flex: 1 1 12rem; max-width: none; min-height: 38px; font-size: inherit; }
+.new-session .model-picker .input { flex: 1 1 12rem; width: auto; min-height: 38px; font-size: inherit; }
+/* Con el dedo, el desplegable vuelve a medir lo que mide cualquier control táctil. */
+@media (pointer: coarse) {
+  .model-picker .select, .model-picker .input { min-height: var(--touch); }
+}

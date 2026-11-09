@@ -88,6 +88,28 @@ const TRANSCRIPTS = {
   ],
 };
 
+/*
+ * El FTS5 del índice de verdad, en pequeño: por palabras, sin tildes ni mayúsculas, una palabra
+ * suelta entera y `"x"*` como prefijo. Copia de `src/fts.ts`, que explica por qué hace falta.
+ */
+const words = (text) =>
+  text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+function ftsMatch(query, columns) {
+  const doc = words(columns.filter(Boolean).join(' '));
+  const terms = [...query.matchAll(/"((?:[^"]|"")*)"(\*?)|(\S+)/g)].map((match) => (
+    match[3] !== undefined
+      ? { phrase: words(match[3]), prefix: false }
+      : { phrase: words((match[1] ?? '').replaceAll('""', '"')), prefix: match[2] === '*' }
+  )).filter((term) => term.phrase.length);
+  if (!terms.length) return false;
+  return terms.every(({ phrase, prefix }) => doc.some((_, start) => phrase.every((word, offset) => {
+    const token = doc[start + offset];
+    if (token === undefined) return false;
+    return prefix && offset === phrase.length - 1 ? token.startsWith(word) : token === word;
+  })));
+}
+
 const send = (res, code, payload) => {
   const body = JSON.stringify(payload);
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) });
@@ -108,11 +130,15 @@ createServer((req, res) => {
   if (url.pathname === '/api/sessions' || url.pathname === '/api/search') {
     const provider = query('provider', 'all');
     const host = query('host', 'all');
-    const needle = query('q').toLowerCase();
+    // `/api/sessions` no busca: el texto sólo lo mira `/api/search`, como en el de verdad.
+    const q = url.pathname === '/api/search' ? query('q') : '';
     const rows = SESSIONS.filter((session) => {
       if (provider !== 'all' && provider && session.provider !== provider) return false;
       if (host !== 'all' && host && session.host !== host && !(host === 'bastion' && session.host === 'local')) return false;
-      if (needle && !`${session.title} ${session.preview}`.toLowerCase().includes(needle)) return false;
+      if (q && !ftsMatch(q, [
+        session.provider, session.title, session.cwd, session.preview,
+        ...(TRANSCRIPTS[session.session_id] ?? []).map((message) => message.text),
+      ])) return false;
       return true;
     });
     return send(res, 200, rows.slice(0, Number(query('limit', '50'))));

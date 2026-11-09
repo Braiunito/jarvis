@@ -54,6 +54,8 @@ export function registerSessionRoutes(app: FastifyInstance, services: CoreServic
       host?: string; provider?: Provider; cwd?: string | null;
       permissionProfile?: 'safe' | 'auto' | 'yolo';
       mode?: 'task' | 'terminal'; prompt?: string;
+      /** El de la primera tarea. Lo valida la creación del trabajo, como el de cualquier otro. */
+      model?: string | null;
     };
     if (!body.host || !body.provider) {
       throw new JarvisError('BAD_REQUEST', 'hacen falta la máquina y el agente');
@@ -93,6 +95,7 @@ export function registerSessionRoutes(app: FastifyInstance, services: CoreServic
       workspaceId: workspace.id,
       prompt: body.prompt,
       ...(body.permissionProfile ? { permissionProfile: body.permissionProfile } : {}),
+      ...(body.model ? { model: body.model } : {}),
     }, user, String(request.id));
     return reply.code(201).send({ mode, workspace, run: created.run, target: created.target });
   });
@@ -109,6 +112,8 @@ export function registerSessionRoutes(app: FastifyInstance, services: CoreServic
     );
     return reply.send(transcript);
   });
+
+  app.get('/api/models', async (_request, reply) => reply.send(await services.sessions.models()));
 
   app.get('/api/sessions/freshness', async (_request, reply) =>
     reply.send({ hosts: await services.sessions.freshness() }));

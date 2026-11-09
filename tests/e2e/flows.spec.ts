@@ -66,6 +66,15 @@ test('flujo 1 · retomar trabajo: carpeta, sesión y abrir', async ({ page }) =>
   await page.getByLabel('Buscar sesiones').fill('certificado');
   await expect(group(page, 'edge')).toBeVisible();
   await expect(group(page, 'app')).toHaveCount(0);
+
+  // Y basta el principio de una palabra, como se teclea: en la conversación…
+  await page.getByLabel('Buscar sesiones').fill('certif');
+  await expect(group(page, 'edge')).toBeVisible();
+  await expect(group(page, 'app')).toHaveCount(0);
+  // …y en la máquina, que el índice ni siquiera tiene en el texto que busca.
+  await page.getByLabel('Buscar sesiones').fill('serv');
+  await expect(group(page, 'edge')).toBeVisible();
+  await expect(group(page, 'deploy')).toHaveCount(0);
   await page.getByLabel('Buscar sesiones').fill('');
 
   // Abrir el grupo enseña sus sesiones, la más reciente primero, y las rutas completas.
@@ -118,8 +127,15 @@ test('flujo 2 · trabajo directo: destino visible antes de enviar, y resultado e
   await expect(page.getByText('claude · en bastion')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Sólo lectura', pressed: true })).toBeVisible();
 
+  // Con qué modelo trabajó la sesión, dicho para leerlo; el identificador exacto, al pasar por encima.
+  await expect(page.locator('.ws-meta')).toContainText('Opus 5');
+
+  // Y con cuál se manda esto: sin elegir, el de la máquina; elegido, llega a la CLI.
+  await page.getByLabel('Modelo', { exact: true }).selectOption('sonnet');
+  const sent = page.waitForRequest((request) => request.url().endsWith('/api/runs') && request.method() === 'POST');
   await page.getByLabel('Qué quieres que haga el agente').fill('@@slow:3 revisa el pool');
   await page.getByRole('button', { name: 'Enviar' }).click();
+  expect((await sent).postDataJSON()).toMatchObject({ model: 'sonnet' });
 
   // El borrador se limpia sólo cuando el servidor confirmó el trabajo.
   await expect(page.getByLabel('Qué quieres que haga el agente')).toHaveValue('');
@@ -128,6 +144,10 @@ test('flujo 2 · trabajo directo: destino visible antes de enviar, y resultado e
   await expect(turno.locator('.turn-head')).toContainText('revisa el pool');
   await expect(turno.getByText('Terminado').first()).toBeVisible({ timeout: 60_000 });
   await expect(turno.getByText('resultado').first()).toBeVisible();
+  // El agente arrancó con el modelo elegido: lo dice él mismo en su primer evento. Y el
+  // compositor se queda con él para el siguiente, que es lo normal en una misma conversación.
+  await expect(turno.getByRole('button', { name: /el agente arrancó.*modelo: sonnet/ })).toBeVisible();
+  await expect(page.getByLabel('Modelo', { exact: true })).toHaveValue('sonnet');
   // Las respuestas del trabajo se copian igual que las del transcript.
   await expect(turno.getByRole('button', { name: 'Copiar la respuesta' }).first()).toBeVisible();
 

@@ -4,18 +4,22 @@
  * Jarvis no posee estas sesiones: las posee el CLI remoto. Aquí sólo se traducen a `SessionRef`
  * y se les cuelga el workspace correspondiente si ya existe.
  */
-import type { HostFreshness, Provider, SessionRef, SessionSearchResult, SessionSummary, TranscriptMessage } from '@jarvis/contracts';
+import type { HostFreshness, ModelCatalog, Provider, SessionRef, SessionSearchResult, SessionSummary, TranscriptMessage } from '@jarvis/contracts';
 import { JarvisError } from '@jarvis/contracts';
 import type { Clock } from '../platform/clock.js';
 import { classifyMessage } from './message-kind.js';
 import type { WorkspaceRepository } from '../workspaces/repository.js';
-import { freshnessFrom, rowToSummary, type SessionIndex, type SessionQuery } from './index-client.js';
+import { freshnessFrom, rowToSummary, type IndexRow, type SessionIndex, type SessionQuery } from './index-client.js';
+import { modelCatalog, type ModelUse } from './models.js';
+import { matchesCard, prefixQuery, searchTerms } from './search.js';
 
 export interface SessionServiceDeps {
   index: SessionIndex;
   workspaces: WorkspaceRepository;
   clock: Clock;
   bastionHost: string;
+  /** Los modelos pedidos al mandar trabajo desde aquí. Los conoce el repositorio de runs. */
+  modelsUsed?: () => ModelUse[];
 }
 
 export class SessionService {
@@ -41,8 +45,16 @@ export class SessionService {
      * se llena, se avisa.
      */
     const limit = query.limit ?? 300;
-    const [list, hosts, status] = await Promise.all([
-      index.list({ ...query, limit }),
+    /*
+     * Con algo escrito, dos consultas que se suman (ver `search.ts`): la conversación en el índice
+     * con cada término como prefijo, y la ficha de cada sesión sobre la lista entera, que es la
+     * única forma de encontrar una máquina por un trozo de su nombre.
+     */
+    const terms = searchTerms(query.q);
+    const { q: _typed, ...scope } = query;
+    const [list, hits, hosts, status] = await Promise.all([
+      index.list({ ...scope, limit }),
+      terms.length ? index.list({ ...scope, q: prefixQuery(terms), limit }) : Promise.resolve(null),
       index.hosts().catch(() => ({ rows: [], stale: true, error: 'the index did not answer' })),
       // Cuándo barrió el índice. Va aquí y no en otra llamada porque su único uso es explicar una
       // lista vacía, y quien la mira la está mirando ahora.
@@ -54,7 +66,7 @@ export class SessionService {
       workspace,
     ]));
 
-    const sessions: SessionSummary[] = list.rows.map((row) => {
+    const toSession = (row: IndexRow): SessionSummary => {
       const summary = rowToSummary(row, bastionHost);
       const key = `${summary.ref.host}|${summary.ref.provider}|${summary.ref.sessionId}`;
       const workspace = known.get(key);
@@ -76,7 +88,18 @@ export class SessionService {
         resumable: !summary.empty || workspace?.sessionLaunched === false,
 
       };
-    });
+    };
+
+    let sessions: SessionSummary[] = list.rows.map(toSession);
+    if (hits) {
+      const found = new Map<string, SessionSummary>();
+      const keyOf = (session: SessionSummary): string =>
+        `${session.ref.host}|${session.ref.provider}|${session.ref.sessionId}`;
+      for (const session of sessions) if (matchesCard(session, terms)) found.set(keyOf(session), session);
+      for (const session of hits.rows.map(toSession)) if (!found.has(keyOf(session))) found.set(keyOf(session), session);
+      sessions = [...found.values()].sort((a, b) =>
+        (Date.parse(b.lastActivityAt ?? '') || 0) - (Date.parse(a.lastActivityAt ?? '') || 0));
+    }
 
     const freshness: HostFreshness[] = freshnessFrom(
       hosts.rows, bastionHost, clock.nowMs(), hosts.stale, hosts.error,
@@ -86,8 +109,9 @@ export class SessionService {
       sessions,
       nextCursor: null,
       freshness,
-      stale: list.stale,
-      truncated: list.rows.length >= limit,
+      stale: list.stale || Boolean(hits?.stale),
+      // Buscando también puede faltar algo: la ficha sólo se compara con las que caben en la lista.
+      truncated: list.rows.length >= limit || (hits?.rows.length ?? 0) >= limit,
       indexScannedAt: status.lastScanAt,
       fetchedAt: clock.nowIso(),
     };
@@ -96,7 +120,7 @@ export class SessionService {
   async transcript(
     ref: SessionRef,
     options: { last?: number } = {},
-  ): Promise<{ messages: TranscriptMessage[]; truncated: boolean; messageCount: number | null; preview: string | null; resumable: boolean }> {
+  ): Promise<{ messages: TranscriptMessage[]; truncated: boolean; messageCount: number | null; preview: string | null; model: string | null; resumable: boolean }> {
     try {
       const payload = await this.#deps.index.transcript(ref, options);
       return {
@@ -118,6 +142,8 @@ export class SessionService {
         // El primer mensaje aprovechable de la sesión, tal y como lo guardó el índice. Llega gratis
         // con la fila que ya se busca para localizar el `session_key`.
         preview: payload.preview ?? null,
+        // El último modelo con el que trabajó, para enseñarlo al abrirla. Viene en la misma fila.
+        model: payload.model ?? null,
         /**
          * Si continuar esta conversación tiene sentido, con la misma regla que el explorador.
          *
@@ -176,6 +202,23 @@ export class SessionService {
   #resumable(ref: SessionRef, empty: boolean | null | undefined): boolean {
     if (empty !== true) return true;
     return this.#deps.workspaces.findByRef(ref)?.sessionLaunched === false;
+  }
+
+  /**
+   * Los modelos que se pueden elegir: los alias de cada CLI y lo que la flota ya ha usado.
+   *
+   * Si el índice no contesta, el catálogo sale con lo que se sabe aquí —los alias y lo pedido
+   * desde Jarvis— en vez de fallar: elegir modelo es opcional, y mandar trabajo no puede quedarse
+   * esperando a que vuelva el índice.
+   */
+  async models(): Promise<ModelCatalog> {
+    const list = await this.#deps.index.list({ limit: 500 }).catch(() => ({ rows: [] as IndexRow[] }));
+    return {
+      models: modelCatalog([
+        ...list.rows.map((row) => ({ provider: row.provider, model: row.model, at: row.updated_at ?? row.created_at })),
+        ...(this.#deps.modelsUsed?.() ?? []),
+      ]),
+    };
   }
 
   async freshness(): Promise<HostFreshness[]> {

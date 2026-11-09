@@ -4,6 +4,8 @@
  * Permite ejercitar «el índice está viejo», «el índice no responde» y «apareció una sesión nueva»
  * sin levantar el sidecar Python.
  */
+import { ftsMatch } from './fts.js';
+
 export interface FakeIndexRow {
   session_key: string;
   host: string;
@@ -71,8 +73,12 @@ export class FakeSessionIndex {
     if (query.provider) rows = rows.filter((row) => row.provider === query.provider);
     if (query.host && query.host !== 'all') rows = rows.filter((row) => row.host === query.host || (query.host === 'bastion' && row.host === 'local'));
     if (query.q) {
-      const needle = query.q.toLowerCase();
-      rows = rows.filter((row) => `${row.title} ${row.preview}`.toLowerCase().includes(needle));
+      // Como `/api/search`: FTS5 sobre proveedor, título, carpeta y conversación. La máquina no.
+      const q = query.q;
+      rows = rows.filter((row) => ftsMatch(q, [
+        row.provider, row.title, row.cwd, row.preview,
+        ...(this.transcripts.get(row.session_id) ?? []).map((message) => message.text),
+      ]));
     }
     return { rows: rows.slice(0, query.limit ?? 50), stale: false, error: null };
   }

@@ -122,6 +122,35 @@ export function runTitle(run: { promptPreview?: string | null; id: string }, max
 }
 
 /**
+ * Lo que se acepta como nombre de modelo. Es el mismo patrón que `MODEL_ID_PATTERN` del contrato
+ * —una prueba lo comprueba—, copiado para no meter TypeBox en el bundle por una expresión. El que
+ * manda es el del core: esto sólo avisa antes de enviar.
+ */
+export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,127}$/;
+
+const CLAUDE_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable'];
+const capitalize = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
+
+/**
+ * Un modelo dicho para leerlo, no para teclearlo.
+ *
+ * `claude-opus-5-5` es «Opus 5.5», con o sin la fecha que a veces lleva detrás. Los alias de la CLI
+ * —`opus`, `sonnet`— son el más reciente de su familia y se dicen así. Lo que no se reconoce se
+ * deja tal cual: un nombre de Codex o de OpenCode ya se lee bien, y reescribirlo mal sería peor
+ * que no tocarlo. El identificador exacto va siempre en el `title`.
+ */
+export function modelLabel(id: string): string {
+  const lower = id.toLowerCase();
+  if (CLAUDE_FAMILIES.includes(lower)) return `${capitalize(lower)}, el más reciente`;
+  const claude = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[[^\]]+\])?$/i.exec(id);
+  if (claude && CLAUDE_FAMILIES.includes(claude[1]!.toLowerCase())) {
+    const version = claude[3] ? `${claude[2]}.${claude[3]}` : claude[2];
+    return `${capitalize(claude[1]!.toLowerCase())} ${version}${claude[4] ? ` ${claude[4]}` : ''}`;
+  }
+  return id;
+}
+
+/**
  * Los checks de salud se identifican por una clave técnica —la que va en «copiar diagnóstico» y
  * la que se nombra al pedir ayuda—, pero al lado conviene decir qué es cada cosa.
  */

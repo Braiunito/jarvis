@@ -10,6 +10,7 @@
  */
 import type { HostFreshness, Provider, SessionRef, SessionSummary } from '@jarvis/contracts';
 import { JarvisError } from '@jarvis/contracts';
+import { cleanModel } from './models.js';
 
 /** Una fila del índice, tal y como la sirve `aisessions serve`. */
 export interface IndexRow {
@@ -52,7 +53,7 @@ export interface SessionQuery {
 export interface SessionIndex {
   list(query: SessionQuery): Promise<{ rows: IndexRow[]; stale: boolean; error: string | null }>;
   hosts(): Promise<{ rows: IndexHostRow[]; stale: boolean; error: string | null }>;
-  transcript(ref: SessionRef, options?: { last?: number }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount?: number | null; preview?: string | null; empty?: boolean | null }>;
+  transcript(ref: SessionRef, options?: { last?: number }): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount?: number | null; preview?: string | null; empty?: boolean | null; model?: string | null }>;
   health(): Promise<{ ok: boolean; error: string | null; lastOkAt: string | null }>;
   /** Cuándo barrió el índice. Opcional: uno antiguo no lo expone y se degrada a «no lo sé». */
   status?(): Promise<{ lastScanAt: string | null }>;
@@ -94,6 +95,7 @@ export function rowToSummary(row: IndexRow, bastionHost: string): SessionSummary
     startedAt: row.created_at || null,
     lastActivityAt: row.updated_at || null,
     preview: row.preview || null,
+    model: cleanModel(row.model),
     workspaceId: null,
     workspaceTitle: null,
     empty: isEmptyRow(row),
@@ -182,7 +184,7 @@ export class HttpSessionIndex implements SessionIndex {
     return this.#withFallback('hosts', () => this.#get<IndexHostRow[]>('/api/hosts'));
   }
 
-  async transcript(ref: SessionRef, { last }: { last?: number } = {}): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null; preview: string | null; empty: boolean }> {
+  async transcript(ref: SessionRef, { last }: { last?: number } = {}): Promise<{ messages: Array<{ role: string; at: string | null; text: string }>; truncated: boolean; messageCount: number | null; preview: string | null; empty: boolean; model: string | null }> {
     // El índice indexa por `session_key`; se localiza por el id, que es lo único que Jarvis guarda.
     const listed = await this.#get<IndexRow[]>('/api/sessions', { limit: '500', host: ref.host, provider: ref.provider });
     const row = listed.find((candidate) => candidate.session_id === ref.sessionId);
@@ -209,6 +211,8 @@ export class HttpSessionIndex implements SessionIndex {
       // página trae los últimos y porque una sesión que sólo guarda un `/comando` tiene turnos que
       // no dicen nada.
       empty: isEmptyRow(row),
+      // El modelo de la sesión, que se enseña al abrirla. También viene en la fila.
+      model: cleanModel(row.model),
     };
   }
 

@@ -4,6 +4,29 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 
 ## [0.1.0] — en curso · migración desde LiteChat
 
+### Cambiado — buscar por trozos, y con qué modelo (2026-11-08)
+
+- **Buscar en Sesiones encuentra por el principio de una palabra**, como se teclea: «vul» da las
+  de vultr y «migra» las que hablan de migraciones. Antes la búsqueda iba entera al índice, que
+  compara palabras completas y ni siquiera tiene la máquina en el texto: «vul» no daba nada y
+  «vultr» tampoco. Ahora busca la conversación por prefijos y, aparte, compara un trozo con la
+  máquina, el título, el nombre que se le puso aquí, la carpeta, el modelo y el id. Sin tildes ni
+  mayúsculas, y con varias palabras cada una puede estar en un sitio distinto.
+- **Al abrir una sesión se ve con qué modelo trabajó** —«Opus 5.5», con el identificador exacto al
+  pasar por encima y en «Detalles»—. Lo dice el índice, y sólo cuando lo sabe: el `<synthetic>`
+  que Claude Code pone en sus propios mensajes no es un modelo, y un proveedor a secas tampoco.
+- **Se elige el modelo al mandar trabajo**, en el compositor y al empezar una sesión. Se ofrecen
+  los alias de Claude —Opus, Sonnet, Haiku: el más reciente de cada uno—, los modelos que la flota
+  ya ha usado, y «Otro…» para escribir cualquiera. Sin elegir, la CLI usa el que tenga configurado
+  la máquina, como siempre; elegido, el compositor se queda con él para el siguiente trabajo de esa
+  sesión. El agente se elige al empezar la sesión, no en el compositor: una conversación de Claude
+  no la puede continuar Codex.
+- **El nombre del modelo se valida en el core**: letras, cifras y `. _ : / @ - [ ]`, sin espacios y
+  sin empezar por guion. Va de argumento a una CLI en otra máquina, y ahí no puede colarse una
+  bandera.
+- **Con aiSessions al día, las sesiones de Codex también dicen su modelo** (`gpt-5.6-sol`): hasta
+  ahora el índice guardaba el proveedor, `openai`, que aquí no se enseña.
+
 ### Cambiado — la interfaz, compacta (2026-11-07)
 
 - **Fuera la sección Asistente** y todo lo que colgaba de ella en las demás pantallas: el panel de

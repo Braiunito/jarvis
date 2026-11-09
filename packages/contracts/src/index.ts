@@ -10,3 +10,4 @@ export * from './health.js';
 export * from './terminal.js';
 export * from './identity.js';
 export * from './import.js';
+export * from './models.js';
