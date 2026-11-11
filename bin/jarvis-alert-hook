@@ -1,58 +1,120 @@
 #!/usr/bin/env python3
-"""Hook de Claude Code que avisa a Jarvis cuando un Claude termina una tarea o pide permiso.
+"""Hook de Claude Code que avisa a Jarvis cuando un Claude termina una tarea larga o pide permiso en una.
 
 Se engancha en `~/.claude/settings.json` a dos eventos:
 
-  · `Stop` — Claude terminó de responder: alerta `normal` con el título de la sesión y el final
-    de lo que dijo.
-  · `Notification` (permiso o pregunta) — Claude está parado esperándote: alerta `high` con lo
-    que pide.
+  · `Stop` — Claude terminó de responder: alerta `normal` con el título de la sesión, cuánto tardó
+    y el final de lo que dijo;
+  · `Notification` (permiso o pregunta) — Claude está parado esperándote: alerta `high`.
 
-Lee del hook el JSON que manda Claude Code por la entrada estándar y delega el envío en
-`jarvis-alert`, que sabe la URL y la clave (`~/.config/jarvis/alerts.env`).
+**Sólo si la tarea es larga**: el turno tiene que llevar al menos `JARVIS_ALERTS_MIN_MINUTES`
+(15 por defecto) desde que se le pidió. Lo que dura menos se ve en la terminal, que es donde uno
+está mientras tanto.
 
-Nunca estorba a Claude: no escribe nada en la salida estándar (en `Stop` eso podría leerse como
-una orden), sale siempre con 0 y no espera más de 20 s. `JARVIS_ALERTS_HOOK=off` lo apaga, para
-una sesión o un `claude -p` automatizado que no deba sonar.
+Cómo se mide, y por qué es fiable: Claude Code escribe en el transcript cada entrada de un turno
+con el `promptId` de ese turno —el mensaje que lo empezó, los resultados de herramientas, los
+mensajes que se le añaden a mitad—, y el hook recibe ese mismo id. La primera entrada con él es el
+inicio del turno; es el mismo instante desde el que Claude Code cuenta su propia duración
+(`turn_duration`, que escribe justo después de este hook y por eso no se puede leer aquí). Si algo
+no cuadra —sin id, sin esa entrada, un transcript que no se ha movido en minutos, como al hacer
+`/clear` sobre una sesión vieja— no se avisa: mejor callar que avisar de algo que no se midió.
+
+Lee el JSON del hook por la entrada estándar y delega el envío en `jarvis-alert`, que sabe la URL y
+la clave (`~/.config/jarvis/alerts.env`). Nunca estorba a Claude: no escribe nada en la salida
+estándar (en `Stop` podría leerse como una orden) y sale siempre con 0. `JARVIS_ALERTS_HOOK=off` lo
+apaga para una sesión o un `claude -p` automatizado.
 """
 import json
 import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
+
+# Lo que se lee del final del transcript para el título, el texto y el id del turno. Un turno largo
+# puede tener miles de entradas, pero esto sólo busca las últimas: el inicio se busca aparte.
+TAIL_BYTES = 4 * 1024 * 1024
+# Un `Stop` de verdad llega segundos después de que Claude escriba su último mensaje.
+FRESH_SECONDS = 10 * 60
 
 
-def last_words(transcript_path: str) -> tuple[str | None, str | None]:
-    """El título que Claude Code le puso a la sesión y el último texto de Claude, si se encuentran."""
-    title, text = None, None
+def parse_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
     try:
-        with open(transcript_path, encoding="utf-8") as handle:
-            lines = handle.readlines()[-400:]
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def tail_entries(path: str) -> list[dict]:
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - TAIL_BYTES))
+            chunk = handle.read()
     except OSError:
-        return None, None
-    for line in reversed(lines):
+        return []
+    entries = []
+    for raw in chunk.splitlines()[1:] if size > TAIL_BYTES else chunk.splitlines():
         try:
-            entry = json.loads(line)
+            entries.append(json.loads(raw))
         except ValueError:
             continue
+    return entries
+
+
+def turn_start(path: str, prompt_id: str) -> datetime | None:
+    """La primera entrada del transcript con ese `promptId`: cuando se le pidió la tarea."""
+    needle = prompt_id.encode()
+    try:
+        with open(path, "rb") as handle:
+            for raw in handle:
+                if needle not in raw:
+                    continue
+                try:
+                    entry = json.loads(raw)
+                except ValueError:
+                    continue
+                if entry.get("promptId") == prompt_id:
+                    return parse_time(entry.get("timestamp"))
+    except OSError:
+        return None
+    return None
+
+
+def describe(entries: list[dict]) -> tuple[str | None, str | None, str | None, datetime | None]:
+    """Título de la sesión, último texto de Claude, id del último turno y la entrada más reciente."""
+    title = text = prompt_id = None
+    newest = None
+    for entry in reversed(entries):
+        moment = parse_time(entry.get("timestamp"))
+        if moment and (newest is None or moment > newest):
+            newest = moment
         if title is None and entry.get("type") == "ai-title":
             title = entry.get("aiTitle") or None
+        if prompt_id is None and entry.get("promptId"):
+            prompt_id = entry["promptId"]
         message = entry.get("message") or {}
         if text is None and entry.get("type") == "assistant" and message.get("role") == "assistant":
             content = message.get("content")
             if isinstance(content, list):
-                parts = [part.get("text", "") for part in content if part.get("type") == "text"]
-                joined = "\n".join(p for p in parts if p).strip()
+                joined = "\n".join(part.get("text", "") for part in content if part.get("type") == "text").strip()
                 if joined:
                     text = joined
-        if title is not None and text is not None:
-            break
-    return title, text
+    return title, text, prompt_id, newest
 
 
 def clip(value: str, limit: int) -> str:
     value = " ".join(value.split())
     return value if len(value) <= limit else value[: limit - 1] + "…"
+
+
+def human(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    return f"{minutes} min" if minutes < 60 else f"{minutes // 60} h {minutes % 60:02d} min"
 
 
 def main() -> None:
@@ -64,28 +126,44 @@ def main() -> None:
         return
 
     name = event.get("hook_event_name")
-    folder = os.path.basename((event.get("cwd") or os.getcwd()).rstrip("/")) or "/"
-    title, said = last_words(event.get("transcript_path") or "")
-    what = clip(title, 90) if title else folder
-
-    if name == "Stop":
-        if event.get("stop_hook_active"):
-            return
-        importance = "normal"
-        heading = f"Claude terminó: {what}"
-        body = clip(said, 700) if said else "Terminó y espera tu siguiente mensaje."
-    elif name == "Notification":
-        kind = event.get("notification_type") or ""
-        # El «lleva un rato esperando» llega después de cada Stop, que ya avisó: sería doble.
-        if kind in ("idle_prompt", "auth_success"):
-            return
-        importance = "high"
-        heading = f"Claude te necesita: {what}"
-        body = clip(event.get("message") or "Está esperando tu permiso.", 700)
-    else:
+    if name == "Stop" and event.get("stop_hook_active"):
+        return
+    if name == "Notification" and (event.get("notification_type") or "") in ("idle_prompt", "auth_success"):
+        # El «lleva un rato esperando» llega tras cada Stop: sería un aviso doble.
+        return
+    if name not in ("Stop", "Notification"):
         return
 
+    try:
+        minimum = float(os.environ.get("JARVIS_ALERTS_MIN_MINUTES", "15")) * 60
+    except ValueError:
+        minimum = 15 * 60
+
+    path = event.get("transcript_path") or ""
+    title, said, last_prompt, newest = describe(tail_entries(path))
+    now = datetime.now(timezone.utc)
+    if newest is None or (now - newest).total_seconds() > FRESH_SECONDS:
+        return
+    prompt_id = event.get("prompt_id") or last_prompt
+    started = turn_start(path, prompt_id) if prompt_id else None
+    if started is None:
+        return
+    elapsed = (now - started).total_seconds()
+    if elapsed < minimum:
+        return
+
+    folder = os.path.basename((event.get("cwd") or os.getcwd()).rstrip("/")) or "/"
+    what = clip(title, 90) if title else folder
+    if name == "Stop":
+        importance = "normal"
+        heading = f"Claude terminó ({human(elapsed)}): {what}"
+        body = clip(said, 700) if said else "Terminó y espera tu siguiente mensaje."
+    else:
+        importance = "high"
+        heading = f"Claude te necesita ({human(elapsed)} trabajando): {what}"
+        body = clip(event.get("message") or "Está esperando tu permiso.", 700)
     body = f"{body}\n\n📁 {event.get('cwd') or folder}"
+
     command = shutil.which("jarvis-alert") or os.path.expanduser("~/.local/bin/jarvis-alert")
     try:
         subprocess.run(
