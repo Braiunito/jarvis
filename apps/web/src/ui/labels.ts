@@ -6,7 +6,7 @@
  * una etiqueta tiene que decir **qué puede hacer el agente**, no cómo se llama la bandera de la
  * CLI por dentro.
  */
-import type { PermissionProfile, RunStatus } from '@jarvis/contracts';
+import type { AlertImportance, AlertOriginKind, PermissionProfile, RunStatus } from '@jarvis/contracts';
 
 export interface PermissionLabel {
   name: string;
@@ -166,3 +166,22 @@ export function checkName(key: string): { title: string; id: string } {
   };
   return { title: known[key] ?? key, id: key };
 }
+
+/**
+ * La importancia de una alerta: qué significa para quien la recibe, no cómo se guarda.
+ *
+ * Decide también si suena. `low` sólo se apunta en la lista; de `normal` para arriba llega como
+ * notificación a los dispositivos que la aceptan, y la crítica se queda en pantalla.
+ */
+export const IMPORTANCE: Record<AlertImportance, { name: string; tone: 'neutral' | 'accent' | 'warn' | 'danger'; help: string }> = {
+  low: { name: 'Baja', tone: 'neutral', help: 'Se apunta aquí y no suena en ningún dispositivo.' },
+  normal: { name: 'Normal', tone: 'accent', help: 'Llega como notificación.' },
+  high: { name: 'Alta', tone: 'warn', help: 'Llega como notificación; conviene mirarla pronto.' },
+  critical: { name: 'Crítica', tone: 'danger', help: 'Llega como notificación y se queda en pantalla hasta que la quites.' },
+};
+
+/** Quién la mandó: alguien con la clave de la API, desde cualquier máquina, o Jarvis mismo. */
+export const ALERT_ORIGIN_KIND: Record<AlertOriginKind, { name: string; help: string }> = {
+  api: { name: 'API', help: 'Llegó por la API con la clave: un script, un Claude de otra máquina, un cron…' },
+  jarvis: { name: 'Jarvis', help: 'La generó Jarvis: un trabajo que terminó, una máquina que no responde…' },
+};

@@ -385,6 +385,38 @@ a:hover { text-decoration: underline; }
 .health-shield[aria-current="page"] { background: var(--bg-elevated); border-color: var(--border-strong); }
 .health-shield.ok[aria-current="page"], .health-shield.neutral[aria-current="page"] { color: var(--text-strong); }
 
+/*
+ * La campana, junto al escudo: la puerta a Alertas. Sin nada pendiente es gris y no pide nada;
+ * con algo sin leer toma el tono de la más grave, y el número va en una pastilla de ese tono.
+ * El tono vive en `--tone` para que la pastilla lo use de fondo sin perder el color del texto.
+ */
+.alerts-bell { --tone: var(--text-muted); cursor: pointer; }
+.alerts-bell:hover { text-decoration: none; border-color: var(--border-strong); }
+.alerts-bell.neutral { --tone: var(--text-muted); color: var(--text); }
+.alerts-bell.accent {
+  --tone: var(--accent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.alerts-bell.warn { --tone: var(--warn); }
+.alerts-bell.danger { --tone: var(--danger); }
+.alerts-bell[aria-current="page"] { background: var(--bg-elevated); border-color: var(--border-strong); }
+.alerts-bell.quiet[aria-current="page"] { color: var(--text-strong); }
+.alerts-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--tone);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
 .avatar {
   display: grid;
   place-items: center;
@@ -1469,6 +1501,9 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
   .rail-collapse { min-height: var(--touch); }
   /* El escudo es la única puerta a Salud: con el dedo tiene que acertarse a la primera. */
   .health-shield { min-height: var(--touch); min-width: var(--touch); justify-content: center; }
+  .alerts-bell { min-height: var(--touch); min-width: var(--touch); justify-content: center; }
+  .filter-toggle { min-height: 40px; }
+  .alert-host-filter .select { min-height: 40px; }
   /* Los de la esquina crecen un poco: siguen sin gastar una fila, pero se aciertan con el dedo. */
   .event-more, .copy-btn { width: 32px; height: 32px; }
   .turn.has-copy .turn-answer { padding-right: 32px; }
@@ -2093,4 +2128,105 @@ button.event-card:hover { background: var(--bg-elevated); border-color: var(--bo
 /* Con el dedo, el desplegable vuelve a medir lo que mide cualquier control táctil. */
 @media (pointer: coarse) {
   .model-picker .select, .model-picker .input { min-height: var(--touch); }
+}
+
+/* ------------------------------------------------------------------ alertas */
+
+/*
+ * El tono de cada alerta en `--tone`: la marca, el borde de las no leídas y la pastilla de
+ * importancia salen de la misma variable, así que una alta nunca puede pintarse a medias en verde.
+ */
+.alert-row.neutral, .filter-toggle.neutral { --tone: var(--text-muted); }
+.alert-row.accent, .filter-toggle.accent { --tone: var(--accent); }
+.alert-row.warn, .filter-toggle.warn { --tone: var(--warn); }
+.alert-row.danger, .filter-toggle.danger { --tone: var(--danger); }
+
+.alert-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.alert-importance-filter { display: flex; flex-wrap: wrap; gap: 6px; }
+.filter-toggle {
+  --tone: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.filter-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.filter-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Puesto: se lee por el tono y además por el relleno, que no depende de distinguir colores. */
+.filter-toggle[aria-pressed="true"] {
+  color: var(--tone);
+  border-color: color-mix(in srgb, var(--tone) 50%, transparent);
+  background: color-mix(in srgb, var(--tone) 12%, var(--bg-card));
+  font-weight: 600;
+}
+.alert-host-filter .select { width: auto; max-width: 14rem; min-height: 32px; padding: 4px 8px; font-size: 12.5px; }
+
+.alert-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.alert-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  padding: 12px 8px 12px 10px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+}
+.alert-row:last-child { border-bottom: 0; }
+/* Sin leer: el borde del tono y un fondo apenas teñido. Leída, se queda en la lista sin gritar. */
+.alert-row.unread {
+  border-left-color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 5%, transparent);
+}
+.alert-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--tone);
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
+  background: color-mix(in srgb, var(--tone) 12%, var(--bg-card));
+}
+.alert-main { display: grid; gap: 4px; min-width: 0; }
+.alert-title { margin: 0; font-weight: 600; color: var(--text-strong); overflow-wrap: anywhere; }
+.alert-row:not(.unread) .alert-title { font-weight: 500; color: var(--text); }
+/* El cuerpo es texto tal cual —puede ser la cola de un log— y se respetan sus saltos de línea. */
+.alert-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 13px;
+  max-height: 14em;
+  overflow: auto;
+}
+.alert-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.alert-actions { display: flex; align-items: center; gap: 4px; }
+
+.push-card { display: grid; gap: 12px; }
+.push-head { display: flex; align-items: center; gap: 12px; }
+.push-head > svg { color: var(--text-muted); }
+.push-card.ok .push-head > svg { color: var(--ok); }
+.push-card.warn .push-head > svg { color: var(--warn); }
+/* Con base fija y no `auto`: si no, en un teléfono el texto largo empuja al icono a su propia línea. */
+.push-head .grow { display: grid; gap: 2px; min-width: 0; flex: 1 1 12rem; }
+.push-head h2 { margin: 0; font-size: 15px; color: var(--text-strong); }
+.push-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.push-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.push-devices { border-top: 1px solid var(--border); }
+
+@media (max-width: 560px) {
+  /* Las acciones bajan debajo del texto: tres botones al lado de un título largo lo dejan en dos letras. */
+  .alert-row { grid-template-columns: auto minmax(0, 1fr); }
+  .alert-actions { grid-column: 2; }
+  .push-head { flex-wrap: wrap; }
+  .push-head .btn { flex: 1 1 100%; justify-content: center; }
 }

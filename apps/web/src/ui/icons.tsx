@@ -17,7 +17,7 @@
  */
 import type { JSX } from 'react';
 import {
-  Activity, Ban, Boxes, Cable, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu,
+  Activity, Ban, Bell, BellDot, BellOff, BellRing, Boxes, Cable, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu,
   ChevronsDown, Check, CircleCheck,
   CircleHelp, CircleSlash, CircleStop, CircleX, Clock, Copy, CornerDownLeft, Database,
   Download, ExternalLink, Eye, Filter, FolderOpen, Gauge, Hexagon, History,
@@ -26,9 +26,10 @@ import {
   Plus, RotateCcw, Search, SendHorizontal, Server, Settings2, Shield, ShieldAlert, ShieldCheck,
   ShieldOff, Sparkles,
   SlidersHorizontal, SquareTerminal, Timer, TimerOff, TriangleAlert, Wrench, X, Zap, Braces,
-  Code, Folder, Folders, Info, type LucideIcon,
+  Code, Folder, Folders, Info, OctagonAlert, Trash2, CheckCheck, Smartphone, Webhook, Bot,
+  type LucideIcon,
 } from 'lucide-react';
-import type { PermissionProfile, RunStatus } from '@jarvis/contracts';
+import type { AlertImportance, AlertOriginKind, PermissionProfile, RunStatus } from '@jarvis/contracts';
 
 export type { LucideIcon };
 
@@ -89,6 +90,7 @@ export const NAV_ICON = {
   runs: ListChecks,
   terminal: SquareTerminal,
   health: Shield,
+  alerts: Bell,
   settings: Settings2,
 } as const;
 
@@ -105,6 +107,36 @@ export const SHIELD_ICON = {
   insecure: ShieldOff,
   neutral: Shield,
 } as const;
+
+/**
+ * La campana de arriba, junto al escudo: la puerta a Alertas.
+ *
+ * Igual que el escudo, cambia de forma además de color: tachada si no hay nada pendiente que
+ * mirar, con punto si hay algo sin leer y sonando si lo sin leer es alto o crítico.
+ */
+export const BELL_ICON = {
+  idle: Bell,
+  unread: BellDot,
+  ringing: BellRing,
+  off: BellOff,
+} as const;
+
+/**
+ * La importancia de una alerta, con silueta propia en cada nivel: un octógono para lo crítico y
+ * un triángulo para lo alto se distinguen sin ver el rojo ni el ámbar.
+ */
+export const IMPORTANCE_ICON: Record<AlertImportance, LucideIcon> = {
+  low: Info,
+  normal: Bell,
+  high: TriangleAlert,
+  critical: OctagonAlert,
+};
+
+/** De dónde vino: alguien con la clave, o Jarvis mismo. */
+export const ALERT_ORIGIN_ICON: Record<AlertOriginKind, LucideIcon> = {
+  api: Webhook,
+  jarvis: Bot,
+};
 
 /** Cada agente con su forma: en una lista de sesiones se distinguen sin leer el nombre. */
 export const PROVIDER_ICON: Record<string, LucideIcon> = {
@@ -167,4 +199,8 @@ export const ACTION_ICON = {
   scrollEnd: ChevronsDown,
   /** Llevarse lo que se está mirando: el artifact se arma en el navegador y se guarda. */
   download: Download,
+  remove: Trash2,
+  markRead: CheckCheck,
+  device: Smartphone,
+  test: SendHorizontal,
 } as const;

@@ -55,6 +55,8 @@ services:
       JARVIS_TEST_NO_AUTH_USER: ${JARVIS_TEST_NO_AUTH_USER:-}
       JARVIS_INSECURE_LOGIN_LAN_ONLY: ${JARVIS_INSECURE_LOGIN_LAN_ONLY:-true}
       JARVIS_INSECURE_COOKIES: ${JARVIS_INSECURE_COOKIES:-false}
+      # La clave de la API de alertas: sólo abre `POST /api/alerts`. Vacía, la puerta está cerrada.
+      JARVIS_ALERTS_API_KEY: ${JARVIS_ALERTS_API_KEY:-}
     volumes:
       - jarvis-auth:/var/lib/jarvis
     depends_on:
@@ -106,6 +108,14 @@ services:
       JARVIS_SWEEP_INTERVAL_MS: ${JARVIS_SWEEP_INTERVAL_MS:-21600000}
       JARVIS_SPOOL_RETENTION_DAYS: ${JARVIS_SPOOL_RETENTION_DAYS:-7}
       JARVIS_TITLE_PER_MINUTE: ${JARVIS_TITLE_PER_MINUTE:-8}
+      # Las notificaciones push. El core sale a los servicios de push de cada navegador (FCM,
+      # Mozilla, Apple) firmando con VAPID; el par lo genera él si no se fija aquí.
+      JARVIS_PUSH_SUBJECT: ${JARVIS_PUSH_SUBJECT:-mailto:jarvis@localhost.localdomain}
+      JARVIS_PUSH_VAPID_PUBLIC_KEY: ${JARVIS_PUSH_VAPID_PUBLIC_KEY:-}
+      JARVIS_PUSH_VAPID_PRIVATE_KEY: ${JARVIS_PUSH_VAPID_PRIVATE_KEY:-}
+      JARVIS_ALERTS_RUNS: ${JARVIS_ALERTS_RUNS:-true}
+      JARVIS_ALERTS_HEALTH_WATCH_MS: ${JARVIS_ALERTS_HEALTH_WATCH_MS:-300000}
+      JARVIS_ALERTS_SELF_HOST: ${JARVIS_ALERTS_SELF_HOST:-}
       # Dónde recuerda el core las claves de host que ya ha visto (M32).
       #
       # Por defecto esto vivía en `/tmp`, que en un contenedor se vacía en cada arranque: con

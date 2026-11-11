@@ -4,6 +4,24 @@ Todas las entradas describen **qué cambió para quien usa esto**, no qué fiche
 
 ## [0.1.0] — en curso · migración desde LiteChat
 
+### Añadido — alertas, notificaciones y la consola instalable (2026-11-10)
+
+- **Una campana al lado del escudo** con las alertas sin leer, del color de la más grave, que lleva
+  a la pantalla **Alertas**: la bandeja entera, filtrable por importancia (baja, normal, alta,
+  crítica) y por origen (por la API o del propio Jarvis, y de qué máquina), con «marcar todo leído»
+  y el enlace de cada una.
+- **Notificaciones en el teléfono y el escritorio**: se activan por dispositivo desde Alertas, cada
+  uno con su importancia mínima, y se prueban con un botón. Tocar una notificación abre a lo que se
+  refiere y la da por leída. En iPhone, con la consola añadida a la pantalla de inicio.
+- **Jarvis avisa solo** cuando un trabajo termina (normal), falla o se pasa de tiempo (alta), cuando
+  un host deja de responder o se cae el índice (alta), cuando la base del core falla (crítica), y en
+  baja cuando algo vuelve o el core arranca.
+- **Una API con clave para avisar desde cualquier sitio**: `POST /api/alerts` con
+  `Authorization: Bearer …`, y `bin/jarvis-alert` para hacerlo en una línea desde scripts, crons o
+  Claude de otras máquinas. La clave sólo sirve para crear alertas.
+- **La consola se puede instalar** como aplicación (manifiesto, iconos y service worker).
+- La base del core sube a la **migración 20**; volver al código anterior exige restaurar la copia.
+
 ### Cambiado — buscar por trozos, y con qué modelo (2026-11-08)
 
 - **Buscar en Sesiones encuentra por el principio de una palabra**, como se teclea: «vul» da las

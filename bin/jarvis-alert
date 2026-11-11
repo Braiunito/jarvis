@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Manda una alerta a Jarvis: aparece en la campana de la consola y, según su importancia, suena en
+# los dispositivos con notificaciones activadas.
+#
+#   jarvis-alert [-i low|normal|high|critical] [-a remitente] [-l enlace] [-H máquina] "título" [cuerpo|-]
+#
+#   -i  importancia. `low` sólo se apunta; `normal` y `high` suenan; `critical` se queda en pantalla.
+#       Por defecto, normal.
+#   -a  quién la manda dentro de la máquina («backup», «deploy»…). Dentro de Claude Code, por
+#       defecto «claude-code».
+#   -l  a dónde lleva tocarla: una ruta de la consola (/runs/r…) o una URL http(s).
+#   -H  la máquina de origen. Por defecto, JARVIS_ALERTS_HOST o `hostname`.
+#   cuerpo  el detalle; con `-` se lee de la entrada estándar.
+#
+# Lee la URL y la clave de JARVIS_ALERTS_URL / JARVIS_ALERTS_KEY o, si no están, de
+# ~/.config/jarvis/alerts.env. La clave sólo sirve para crear alertas.
+#
+# Sale con 0 si Jarvis la guardó, 1 si falta configuración o los argumentos están mal, y 2 si la
+# petición falló. Nunca espera más de 20 segundos: un aviso no puede colgar la tarea que avisa.
+set -euo pipefail
+
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
+
+config="${JARVIS_ALERTS_CONFIG:-$HOME/.config/jarvis/alerts.env}"
+if [[ -z "${JARVIS_ALERTS_KEY:-}" || -z "${JARVIS_ALERTS_URL:-}" ]] && [[ -r "$config" ]]; then
+  # Sólo las variables que se esperan: el fichero no se ejecuta como script.
+  while IFS='=' read -r name value; do
+    case "$name" in
+      JARVIS_ALERTS_URL|JARVIS_ALERTS_KEY|JARVIS_ALERTS_HOST)
+        [[ -z "${!name:-}" ]] && printf -v "$name" '%s' "$value" ;;
+    esac
+  done < <(grep -E '^JARVIS_ALERTS_[A-Z]+=' "$config")
+fi
+
+importance=normal
+app=""
+link=""
+host="${JARVIS_ALERTS_HOST:-$(hostname 2>/dev/null || echo desconocido)}"
+[[ -n "${CLAUDECODE:-}" ]] && app="claude-code"
+
+while getopts ":i:a:l:H:h" opt; do
+  case "$opt" in
+    i) importance="$OPTARG" ;;
+    a) app="$OPTARG" ;;
+    l) link="$OPTARG" ;;
+    H) host="$OPTARG" ;;
+    h) usage; exit 0 ;;
+    *) usage >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+title="${1:-}"
+body="${2:-}"
+if [[ -z "$title" ]]; then usage >&2; exit 1; fi
+if [[ "$body" == "-" ]]; then body="$(cat)"; fi
+case "$importance" in low|normal|high|critical) ;; *) echo "jarvis-alert: importancia desconocida: $importance" >&2; exit 1 ;; esac
+
+if [[ -z "${JARVIS_ALERTS_URL:-}" || -z "${JARVIS_ALERTS_KEY:-}" ]]; then
+  echo "jarvis-alert: falta JARVIS_ALERTS_URL o JARVIS_ALERTS_KEY (ni en el entorno ni en $config)" >&2
+  exit 1
+fi
+
+# El JSON lo arma jq o python: escapar a mano en bash rompe con la primera comilla del cuerpo.
+if command -v jq >/dev/null 2>&1; then
+  payload="$(jq -n --arg title "$title" --arg body "$body" --arg importance "$importance" \
+    --arg host "$host" --arg app "$app" --arg link "$link" \
+    '{title: $title[0:200], importance: $importance, host: $host}
+     + (if $body != "" then {body: $body[0:4000]} else {} end)
+     + (if $app != "" then {app: $app} else {} end)
+     + (if $link != "" then {link: $link} else {} end)')"
+else
+  payload="$(TITLE="$title" BODY="$body" IMPORTANCE="$importance" HOST="$host" APP="$app" LINK="$link" python3 -c '
+import json, os
+e = os.environ
+d = {"title": e["TITLE"][:200], "importance": e["IMPORTANCE"], "host": e["HOST"]}
+if e["BODY"]: d["body"] = e["BODY"][:4000]
+if e["APP"]: d["app"] = e["APP"]
+if e["LINK"]: d["link"] = e["LINK"]
+print(json.dumps(d))')"
+fi
+
+response="$(curl -sS --max-time 20 -w '\n%{http_code}' -X POST "${JARVIS_ALERTS_URL%/}/api/alerts" \
+  -H "Authorization: Bearer ${JARVIS_ALERTS_KEY}" \
+  -H 'Content-Type: application/json' \
+  --data-binary "$payload")" || { echo "jarvis-alert: no se pudo contactar con ${JARVIS_ALERTS_URL}" >&2; exit 2; }
+
+status="${response##*$'\n'}"
+answer="${response%$'\n'*}"
+if [[ "$status" != "201" ]]; then
+  echo "jarvis-alert: Jarvis respondió $status: $answer" >&2
+  exit 2
+fi
+if command -v jq >/dev/null 2>&1; then
+  jq -r '"alerta \(.id) [\(.importance)] guardada; notificada a \(.pushedTo) dispositivo(s)"' <<<"$answer"
+else
+  echo "$answer"
+fi

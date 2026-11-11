@@ -97,6 +97,7 @@ escotilla se revisa **en cada despliegue** ([docs/security.md](docs/security.md)
 | [docs/console.md](docs/console.md) | qué promete la interfaz y con qué reglas está hecha |
 | [docs/security.md](docs/security.md) | qué se protege, cómo, y qué está deliberadamente abierto |
 | [docs/runbook.md](docs/runbook.md) | levantar, mirar, diagnosticar, respaldar y volver atrás |
+| [docs/alerts.md](docs/alerts.md) | las alertas, la API con clave, `jarvis-alert` y las notificaciones push |
 | [docs/trace-a-request.md](docs/trace-a-request.md) | seguir una petición desde el clic hasta el host |
 | [docs/contracts/registry.md](docs/contracts/registry.md) | los contratos congelados y sus fixtures |
 | [docs/adr/](docs/adr/) | las decisiones y por qué se tomaron |

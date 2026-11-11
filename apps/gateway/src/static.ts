@@ -61,6 +61,12 @@ const HASHED_NAME = /-[A-Za-z0-9_]{8,}\.[a-z0-9]+$/;
 function cacheControlFor(servedPath: string, isHtml: boolean): string {
   if (isHtml) return 'no-cache';
   const name = servedPath.replace(/\\/g, '/');
+  /*
+   * El service worker y el manifiesto deciden qué versión de la aplicación queda instalada en un
+   * teléfono: con cinco minutos de caché, un despliegue tardaría en llegar a quien la tiene en la
+   * pantalla de inicio, y un arreglo del worker, más.
+   */
+  if (name === '/sw.js' || name === '/manifest.webmanifest') return 'no-cache';
   if (name.startsWith('/assets/') || HASHED_NAME.test(name)) {
     return 'public, max-age=31536000, immutable';
   }

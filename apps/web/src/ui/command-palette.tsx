@@ -171,6 +171,11 @@ export function CommandPalette(): JSX.Element | null {
                   <Glyph icon={NAV_ICON.runs} />Trabajo en curso
                 </span>
               </Command.Item>
+              <Command.Item value="alertas avisos notificaciones campana" onSelect={() => go('/alerts')}>
+                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                  <Glyph icon={NAV_ICON.alerts} />Alertas
+                </span>
+              </Command.Item>
             </Command.Group>
           </Command.List>
         </Command>

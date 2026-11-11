@@ -6,6 +6,18 @@
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#090c11" />
+    <!--
+      Instalable como aplicación: el manifiesto para Android y escritorio, y las etiquetas de
+      Apple porque Safari en iOS sigue sin leer los iconos del manifiesto. Sin instalar, iOS no
+      entrega notificaciones push a una web: por eso esto no es decorativo.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Jarvis" />
+    <!-- `black` y no `black-translucent`: la cabecera no reserva sitio para la barra de estado. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <title>Jarvis</title>
   </head>
   <body>

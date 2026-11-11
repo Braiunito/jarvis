@@ -696,4 +696,58 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE leases;
     `,
   },
+  {
+    version: 20,
+    name: 'alerts',
+    sql: `
+      -- Alertas: lo que Jarvis o cualquiera con la clave de la API quiere que se sepa aunque no se
+      -- esté mirando. Una sola bandeja para toda la casa, no una por usuario: es una consola de
+      -- una persona, y repartirla complicaría todo para nada.
+      --
+      -- El origen va en tres columnas y no en una: el tipo (\`api\` o \`jarvis\`) lo pone el core
+      -- según por dónde entró, y no se puede declarar; la máquina y el remitente los dice quien la
+      -- manda. \`remote_ip\` es lo que vio el gateway, para cuando la máquina declarada no cuadre.
+      CREATE TABLE alerts (
+        id           TEXT PRIMARY KEY,
+        created_at   TEXT NOT NULL,
+        importance   TEXT NOT NULL,
+        title        TEXT NOT NULL,
+        body         TEXT,
+        link         TEXT,
+        origin_kind  TEXT NOT NULL,
+        origin_host  TEXT NOT NULL,
+        origin_app   TEXT,
+        remote_ip    TEXT,
+        read_at      TEXT,
+        pushed_to    INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX idx_alerts_created ON alerts (created_at DESC);
+      CREATE INDEX idx_alerts_unread ON alerts (created_at DESC) WHERE read_at IS NULL;
+
+      -- Los dispositivos que reciben notificaciones. El endpoint es la identidad: el navegador lo
+      -- da al suscribirse y lo cambia si la suscripción se renueva.
+      CREATE TABLE push_subscriptions (
+        endpoint        TEXT PRIMARY KEY,
+        id              TEXT NOT NULL UNIQUE,
+        p256dh          TEXT NOT NULL,
+        auth            TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        label           TEXT,
+        min_importance  TEXT NOT NULL DEFAULT 'normal',
+        created_at      TEXT NOT NULL,
+        last_ok_at      TEXT,
+        last_error      TEXT,
+        failures        INTEGER NOT NULL DEFAULT 0
+      );
+
+      -- El par VAPID con el que el core firma cada envío. Se genera solo la primera vez y se queda:
+      -- cambiarlo invalida todas las suscripciones, que se hicieron contra la clave pública vieja.
+      CREATE TABLE push_vapid (
+        id           INTEGER PRIMARY KEY CHECK (id = 1),
+        public_key   TEXT NOT NULL,
+        private_key  TEXT NOT NULL,
+        created_at   TEXT NOT NULL
+      );
+    `,
+  },
 ];

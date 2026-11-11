@@ -22,12 +22,18 @@ import { IDENTITY_HEADER, REQUEST_ID_HEADER, signIdentity } from './lib/identity
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade', 'authorization',
-  IDENTITY_HEADER,
+  IDENTITY_HEADER, 'x-jarvis-client-ip',
 ]);
+
+/**
+ * La IP que vio el gateway, para el core. Se borra la que traiga el cliente (está en la lista de
+ * arriba) y se pone la de verdad: al core sólo llega lo que pasó por aquí, así que puede creerla.
+ */
+export const CLIENT_IP_HEADER = 'x-jarvis-client-ip';
 
 export interface ProxyUser { userId: string; username: string }
 
-function buildHeaders(req: IncomingMessage, target: URL, user: ProxyUser, requestId: string): Record<string, string | string[]> {
+function buildHeaders(req: IncomingMessage, target: URL, user: ProxyUser, requestId: string, clientIp: string): Record<string, string | string[]> {
   const headers: Record<string, string | string[]> = {};
   for (const [name, value] of Object.entries(req.headers)) {
     const lower = name.toLowerCase();
@@ -37,6 +43,7 @@ function buildHeaders(req: IncomingMessage, target: URL, user: ProxyUser, reques
   headers['host'] = target.host;
   headers[IDENTITY_HEADER] = signIdentity({ userId: user.userId, username: user.username, requestId }, config.internalSecret);
   headers[REQUEST_ID_HEADER] = requestId;
+  if (clientIp) headers[CLIENT_IP_HEADER] = clientIp;
   return headers;
 }
 
@@ -70,7 +77,7 @@ const wasTimeout = (error: Error): boolean =>
 export function proxyToCore(
   req: IncomingMessage,
   res: ServerResponse,
-  { path, user, requestId }: { path: string; user: ProxyUser; requestId: string },
+  { path, user, requestId, clientIp = '' }: { path: string; user: ProxyUser; requestId: string; clientIp?: string },
 ): void {
   const target = new URL(config.coreUrl);
   const query = req.url?.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
@@ -82,7 +89,7 @@ export function proxyToCore(
     port: target.port || (target.protocol === 'https:' ? 443 : 80),
     method: req.method,
     path: `${path}${query}`,
-    headers: buildHeaders(req, target, user, requestId),
+    headers: buildHeaders(req, target, user, requestId, clientIp),
   }, (upstreamRes) => {
     clearTimeout(headerTimer);
     const outHeaders: Record<string, string | string[]> = {};
@@ -158,7 +165,8 @@ export function proxyUpgradeToCore(
     const lower = name.toLowerCase();
     // Aquí sí se conservan connection y upgrade: son el handshake. La Authorization del cliente
     // se descarta igual.
-    if (lower === 'cookie' || lower === 'host' || lower === 'authorization' || value === undefined) continue;
+    if (lower === 'cookie' || lower === 'host' || lower === 'authorization' || lower === CLIENT_IP_HEADER
+      || lower === IDENTITY_HEADER || value === undefined) continue;
     headers[name] = value;
   }
   headers['host'] = target.host;

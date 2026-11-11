@@ -5,8 +5,11 @@
  * stale al instante y se refresca al enfocar la ventana» para cosas que cuestan un SSH.
  */
 import { useEffect, useRef } from 'react';
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import {
+  useInfiniteQuery, useMutation, useQuery, useQueryClient, type UseQueryResult,
+} from '@tanstack/react-query';
 import type {
+  Alert, AlertImportance, AlertList, AlertOriginKind, PushDevice, PushStatus, PushSubscriptionRequest,
   Attachment, Draft, Health, HostCapabilities, ModelCatalog, Run, RunEvent, SessionSearchResult,
   TargetPlan, TerminalSession, TranscriptMessage, UsageSnapshot, Workspace,
 } from '@jarvis/contracts';
@@ -63,6 +66,11 @@ export const keys = {
   terminals: (host: string) => ['terminals', host] as const,
   metrics: (hours: number) => ['metrics', hours] as const,
   models: ['models'] as const,
+  /** Todo lo de alertas cuelga de `['alerts']`, para invalidarlo de una vez cuando llega una. */
+  alerts: ['alerts'] as const,
+  alertBadge: ['alerts', 'badge'] as const,
+  alertList: (filter: AlertFilter) => ['alerts', 'list', filter] as const,
+  push: ['alerts', 'push'] as const,
 };
 
 export interface SessionQuery {
@@ -521,6 +529,113 @@ export function useRetryRun() {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: keys.runs });
       void client.invalidateQueries({ queryKey: ['metrics'] });
+    },
+  });
+}
+
+// ---- alertas ---------------------------------------------------------------
+
+export interface AlertFilter {
+  importance?: AlertImportance[];
+  kind?: AlertOriginKind;
+  host?: string;
+  unread?: boolean;
+}
+
+const ALERT_PAGE = 50;
+
+const alertSearch = (filter: AlertFilter, extra: Record<string, string> = {}): string => {
+  const params = new URLSearchParams(extra);
+  if (filter.importance?.length) params.set('importance', filter.importance.join(','));
+  if (filter.kind) params.set('kind', filter.kind);
+  if (filter.host) params.set('host', filter.host);
+  if (filter.unread) params.set('unread', '1');
+  return `?${params.toString()}`;
+};
+
+/**
+ * El contador de la campana: sólo cuántas sin leer y la más grave.
+ *
+ * Se pide una alerta y no la lista, porque esto se sondea en todas las pantallas. Cada 30 s es
+ * para quien no tiene el push activado; con push, el worker avisa a la ventana en el momento y
+ * esto se invalida antes.
+ */
+export const useAlertBadge = (): UseQueryResult<AlertList> => useQuery({
+  queryKey: keys.alertBadge,
+  queryFn: () => get<AlertList>('/api/alerts?limit=1'),
+  staleTime: 10_000,
+  refetchInterval: 30_000,
+  retry: 1,
+});
+
+/** La lista, por páginas hacia atrás en el tiempo: la siguiente empieza antes de la última vista. */
+export function useAlerts(filter: AlertFilter) {
+  return useInfiniteQuery({
+    queryKey: keys.alertList(filter),
+    queryFn: ({ pageParam }) => get<AlertList>(`/api/alerts${alertSearch(filter, {
+      limit: String(ALERT_PAGE),
+      ...(pageParam ? { before: pageParam } : {}),
+    })}`),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) =>
+      last.alerts.length >= ALERT_PAGE ? last.alerts.at(-1)?.createdAt ?? null : null,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useMarkAlertsRead() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (request: { ids: string[] } | { all: true }) =>
+      post<{ updated: number }>('/api/alerts/read', request),
+    onSuccess: () => { void client.invalidateQueries({ queryKey: keys.alerts }); },
+  });
+}
+
+export function useDeleteAlert() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (id: string) => api<void>(`/api/alerts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => { void client.invalidateQueries({ queryKey: keys.alerts }); },
+  });
+}
+
+/** La clave pública del core y los dispositivos que ya reciben. */
+export const usePushStatus = (): UseQueryResult<PushStatus> => useQuery({
+  queryKey: keys.push,
+  queryFn: () => get<PushStatus>('/api/alerts/push'),
+  staleTime: 60_000,
+});
+
+export function useSavePushSubscription() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (request: PushSubscriptionRequest) => post<PushDevice>('/api/alerts/push/subscriptions', request),
+    onSuccess: () => { void client.invalidateQueries({ queryKey: keys.push }); },
+  });
+}
+
+export function useRemovePushDevice() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: (target: { endpoint: string } | { id: string }) =>
+      post<void>('/api/alerts/push/unsubscribe', target),
+    onSuccess: () => { void client.invalidateQueries({ queryKey: keys.push }); },
+  });
+}
+
+export function useSendTestAlert() {
+  const client = useQueryClient();
+  return useMutation({
+    retry: 0,
+    mutationFn: () => post<Alert>('/api/alerts/push/test'),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.alerts });
     },
   });
 }

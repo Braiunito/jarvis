@@ -122,6 +122,33 @@ export function buildConfig(env: NodeJS.ProcessEnv = process.env) {
      */
     titlePerMinute: Number(env['JARVIS_TITLE_PER_MINUTE'] ?? '8') || 8,
 
+    /**
+     * Alertas y notificaciones push.
+     *
+     * El par VAPID puede fijarse aquí; si no, el core lo genera la primera vez y lo guarda en su
+     * base, que es lo normal. Fijarlo sólo sirve para conservar las suscripciones al cambiar de
+     * base: con otra clave, cada dispositivo tiene que volver a activarse.
+     */
+    pushVapidPublicKey: env['JARVIS_PUSH_VAPID_PUBLIC_KEY'] || '',
+    pushVapidPrivateKey: env['JARVIS_PUSH_VAPID_PRIVATE_KEY'] || '',
+    /** El contacto del JWT de VAPID. Apple rechaza el envío si no es un `mailto:` o `https:` real. */
+    pushSubject: env['JARVIS_PUSH_SUBJECT'] || 'mailto:jarvis@localhost.localdomain',
+    alertsApiPerMinute: Number(env['JARVIS_ALERTS_API_PER_MINUTE'] || 30),
+    alertsRetentionDays: Number(env['JARVIS_ALERTS_RETENTION_DAYS'] || 30),
+    alertsMaxStored: Number(env['JARVIS_ALERTS_MAX_STORED'] || 2000),
+    /** Cada cuánto mira la salud para avisar de cambios. 0 lo apaga. */
+    alertsHealthWatchMs: Number(env['JARVIS_ALERTS_HEALTH_WATCH_MS'] ?? 5 * 60 * 1000),
+    /** Avisar de los trabajos que terminan. */
+    alertsRuns: bool(env['JARVIS_ALERTS_RUNS'], true),
+    /**
+     * Cómo se llama en las alertas la máquina donde vive el core.
+     *
+     * En la flota el bastión es un alias SSH (`bastion`), pero quien lee una notificación piensa en
+     * la máquina (`zeus`), y los scripts de esa máquina mandan con su `hostname`. Con un nombre
+     * para cada cosa, el filtro por máquina partiría la misma en dos.
+     */
+    alertsSelfHost: env['JARVIS_ALERTS_SELF_HOST'] || bastionHost,
+
   } as const;
 }
 

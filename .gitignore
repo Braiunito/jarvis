@@ -33,3 +33,7 @@ deploy/secrets/
 # `session.key`, `internal.key` y `users.json` con las passkeys: un `git add -A` distraído las
 # publicaría. El aviso no basta, porque quien se distrae no lo lee.
 backups/
+
+# Lo que Claude Code lee de este proyecto y no puede publicarse: lleva la clave de la API de
+# alertas, y este repositorio es público.
+CLAUDE.local.md

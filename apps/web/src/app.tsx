@@ -2,9 +2,9 @@
  * El armazón.
  *
  * Tres destinos en el carril: Sesiones —que es la portada, porque casi siempre se viene a
- * retomar algo—, Trabajo y Terminal. Arriba, dónde estoy, el buscador y el escudo, que es el
- * estado de todo y la única puerta a Salud. En un teléfono el carril baja, se queda en iconos y
- * Sesiones pasa al centro, entre Trabajo y Terminal.
+ * retomar algo—, Trabajo y Terminal. Arriba, dónde estoy, el buscador, la campana de Alertas y
+ * el escudo, que es el estado de todo y la única puerta a Salud. En un teléfono el carril baja,
+ * se queda en iconos y Sesiones pasa al centro, entre Trabajo y Terminal.
  *
  * Lo que había además —una portada de tarjetas, el asistente, la barra de estado de abajo— se
  * quitó: duplicaba lo que ya dicen estas cuatro pantallas y obligaba a leer más para lo mismo.
@@ -13,15 +13,17 @@
  */
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { get, post, UnauthenticatedError } from './api/client.js';
-import { useHealth, useMetrics, useRuns } from './api/queries.js';
-import { useRoute } from './router.js';
+import { onWorkerMessage } from './api/push.js';
+import { keys, useAlertBadge, useHealth, useMetrics, useRuns } from './api/queries.js';
+import { navigate, useRoute } from './router.js';
 import { Announcer } from './ui/announce.jsx';
 import { Link } from './ui/bits.jsx';
 import { CommandPalette, openCommandPalette } from './ui/command-palette.jsx';
 import { NewSessionDialog } from './ui/new-session.jsx';
-import { ACTION_ICON, Glyph, NAV_ICON, SHIELD_ICON } from './ui/icons.jsx';
+import { ACTION_ICON, BELL_ICON, Glyph, NAV_ICON, SHIELD_ICON } from './ui/icons.jsx';
+import { IMPORTANCE } from './ui/labels.js';
 import { PageMetaProvider, usePageMetaValue } from './ui/page-meta.jsx';
 import { LoginScreen } from './screens/login.jsx';
 import { EnrollScreen } from './screens/enroll.jsx';
@@ -31,6 +33,7 @@ import { WorkspaceScreen } from './screens/workspace.jsx';
 import { RunCenterScreen } from './screens/runs.jsx';
 import { HealthScreen } from './screens/health.jsx';
 import { TerminalScreen } from './screens/terminal.jsx';
+import { AlertsScreen } from './screens/alerts.jsx';
 
 interface Me {
   authenticated: boolean;
@@ -186,12 +189,80 @@ function HealthShield({ me }: { me: Me }): JSX.Element {
   );
 }
 
+/**
+ * La campana, al lado del escudo: lo que alguien quiso que supieras, y la puerta a Alertas.
+ *
+ * Mismo patrón que el escudo y por lo mismo: un solo sitio, siempre igual, que no pide atención
+ * cuando no hay nada. Sin nada sin leer es una campana gris; con algo, el número y el tono de la
+ * más grave de las pendientes —una normal no pinta igual que una crítica—, y la forma cambia
+ * además del color.
+ *
+ * Instalada como aplicación, el mismo número va al icono de la pantalla de inicio.
+ */
+function AlertsBell(): JSX.Element {
+  const route = useRoute();
+  const badge = useAlertBadge();
+  const unread = badge.data?.unread ?? 0;
+  const top = badge.data?.unreadTop ?? null;
+
+  useEffect(() => {
+    const app = navigator as Navigator & {
+      setAppBadge?: (count?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    try {
+      if (unread > 0) void app.setAppBadge?.(unread).catch(() => undefined);
+      else void app.clearAppBadge?.().catch(() => undefined);
+    } catch {
+      // Un navegador sin insignias no tiene por qué saberlo nadie.
+    }
+  }, [unread]);
+
+  const label = top ? IMPORTANCE[top] : null;
+  const tone = unread === 0 || !label ? 'quiet' : label.tone;
+  const icon = unread === 0 ? BELL_ICON.idle
+    : top === 'high' || top === 'critical' ? BELL_ICON.ringing : BELL_ICON.unread;
+  const count = unread > 99 ? '99+' : String(unread);
+  const summary = unread === 0
+    ? 'Ninguna alerta sin leer.'
+    : `${unread} sin leer${label ? `; la más grave, de importancia ${label.name.toLowerCase()}` : ''}.`;
+
+  return (
+    <Link to="/alerts" className={`chip alerts-bell ${tone}`}
+      aria-current={route.path.startsWith('/alerts') ? 'page' : undefined}
+      aria-label={`Alertas: ${summary}`}
+      title={`${summary} Abre Alertas.`}>
+      <Glyph icon={icon} />
+      <span className="chip-text">Alertas</span>
+      {unread > 0 ? <span className="alerts-count" aria-hidden="true">{count}</span> : null}
+    </Link>
+  );
+}
+
+/**
+ * Lo que cuenta el service worker a la ventana abierta.
+ *
+ * Una alerta nueva invalida todo lo de alertas para que la campana cambie sin esperar al sondeo;
+ * tocar una notificación con la consola abierta la lleva a su enlace sin recargar.
+ */
+function useWorkerMessages(): void {
+  const client = useQueryClient();
+  useEffect(() => onWorkerMessage((message) => {
+    if (message.type === 'jarvis:alert') void client.invalidateQueries({ queryKey: keys.alerts });
+    if (message.type === 'jarvis:navigate' && message.url.startsWith('/') && !message.url.startsWith('//')) {
+      navigate(message.url);
+      void client.invalidateQueries({ queryKey: keys.alerts });
+    }
+  }), [client]);
+}
+
 function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element {
   const route = useRoute();
   const [section] = route.segments;
   const runs = useRuns();
   const metrics = useMetrics(24);
   const meta = usePageMetaValue();
+  useWorkerMessages();
 
   // Dos números distintos: lo que está en marcha y lo que se paró mal. Mezclarlos haría que el
   // segundo pasara desapercibido, que es justo el que hay que mirar.
@@ -218,6 +289,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
       if (section === 'runs') return <RunCenterScreen runId={route.segments[1] ?? null} />;
       if (section === 'terminal') return <TerminalScreen query={route.query} />;
       if (section === 'health') return <HealthScreen />;
+      if (section === 'alerts') return <AlertsScreen />;
       // `/sessions` sigue valiendo: hay enlaces viejos guardados que apuntan ahí.
       return <SessionsScreen />;
     })();
@@ -259,6 +331,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }): JSX.Element 
           </button>
 
           <div className="topbar-right">
+            <AlertsBell />
             <HealthShield me={me} />
             <span className="avatar" title={me.user.displayName} aria-hidden="true">
               {me.user.displayName.slice(0, 1).toUpperCase()}

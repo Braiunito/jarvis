@@ -128,10 +128,26 @@ La alternativa mientras tanto es un túnel, que es lo que convierte `localhost` 
 ssh -L 8080:127.0.0.1:8080 usuario@bastion   # y abrir http://localhost:8080 con JARVIS_RP_ID=localhost
 ```
 
+## La clave de la API de alertas
+
+Es la única credencial del gateway que no es una sesión (`JARVIS_ALERTS_API_KEY`), y por eso vale
+para **una sola ruta**: `POST /api/alerts`. Con ella no se lee la bandeja ni se toca nada más; el
+gateway la comprueba sólo ahí, en tiempo constante, y reenvía al core como el usuario de servicio
+`alerts-api` sin pasarle la clave. Filtrada, permite llenar el teléfono de avisos falsos, no entrar.
+
+Una clave presentada se juzga sola: si es mala es `401` aunque la petición traiga cookie o el modo
+de pruebas esté puesto. Diez fallos desde la misma IP en cinco minutos cortan con `429`, y cada
+fallo queda en `audit.log` como `alerts.api.key_rejected`. Se puede rotar sin cortar a nadie
+poniendo la nueva y la vieja separadas por comas. Detalle en [alerts.md](alerts.md).
+
+**El repositorio es público**, así que la clave real no va en ningún fichero versionado: vive en el
+`deploy/.env` del bastión, en `~/.config/jarvis/alerts.env` de cada máquina que la use y en
+`CLAUDE.local.md`, que está en el `.gitignore`.
+
 ## Lo que nunca se commitea
 
 `.env` y variantes · `secrets/` · `users.json` · `session.key` · `internal.key` · `backups/` ·
-ficheros `.pem` o claves privadas pegadas dentro de cualquier fichero.
+`CLAUDE.local.md` · ficheros `.pem` o claves privadas pegadas dentro de cualquier fichero.
 
 `backups/` está en esa lista por una razón concreta: `bin/jarvis backup` deja la copia ahí, dentro
 del propio repositorio del bastión, y esa copia lleva `session.key` y el `users.json` con las

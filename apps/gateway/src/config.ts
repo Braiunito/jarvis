@@ -156,6 +156,12 @@ export const config = {
    */
   trustProxy: bool(env['JARVIS_TRUST_PROXY'], false),
 
+  /**
+   * Las claves de la API de alertas (`Authorization: Bearer …` en `POST /api/alerts`), separadas
+   * por comas para poder rotar. Vacío apaga la puerta: sin clave, sólo se entra con sesión.
+   */
+  alertsApiKeys: list(env['JARVIS_ALERTS_API_KEY']),
+
   /** El core. Es el único upstream: el navegador no habla con nada más. */
   coreUrl: env['JARVIS_CORE_URL'] || 'http://core:8770',
   coreTimeoutMs: Number(env['JARVIS_CORE_TIMEOUT_MS'] || 30_000),
@@ -174,6 +180,7 @@ export function describeConfig() {
     testNoAuthLanOnly: config.testNoAuthLanOnly,
     trustProxy: config.trustProxy,
     coreUrl: config.coreUrl,
+    alertsApi: config.alertsApiKeys.length > 0,
   };
 }
 

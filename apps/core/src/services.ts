@@ -30,6 +30,8 @@ import { TerminalService } from './terminal/service.js';
 import { ImportService } from './import/service.js';
 import { OpenAiCompatibleTitleModel, TitleService } from './workspaces/title.js';
 import { MetricsService } from './metrics/service.js';
+import { AlertService } from './alerts/service.js';
+import { HealthWatch, runAlert } from './alerts/watch.js';
 
 export const VERSION = '0.1.0';
 
@@ -58,6 +60,9 @@ export interface CoreServices {
   imports: ImportService;
   titles: TitleService;
   metrics: MetricsService;
+  alerts: AlertService;
+  /** Avisa cuando la salud cambia; arranca con `main.ts`, no al construir. */
+  healthWatch: HealthWatch;
   close(): void;
 }
 
@@ -205,15 +210,44 @@ export function buildServices(options: BuildServicesOptions = {}): CoreServices 
   runs.onRunFinished = (run, prompt) => {
     void titles.nameFromRun(run.workspaceId, { prompt, resultSummary: run.resultSummary })
       .catch(() => undefined);
+    // Y avisar. El nombre se lee antes de que el título nuevo llegue, que va en segundo plano: el
+    // de ahora es el que la persona reconoce, porque es el que estaba viendo.
+    if (config.alertsRuns) {
+      runAlert(run, workspaceRepository.findById(run.workspaceId)?.title ?? null, alerts,
+        (host) => (host === config.bastionHost ? config.alertsSelfHost : host));
+    }
   };
+
+  /**
+   * Las alertas: la bandeja, el envío push y lo que Jarvis cuenta por su cuenta.
+   *
+   * La máquina de origen de lo que nace aquí es la del core, con el nombre que la reconoce quien
+   * lee (`alertsSelfHost`), no con su alias de la flota.
+   */
+  const alerts = new AlertService({
+    db, clock,
+    pushSubject: config.pushSubject,
+    vapidKeys: config.pushVapidPublicKey && config.pushVapidPrivateKey
+      ? { publicKey: config.pushVapidPublicKey, privateKey: config.pushVapidPrivateKey }
+      : null,
+    apiPerMinute: config.alertsApiPerMinute,
+    retentionDays: config.alertsRetentionDays,
+    maxStored: config.alertsMaxStored,
+    onWarn: (message) => console.warn(`[alerts] ${message}`),
+  });
+  const healthWatch = new HealthWatch({
+    snapshot: () => health.snapshot({ probeHosts: true }),
+    alerts, host: config.alertsSelfHost, intervalMs: config.alertsHealthWatchMs,
+  });
 
   return {
     config, db, clock, sshConfig, audit, capabilities, workspaceRepository, workspaces, cwdResolver,
     index, sessions, fleet, runRepository, runs, supervisor, attachments, usage, health, terminal,
-    retention, imports, titles, metrics,
+    retention, imports, titles, metrics, alerts, healthWatch,
     close() {
       supervisor.stop();
       retention.stop();
+      healthWatch.stop();
       db.close();
     },
   };

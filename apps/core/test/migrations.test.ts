@@ -151,9 +151,29 @@ describe('MIGRACIÓN 19 · sin el asistente, sin sus tablas', () => {
   it('el runner la aplica sobre una base vacía y en orden, como en un despliegue', () => {
     const db = openDatabase({ path: ':memory:' });
     const { version } = migrate(db);
-    expect(version).toBe(19);
+    expect(version).toBe(20);
     for (const tabla of DEL_ASISTENTE) expect(tablas(db), tabla).not.toContain(tabla);
     expect(tablas(db)).toEqual(expect.arrayContaining(['workspaces', 'runs', 'run_events', 'attachments', 'drafts']));
+    db.close();
+  });
+});
+
+describe('MIGRACIÓN 20 · alertas y dispositivos', () => {
+  const tablas = (db: Db): string[] =>
+    (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((row) => row.name);
+
+  it('se aplica encima de la 19 con datos y no toca nada de lo que había', () => {
+    const db = hasta(19);
+    db.prepare(`INSERT INTO workspaces
+      (id, session_host, provider, session_id, created_by, title, title_source, cwd, cwd_source, created_at, updated_at)
+      VALUES ('w1','bastion','claude','sid-1','braian','sesión','manual','/srv/app','manual',?,?)`).run(NOW, NOW);
+    aplicar(db, 20);
+
+    expect(tablas(db)).toEqual(expect.arrayContaining(['alerts', 'push_subscriptions', 'push_vapid']));
+    expect(cuantos(db, 'workspaces')).toBe(1);
+    // Un único par VAPID: la segunda fila la rechaza el CHECK, no la buena voluntad del código.
+    db.exec(`INSERT INTO push_vapid (id, public_key, private_key, created_at) VALUES (1, 'p', 'k', 'now')`);
+    expect(() => db.exec(`INSERT INTO push_vapid (id, public_key, private_key, created_at) VALUES (2, 'p', 'k', 'now')`)).toThrow();
     db.close();
   });
 });

@@ -35,6 +35,13 @@ async function start(): Promise<void> {
   console.log(`  reconciled : ${JSON.stringify(reconciled ?? {})}`);
   await app.listen({ port: config.port, host: config.bind });
   console.log(`jarvis-core listening on ${config.bind}:${config.port}`);
+  // Después de escuchar: la primera vuelta de salud sondea la flota y no puede retrasar el arranque.
+  services.healthWatch.start();
+  services.alerts.notify({
+    title: `Jarvis arrancó (${VERSION})`,
+    importance: 'low',
+    origin: { kind: 'jarvis', host: config.alertsSelfHost, app: 'core' },
+  });
 }
 
 start().catch((error: unknown) => {
@@ -46,6 +53,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     console.log(`\n${signal} received, closing.`);
     services.supervisor.stop();
+    services.healthWatch.stop();
     void app.close().then(() => {
       services.close();
       process.exit(0);

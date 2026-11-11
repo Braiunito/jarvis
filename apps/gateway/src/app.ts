@@ -9,6 +9,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { config, isPrivateAddress } from './config.js';
 import { audit } from './lib/audit.js';
+import { ALERTS_API_USER, ALERTS_PATH, alertsKeyLimiter, alertsKeyMatches, bearerToken } from './lib/alerts-key.js';
 import { clientIp } from './lib/ratelimit.js';
 import { parseCookies, session, SESSION_COOKIE } from './lib/session.js';
 import { users } from './lib/store.js';
@@ -79,16 +80,52 @@ export function buildGateway(options: { logger?: boolean } = {}): FastifyInstanc
       return;
     }
     const requestId = `req_${randomUUID()}`;
-    const user = userFromHeaders(req.headers.cookie, clientIp(req, config.trustProxy));
-    if (!user) {
-      const body = JSON.stringify({
-        error: { code: 'UNAUTHENTICATED', message: 'authentication required', retryable: false, requestId },
+    const ip = clientIp(req, config.trustProxy);
+    const fail = (status: number, code: string, message: string, extra: Record<string, string> = {}): void => {
+      const body = JSON.stringify({ error: { code, message, retryable: status === 429, requestId } });
+      res.writeHead(status, {
+        'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body), ...extra,
       });
-      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) });
       res.end(body);
+    };
+
+    /*
+     * La API de alertas con clave, antes que la sesión.
+     *
+     * Quien presenta una clave se juzga por la clave y sólo por ella: una clave mala es 401 aunque
+     * la petición venga con cookie o desde la LAN con el modo de pruebas puesto. Si no, una clave
+     * equivocada «funcionaría» en casa y fallaría en cuanto el script saliera de ella.
+     */
+    const token = bearerToken(req.headers.authorization);
+    if (token !== null && pathname === ALERTS_PATH) {
+      if (req.method !== 'POST') {
+        fail(403, 'FORBIDDEN', 'the alerts key can only create alerts (POST /api/alerts)');
+        return;
+      }
+      const limiterKey = `alerts-key:${ip}`;
+      const gate = alertsKeyLimiter.check(limiterKey);
+      if (!gate.allowed) {
+        fail(429, 'RATE_LIMITED', 'too many attempts with a wrong alerts key', { 'retry-after': String(gate.retryAfter) });
+        return;
+      }
+      if (config.alertsApiKeys.length === 0 || !alertsKeyMatches(token, config.alertsApiKeys)) {
+        alertsKeyLimiter.fail(limiterKey);
+        audit('alerts.api.key_rejected', { ip, configured: config.alertsApiKeys.length > 0 });
+        fail(401, 'UNAUTHENTICATED', config.alertsApiKeys.length === 0
+          ? 'the alerts API is not enabled on this deployment (JARVIS_ALERTS_API_KEY)'
+          : 'wrong alerts key');
+        return;
+      }
+      proxyToCore(req, res, { path: pathname, user: { ...ALERTS_API_USER }, requestId, clientIp: ip });
       return;
     }
-    proxyToCore(req, res, { path: pathname, user: { userId: user.sub, username: user.username }, requestId });
+
+    const user = userFromHeaders(req.headers.cookie, ip);
+    if (!user) {
+      fail(401, 'UNAUTHENTICATED', 'authentication required');
+      return;
+    }
+    proxyToCore(req, res, { path: pathname, user: { userId: user.sub, username: user.username }, requestId, clientIp: ip });
   };
 
   const app = Fastify({
