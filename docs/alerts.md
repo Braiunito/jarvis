@@ -86,6 +86,29 @@ Lee `JARVIS_ALERTS_URL`, `JARVIS_ALERTS_KEY` y `JARVIS_ALERTS_HOST` del entorno 
 Para instalarlo en otra máquina: copiar el script a `~/.local/bin/` y crear el `alerts.env`. En el
 propio bastión la URL puede ser `http://127.0.0.1:8080` (el gateway escucha ahí en modo `host-tls`).
 
+## Claude Code: avisar al terminar y al pedir permiso
+
+[`bin/jarvis-alert-hook`](../bin/jarvis-alert-hook) es un hook de Claude Code. Instalado como hook
+**global** (en `~/.claude/settings.json`, así vale para cualquier Claude de la máquina en cualquier
+carpeta), avisa a Jarvis:
+
+- en **`Stop`** —cada vez que un Claude termina una respuesta— con `normal`: «Claude terminó:
+  <título de la sesión>» y el final de lo que dijo;
+- en **`Notification`** —cuando se queda esperando un permiso o una respuesta tuya— con `high`.
+  El aviso de «lleva un rato inactivo» se ignora: llega después de cada `Stop`, que ya avisó.
+
+```json
+"hooks": {
+  "Stop":         [{ "hooks": [{ "type": "command", "command": "/home/<usuario>/.claude/hooks/jarvis-alert-hook", "async": true, "timeout": 30 }] }],
+  "Notification": [{ "hooks": [{ "type": "command", "command": "/home/<usuario>/.claude/hooks/jarvis-alert-hook", "async": true, "timeout": 30 }] }]
+}
+```
+
+Va con `async`, así que Claude no espera al envío; no escribe nada en la salida estándar y sale
+siempre con 0. Necesita `jarvis-alert` y su `alerts.env`. `JARVIS_ALERTS_HOOK=off` lo apaga para una
+sesión o un `claude -p` que no deba sonar. Una sesión ya abierta puede no verlo hasta abrir `/hooks`
+o reiniciarla.
+
 ## Cómo llega al teléfono
 
 El core firma cada envío con VAPID y cifra el mensaje con `aes128gcm` (RFC 8291/8292), escrito con
