@@ -84,9 +84,13 @@ export function NewSessionDialog(): JSX.Element | null {
   /** El de la primera tarea; los siguientes se eligen en el compositor, que empieza con éste. */
   const [model, setModel] = useState('');
 
-  // Sondeado: aquí interesa saber de verdad qué hay en cada máquina, porque de eso depende que la
-  // combinación elegida pueda existir. Es la misma consulta cara que hace Salud.
-  const hosts = useHosts({ probe: true });
+  // Dos consultas, porque responden a dos preguntas. Qué máquinas hay sale de lo que ya se sabe y
+  // contesta al momento. Qué tiene cada una exige sondear —un SSH por máquina, la misma consulta
+  // cara que hace Salud— y no contesta hasta que lo hace la última: con una caída, el timeout
+  // entero. Mientras tanto se puede elegir igual, sin deshabilitar nada.
+  const known = useHosts();
+  const probe = useHosts({ probe: true });
+  const hosts = probe.data ? probe : known;
   const start = useStartSession();
 
   useEffect(() => {
@@ -211,7 +215,7 @@ export function NewSessionDialog(): JSX.Element | null {
               </div>
             </div>
 
-            {!probed && hosts.isFetching ? (
+            {!probed && probe.isFetching ? (
               <p className="tiny faint" style={{ margin: 0 }}>
                 Comprobando qué agentes hay en cada máquina…
               </p>

@@ -288,6 +288,33 @@ test('empezar una sesión desde cero', async ({ page }) => {
 });
 
 /**
+ * Las máquinas se pueden elegir aunque el sondeo tarde.
+ *
+ * El sondeo abre un SSH a cada máquina y contesta cuando ha terminado la última: con una caída,
+ * eso son los 20 s del timeout. El diálogo sacaba la lista de esa respuesta, así que durante todo
+ * ese rato el desplegable estaba vacío y al tocarlo no salía nada (pasó en producción con bevrim
+ * apagada, en el móvil y en el escritorio). Aquí se retiene el sondeo para siempre: la lista tiene
+ * que salir igual, de lo que ya se sabe, y sin deshabilitar nada que no se haya comprobado.
+ */
+test('las máquinas salen en el desplegable aunque el sondeo no conteste', async ({ page }) => {
+  const isProbe = (url: URL): boolean => url.pathname === '/api/hosts' && url.searchParams.get('probe') === '1';
+  let probesHeld = 0;
+  await page.route(isProbe, () => { probesHeld += 1; });
+  // El diálogo vive montado desde que se entra y el sondeo de `login` ya contestó: se recarga
+  // para que la aplicación arranque con él retenido.
+  await page.reload();
+
+  await nav(page, 'Sesiones').click();
+  await page.getByRole('button', { name: 'Empezar una sesión' }).click();
+  const machine = page.getByRole('dialog').getByLabel('Máquina', { exact: true });
+
+  await expect(machine.locator('option')).not.toHaveCount(0, { timeout: 3_000 });
+  await expect(machine).toHaveValue('bastion');
+  await expect(machine.locator('option:disabled')).toHaveCount(0);
+  expect(probesHeld).toBeGreaterThan(0);
+});
+
+/**
  * La cadena de autenticación se recorre, no se supone.
  *
  * Con una política de dos factores el primer paso **no** emite cookie: responde
